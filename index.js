@@ -5879,7 +5879,7 @@ if (BOT2_URL) {
         } catch (error) {
             console.error(`[Ping Chéo] Lỗi khi chọc Bot 2:`, error.message);
         }
-    }, 14 * 60 * 1000); // 14 phút ping 1 lần (Render ngủ sau 15p)
+    }, 2 * 60 * 1000); // 14 phút ping 1 lần (Render ngủ sau 15p)
 } else {
     console.log("⚠️ Chưa cài BOT2_URL, tính năng Ping chéo đang tắt.");
 }
