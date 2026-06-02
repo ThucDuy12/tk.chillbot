@@ -1,0 +1,30 @@
+# Thư viện Node.js (Không được up lên vì rất nặng)
+node_modules/
+package-lock.json
+
+# File chứa token bảo mật (Nếu bạn dùng file .env ở máy máy tính)
+.env
+
+# CÁC FILE DATABASE SỬ DỤNG TRONG CODE (BẮT BUỘC PHẢI KHÓA)
+# Nếu up lên GitHub, Render sẽ ghi đè làm mất dữ liệu của bot
+roles.json
+bans.json
+vatsim_message.json
+profiles.json
+leaderboard.json
+leaderboard_message.json
+pilot_leaderboard.json
+pilot_leaderboard_message.json
+award_sent.json
+reaction_roles.json
+routes.json
+scheduled_announcements.json
+pending_users.json
+vatsea_leaderboard_msg.json
+acdm_message.json
+
+# Hệ thống log và file rác
+*.log
+npm-debug.log*
+.DS_Store
+gen-lang-client-*.json

@@ -1,0 +1,69 @@
+{
+  "products": [],
+  "pendingApprovals": [],
+  "approvedProducts": [
+    {
+      "id": "1768490625481",
+      "productName": "Ma túy đá",
+      "sellerName": "Duy đá",
+      "sellerPhone": "111111111111111",
+      "description": "Sài rất phế",
+      "price": "Thương lượng",
+      "sellerId": "1094252826357670038",
+      "sellerTag": "lythucduy",
+      "date": "2026-01-15T15:23:45.481Z",
+      "imageUrls": [
+        "https://cdn.discordapp.com/attachments/1447970466701774848/1461380448734412984/614088680_911488604546202_6179089212356153029_n.jpg?ex=696a581a&is=6969069a&hm=c8a114e1dee0de4359b2c04999076a61117789bf6c7af44474c40421315638b2&",
+        "https://cdn.discordapp.com/attachments/1447970466701774848/1461380449371816007/613000594_911488537879542_9136365771101182525_n.jpg?ex=696a581a&is=6969069a&hm=1a646cb03140c2383e72fc27c13e84239ebb0d6c5fd7a9b52592dadf0c7ddcd6&",
+        "https://cdn.discordapp.com/attachments/1447970466701774848/1461380449749176542/snapedit_1768461623922.jpeg?ex=696a581a&is=6969069a&hm=eed49677b7fd0e3b8dd3fa092f3ce028800a5d5bc75fea23301549aa7aa73c95&",
+        "https://cdn.discordapp.com/attachments/1447970466701774848/1461380450198097920/371944_11.png?ex=696a581a&is=6969069a&hm=5e93890acb408803f4f9fd0415c04461ad4c2d0358e3199fe12d5474384850d7&"
+      ],
+      "status": "approved",
+      "interestedUsers": [],
+      "approvedBy": "lythucduy",
+      "approvedAt": "2026-01-15T15:24:36.460Z",
+      "publicMessageId": "1461380560894296249",
+      "publicChannelId": "1461357458252365984"
+    },
+    {
+      "id": "1768490831343",
+      "productName": "Dominic",
+      "sellerName": "Duy",
+      "sellerPhone": "111111111111",
+      "description": "a",
+      "price": "thương lượng",
+      "sellerId": "1094252826357670038",
+      "sellerTag": "lythucduy",
+      "date": "2026-01-15T15:27:11.343Z",
+      "imageUrls": [
+        "https://cdn.discordapp.com/attachments/1447970466701774848/1461381274206994432/614088680_911488604546202_6179089212356153029_n.jpg?ex=696a58de&is=6969075e&hm=8c8c29f2a9153b9430db4bedddbda4fdc38b483e245b38711100df3c4acf27fb&"
+      ],
+      "status": "approved",
+      "interestedUsers": [],
+      "approvedBy": "lythucduy",
+      "approvedAt": "2026-01-15T15:28:01.478Z",
+      "publicMessageId": "1461381420344934433",
+      "publicChannelId": "1461357458252365984"
+    },
+    {
+      "id": "1768490937345",
+      "productName": "A",
+      "sellerName": "A",
+      "sellerPhone": "1",
+      "description": "A",
+      "price": "1",
+      "sellerId": "1094252826357670038",
+      "sellerTag": "lythucduy",
+      "date": "2026-01-15T15:28:57.345Z",
+      "imageUrls": [
+        "https://cdn.discordapp.com/attachments/1447970466701774848/1461381717670629407/IMG_3242.jpg?ex=696a5948&is=696907c8&hm=cd4828fb8a24ecd010a1207671ced953c7af0062c483abdae1bd7249cdbfcdfb&"
+      ],
+      "status": "approved",
+      "interestedUsers": [],
+      "approvedBy": "lythucduy",
+      "approvedAt": "2026-01-15T15:29:31.509Z",
+      "publicMessageId": "1461381797484167230",
+      "publicChannelId": "1461357458252365984"
+    }
+  ]
+}

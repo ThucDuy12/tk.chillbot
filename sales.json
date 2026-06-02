@@ -1,0 +1,19 @@
+{
+  "pending": {
+    "1768486920038jftr0sxmq": {
+      "saleId": "1768486920038jftr0sxmq",
+      "productName": "Ma Túy",
+      "productDescription": "Sài rất phê",
+      "sellerName": "Duy đần",
+      "sellerPhone": "0919022927",
+      "productPrice": "1.000",
+      "sellerId": "1094252826357670038",
+      "sellerDiscordTag": "lythucduy",
+      "createdAt": "2026-01-15T14:22:00.039Z",
+      "imageUrl": "https://cdn.discordapp.com/attachments/1447970466701774848/1461365002085732362/371944_11.png?ex=696a49b7&is=6968f837&hm=4750134d196e2ff4bd5f787b1962b02212093b98454f3802c9f0af97490fd2ba&",
+      "adminMessageId": "1461365005327798333"
+    }
+  },
+  "approved": {},
+  "rejected": {}
+}
