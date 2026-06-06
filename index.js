@@ -39,7 +39,7 @@ const GROUP_FLIGHT_CHANNEL_ID = process.env.GROUP_FLIGHT_CHANNEL_ID || '13664175
 const AI_CHANNEL_ID = process.env.AI_CHANNEL_ID || '1431645766795001970';
 const TRIGGER_VOICE_CHANNEL_ID = process.env.TRIGGER_VOICE_CHANNEL_ID || '1440000000000000001';
 const ROLE_APPROVAL_CHANNEL_ID = process.env.ROLE_APPROVAL_CHANNEL_ID;
-const LEADERBOARD_CHANNEL_ID = process.env.LEADERBOARD_CHANNEL_ID || '1440000000000000002';
+const LEADERBOARD_CHANNEL_ID = process.env.LEADERBOARD_CHANNEL_ID || '1458058709677899951';
 
 const BOT_ANNOUNCEMENTS_CHANNEL_ID = process.env.BOT_ANNOUNCEMENTS_CHANNEL_ID || '1510136210683723927';
 const ATC_NOTI_ROLE_ID = process.env.ATC_NOTI_ROLE_ID || '1510148740634382517';
@@ -211,7 +211,7 @@ let roles = {
   adminRoleId: '1365960976016347136',
   banRoleId: '1408787259322273913',
   pendingRoleId: '1511014904142762104',
-  eventParticipantRoleId: '1495788141293076674', // Thêm role cho event participants
+  eventParticipantRoleId: '1512863333512908946', // Thêm role cho event participants
   otherRoles: [
     { name: 'MSFS 2020/2024', id: '1365961239770959872' },
     { name: 'FSX/P3D', id: '1365961302887108669' },
@@ -602,54 +602,12 @@ vatsimWorker.on('message', async (data) => {
 
 // ===================== EVENT ROLE MANAGEMENT =====================
 async function ensureEventRoleExists() {
-  try {
-    const guild = await client.guilds.fetch(GUILD_ID);
-    
-    if (!roles.eventParticipantRoleId) {
-      const role = await guild.roles.create({
-        name: '🎟️ Event Participant',
-        color: 0x0099ff,
-        reason: 'Role cho người tham gia sự kiện',
-        permissions: [],
-        mentionable: true
-      });
-      
-      roles.eventParticipantRoleId = role.id;
-      fs.writeFileSync(ROLES_FILE, JSON.stringify(roles, null, 2));
-      console.log(`Created event participant role: ${role.name} (${role.id})`);
-      
-      const embed = createLogEmbed('➕ Role Created', `**Name:** ${role.name}\n**ID:** ${role.id}\n**Reason:** Event participant role`, 0x2ecc71);
-      await sendLog(embed);
-      
-      return role.id;
-    }
-    
-    // Kiểm tra role có tồn tại không
-    const role = await guild.roles.fetch(roles.eventParticipantRoleId);
-    if (!role) {
-      const newRole = await guild.roles.create({
-        name: '🎟️ Event Participant',
-        color: 0x0099ff,
-        reason: 'Role cho người tham gia sự kiện (recreated)',
-        permissions: [],
-        mentionable: true
-      });
-      
-      roles.eventParticipantRoleId = newRole.id;
-      fs.writeFileSync(ROLES_FILE, JSON.stringify(roles, null, 2));
-      console.log(`Recreated event participant role: ${newRole.name} (${newRole.id})`);
-      
-      const embed = createLogEmbed('➕ Role Recreated', `**Name:** ${newRole.name}\n**ID:** ${newRole.id}\n**Reason:** Event participant role (recreated)`, 0x2ecc71);
-      await sendLog(embed);
-      
-      return newRole.id;
-    }
-    
-    return roles.eventParticipantRoleId;
-  } catch (err) {
-    console.error('Error ensuring event role exists:', err);
-    return null;
-  }
+  // Trả về trực tiếp role cố định, cấm bot tự ý đẻ thêm role rác
+  if (!roles.eventParticipantRoleId) {
+    console.error('Chưa cài đặt ID cho eventParticipantRoleId trong code!');
+    return null;
+  }
+  return roles.eventParticipantRoleId;
 }
 
 async function addUserToEvent(userId, eventId) {
@@ -1032,7 +990,7 @@ async function updateControllerLeaderboardEmbed() {
     
     // NẾU MẤT JSON: Tự động tìm lại tin nhắn cũ trong kênh
     if (!leaderboardMessageStore.messageId) {
-      const oldMsgId = await findOldMessageByTitle(targetChannelId, 'Member Iron Mic Awards Leaderboard');
+      const oldMsgId = await findOldMessageByTitle(targetChannelId, '📊member-iron-mic-leaderboard-vvts');
       if (oldMsgId) {
         leaderboardMessageStore.messageId = oldMsgId;
         leaderboardMessageStore.channelId = targetChannelId;
@@ -1289,7 +1247,7 @@ async function updatePilotLeaderboardEmbed() {
 
     // NẾU MẤT JSON: Tự động tìm lại tin nhắn cũ
     if (!pilotLeaderboardMessageStore.messageId) {
-      const oldMsgId = await findOldMessageByTitle(targetChannelId, 'Pilot Leaderboard');
+      const oldMsgId = await findOldMessageByTitle(targetChannelId, '📊member-iron-mic-leaderboard-vvts');
       if (oldMsgId) {
         pilotLeaderboardMessageStore.messageId = oldMsgId;
         pilotLeaderboardMessageStore.channelId = targetChannelId;
@@ -2649,7 +2607,7 @@ async function scanAndAssignPendingRole() {
           
           // Thay thế bằng cục này ở cả 3 chỗ nhé
           pendingUsersData[member.id] = {
-            joinDate: Date.now(),
+            joinDate: member.joinedTimestamp || Date.now(), 
             notified5Days: false,
             notified7Days: false // Đổi tên cho đồng bộ
           };
@@ -3083,7 +3041,7 @@ client.on('guildMemberAdd', async (member) => {
         
         // --- THÊM LOGIC LƯU DATA VÀ GỬI LỜI CHÀO ---
         pendingUsersData[member.id] = {
-          joinDate: Date.now(),
+          joinDate: member.joinedTimestamp || Date.now(), 
           notified5Days: false,
           notified7Days: false // Đổi tên cho đồng bộ
         };
