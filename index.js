@@ -81,13 +81,21 @@ const MARKETPLACE_CHANNEL_ID = process.env.MARKETPLACE_CHANNEL_ID || '1461357458
 const ADMIN_CHANNEL_ID = process.env.ADMIN_CHANNEL_ID || '1448258683627638895';
 
 // ===================== PENDING USERS DATA =====================
-const PENDING_USERS_FILE = path.join(__dirname, 'pending_users.json');
-let pendingUsersData = fs.existsSync(PENDING_USERS_FILE) 
-  ? JSON.parse(fs.readFileSync(PENDING_USERS_FILE, 'utf8')) 
-  : {};
+// Khởi tạo biến rỗng, dữ liệu sẽ được kéo từ Sheet về lúc bot ready
+let pendingUsersData = {};
 
-function savePendingUsers() {
-  fs.writeFileSync(PENDING_USERS_FILE, JSON.stringify(pendingUsersData, null, 2));
+// Sửa lại hàm save thành dạng gọi API của Google Sheet
+async function savePendingUsers() {
+  try {
+    if (typeof savePendingUsersSheet === 'function') {
+      // Lưu ý: Nếu hàm savePendingUsersSheet của bạn cần truyền tham số 'doc' (như ví dụ trên), 
+      // bạn cần điều chỉnh cho phù hợp với cấu trúc googleSheets.js của bạn. 
+      // Giả sử module googleSheets của bạn đã tự quản lý 'doc' thì chỉ cần gọi:
+      await savePendingUsersSheet(pendingUsersData);
+    }
+  } catch (error) {
+    console.error('❌ Lỗi đẩy dữ liệu Pending Users lên Google Sheets:', error);
+  }
 }
 
 // Bộ nhớ tạm để lưu ảnh khi user mở Form (Modal)
@@ -531,8 +539,8 @@ vatsimWorker.on('message', async (data) => {
 
     // Đóng gói: Discord cho phép 10 Embeds/tin nhắn. Mình gom 5 Embeds/tin nhắn cho an toàn và đẹp.
     const messagesPayload = [];
-    for (let i = 0; i < embeds.length; i += 1) {
-      messagesPayload.push({ embeds: embeds.slice(i, i + 5) });
+    for (let i = 0; i < embeds.length; i++) {
+      messagesPayload.push({ embeds: [embeds[i]] }); 
     }
 
     // Lấy ID tin nhắn đã lưu (Hỗ trợ cấu trúc mảng mới để lưu nhiều tin nhắn)
@@ -1019,28 +1027,42 @@ async function updateControllerLeaderboardEmbed() {
     });
     
     // Update or create leaderboard message
-    if (leaderboardMessageStore.messageId && leaderboardMessageStore.channelId) {
-      try {
-        const channel = await client.channels.fetch(leaderboardMessageStore.channelId);
-        const msg = await channel.messages.fetch(leaderboardMessageStore.messageId);
-        if (msg) {
-          await msg.edit({ embeds: [embed] });
-          console.log(`✅ Controller Leaderboard updated at ${utcTime}`);
-          return;
-        }
-      } catch (err) {
-        console.warn('Could not fetch/edit stored controller leaderboard message:', err.message || err);
-      }
-    }
-    
-    // Create new message
-    if (LEADERBOARD_CHANNEL_ID) {
-      const channel = await client.channels.fetch(LEADERBOARD_CHANNEL_ID);
-      const sent = await channel.send({ embeds: [embed] });
-      leaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
-      fs.writeFileSync(LEADERBOARD_MSG_FILE, JSON.stringify(leaderboardMessageStore, null, 2));
-      console.log(`✅ Controller Leaderboard created at ${utcTime}`);
-    }
+    let targetChannelId = leaderboardMessageStore.channelId || LEADERBOARD_CHANNEL_ID;
+    
+    // NẾU MẤT JSON: Tự động tìm lại tin nhắn cũ trong kênh
+    if (!leaderboardMessageStore.messageId) {
+      const oldMsgId = await findOldMessageByTitle(targetChannelId, 'Member Iron Mic Awards Leaderboard');
+      if (oldMsgId) {
+        leaderboardMessageStore.messageId = oldMsgId;
+        leaderboardMessageStore.channelId = targetChannelId;
+      }
+    }
+
+    if (leaderboardMessageStore.messageId && targetChannelId) {
+      try {
+        const channel = await client.channels.fetch(targetChannelId);
+        const msg = await channel.messages.fetch(leaderboardMessageStore.messageId);
+        if (msg) {
+          await msg.edit({ embeds: [embed] });
+          // Lưu lại vào JSON cho chắc ăn
+          fs.writeFileSync(LEADERBOARD_MSG_FILE, JSON.stringify(leaderboardMessageStore, null, 2));
+          console.log(`✅ Controller Leaderboard updated at ${utcTime}`);
+          return;
+        }
+      } catch (err) {
+        console.warn('Không tìm thấy tin nhắn Controller Leaderboard cũ, tiến hành tạo mới...');
+        leaderboardMessageStore.messageId = null; // Reset để tẹo nữa gửi mới
+      }
+    }
+    
+    // Create new message
+    if (LEADERBOARD_CHANNEL_ID) {
+      const channel = await client.channels.fetch(LEADERBOARD_CHANNEL_ID);
+      const sent = await channel.send({ embeds: [embed] });
+      leaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
+      fs.writeFileSync(LEADERBOARD_MSG_FILE, JSON.stringify(leaderboardMessageStore, null, 2));
+      console.log(`✅ Controller Leaderboard created at ${utcTime}`);
+    }
     
   } catch (err) {
     console.error('Error updating controller leaderboard embed:', err);
@@ -1262,28 +1284,41 @@ async function updatePilotLeaderboardEmbed() {
     });
     
     // Update or create pilot leaderboard message
-    if (pilotLeaderboardMessageStore.messageId && pilotLeaderboardMessageStore.channelId) {
-      try {
-        const channel = await client.channels.fetch(pilotLeaderboardMessageStore.channelId);
-        const msg = await channel.messages.fetch(pilotLeaderboardMessageStore.messageId);
-        if (msg) {
-          await msg.edit({ embeds: [embed] });
-          console.log(`✅ Pilot Leaderboard updated at ${utcTime}`);
-          return;
-        }
-      } catch (err) {
-        console.warn('Could not fetch/edit stored pilot leaderboard message:', err.message || err);
-      }
-    }
-    
-    // Create new message in the same channel or different channel
-    if (LEADERBOARD_CHANNEL_ID) {
-      const channel = await client.channels.fetch(LEADERBOARD_CHANNEL_ID);
-      const sent = await channel.send({ embeds: [embed] });
-      pilotLeaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
-      fs.writeFileSync(PILOT_LEADERBOARD_MSG_FILE, JSON.stringify(pilotLeaderboardMessageStore, null, 2));
-      console.log(`✅ Pilot Leaderboard created at ${utcTime}`);
-    }
+    let targetChannelId = pilotLeaderboardMessageStore.channelId || LEADERBOARD_CHANNEL_ID;
+
+    // NẾU MẤT JSON: Tự động tìm lại tin nhắn cũ
+    if (!pilotLeaderboardMessageStore.messageId) {
+      const oldMsgId = await findOldMessageByTitle(targetChannelId, 'Pilot Leaderboard');
+      if (oldMsgId) {
+        pilotLeaderboardMessageStore.messageId = oldMsgId;
+        pilotLeaderboardMessageStore.channelId = targetChannelId;
+      }
+    }
+
+    if (pilotLeaderboardMessageStore.messageId && targetChannelId) {
+      try {
+        const channel = await client.channels.fetch(targetChannelId);
+        const msg = await channel.messages.fetch(pilotLeaderboardMessageStore.messageId);
+        if (msg) {
+          await msg.edit({ embeds: [embed] });
+          fs.writeFileSync(PILOT_LEADERBOARD_MSG_FILE, JSON.stringify(pilotLeaderboardMessageStore, null, 2));
+          console.log(`✅ Pilot Leaderboard updated at ${utcTime}`);
+          return;
+        }
+      } catch (err) {
+        console.warn('Không tìm thấy tin nhắn Pilot Leaderboard cũ, tiến hành tạo mới...');
+        pilotLeaderboardMessageStore.messageId = null; 
+      }
+    }
+    
+    // Create new message
+    if (LEADERBOARD_CHANNEL_ID) {
+      const channel = await client.channels.fetch(LEADERBOARD_CHANNEL_ID);
+      const sent = await channel.send({ embeds: [embed] });
+      pilotLeaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
+      fs.writeFileSync(PILOT_LEADERBOARD_MSG_FILE, JSON.stringify(pilotLeaderboardMessageStore, null, 2));
+      console.log(`✅ Pilot Leaderboard created at ${utcTime}`);
+    }
     
   } catch (err) {
     console.error('Error updating pilot leaderboard embed:', err);
@@ -1568,11 +1603,18 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
     if (VATSEA_CHANNEL_ID) {
       const channel = await client.channels.fetch(VATSEA_CHANNEL_ID);
       
+      // NẾU MẤT JSON: Tìm lại ID cũ
+      if (!vatseaMessageStore.messageId) {
+        const oldMsgId = await findOldMessageByTitle(VATSEA_CHANNEL_ID, 'Bảng xếp hạng ATC VATSEA');
+        if (oldMsgId) vatseaMessageStore.messageId = oldMsgId;
+      }
+
       if (vatseaMessageStore.messageId) {
         try {
           const msg = await channel.messages.fetch(vatseaMessageStore.messageId);
           if (msg) {
             await msg.edit({ embeds: [embed] });
+            fs.writeFileSync(VATSEA_MSG_FILE, JSON.stringify(vatseaMessageStore, null, 2));
             return embed;
           }
         } catch (err) {
@@ -1629,6 +1671,28 @@ function parseMarketplaceDataFromEmbed(embed) {
 }
 
 // ===================== HELPERS =====================
+// Hàm hỗ trợ: Quét lịch sử kênh để tìm lại tin nhắn cũ do bot gửi dựa vào tiêu đề
+async function findOldMessageByTitle(channelId, titleSubstring) {
+  try {
+    if (!channelId) return null;
+    const channel = await client.channels.fetch(channelId);
+    if (!channel) return null;
+    
+    // Quét 50 tin nhắn gần nhất trong kênh
+    const messages = await channel.messages.fetch({ limit: 50 });
+    const found = messages.find(msg => 
+      msg.author.id === client.user.id && 
+      msg.embeds.length > 0 && 
+      msg.embeds[0].title && 
+      msg.embeds[0].title.includes(titleSubstring)
+    );
+    
+    return found ? found.id : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function formatDateTime(date) {
   return `<t:${Math.floor(date.getTime() / 1000)}:F>`;
 }
@@ -2566,10 +2630,11 @@ async function scanAndAssignPendingRole() {
       // Nếu member đã có role Pending nhưng chưa có trong file JSON thì thêm vào (tính từ thời điểm quét)
       if (member.roles.cache.has(roles.pendingRoleId)) {
         if (!pendingUsersData[member.id]) {
+          // Thay thế bằng cục này ở cả 3 chỗ nhé
           pendingUsersData[member.id] = {
             joinDate: Date.now(),
             notified5Days: false,
-            notified7DaysMinus1Hour: false
+            notified7Days: false // Đổi tên cho đồng bộ
           };
           savePendingUsers();
         }
@@ -2580,11 +2645,11 @@ async function scanAndAssignPendingRole() {
         try {
           await member.roles.add(roles.pendingRoleId);
           
-          // Lưu vào database ngày join
+          // Thay thế bằng cục này ở cả 3 chỗ nhé
           pendingUsersData[member.id] = {
             joinDate: Date.now(),
             notified5Days: false,
-            notified7DaysMinus1Hour: false
+            notified7Days: false // Đổi tên cho đồng bộ
           };
           savePendingUsers();
 
@@ -2791,6 +2856,23 @@ client.once('ready', async () => {
     console.warn('Failed to register commands:', err.message || err);
   }
 
+  // Sau các lệnh khởi tạo khác
+  await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
+
+  // --- THÊM ĐOẠN NÀY ĐỂ KÉO DATA PENDING TỪ SHEET ---
+  try {
+    if (typeof loadPendingUsersSheet === 'function') {
+      const data = await loadPendingUsersSheet();
+      if (data) {
+        pendingUsersData = data;
+        console.log(`✅ Đã tải thành công ${Object.keys(pendingUsersData).length} Pending Users từ Google Sheets.`);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Lỗi kéo dữ liệu Pending Users:', error);
+  }
+  // ---------------------------------------------------
+
   // restore bans timeouts
   for (const [userId, ban] of Object.entries(bans.users)) {
     const timeLeft = ban.endTime - Date.now();
@@ -2846,6 +2928,9 @@ client.once('ready', async () => {
   // ==========================================
   // HỆ THỐNG THEO DÕI VÀ KICK PENDING ROLE (Mỗi 1 tiếng check 1 lần)
   // ==========================================
+  // ==========================================
+  // HỆ THỐNG THEO DÕI VÀ KICK PENDING ROLE (Mỗi 1 tiếng check 1 lần)
+  // ==========================================
   setInterval(async () => {
     const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
     if (!guild) return;
@@ -2867,32 +2952,31 @@ client.once('ready', async () => {
 
         const elapsedMs = now - data.joinDate;
         const daysElapsed = elapsedMs / (1000 * 60 * 60 * 24);
-        const hoursElapsed = elapsedMs / (1000 * 60 * 60);
 
-        // 1. Kick (Sau đúng 7 ngày)
-        if (daysElapsed >= 7) {
+        // 1. Kick (Sau đúng 8 ngày - Hết 1 ngày gia hạn)
+        if (daysElapsed >= 8) {
           try {
-            await member.send(`Đã 1 tuần rồi mà bạn chưa xin role, đây là trách nhiệm của tui. Tạm biệt bạn nhé, bạn có thể rejoin server: ${SERVER_INVITE_LINK}`);
-          } catch(e) {} // Lơ lỗi nếu họ khóa DM
+            await member.send(`Đã hết 1 ngày gia hạn mà bạn vẫn chưa xin role. Tạm biệt bạn nhé, bạn có thể rejoin server: ${SERVER_INVITE_LINK}`);
+          } catch(e) {} 
           
-          await member.kick("Không xin role Member sau 1 tuần");
+          await member.kick("Không xin role Member sau 8 ngày");
           delete pendingUsersData[userId];
           isModified = true;
-          console.log(`👢 [Auto-Kick] Đã kick ${member.user.tag} vì không xin role sau 7 ngày.`);
+          console.log(`👢 [Auto-Kick] Đã kick ${member.user.tag} vì không xin role sau 8 ngày.`);
           continue;
         }
 
-        // 2. Nhắc nhở trước khi kick 1 tiếng (Tức là đã trôi qua 167 tiếng / 7*24 = 168)
-        if (hoursElapsed >= 167 && !data.notified7DaysMinus1Hour) {
+        // 2. Nhắc nhở tối hậu thư (Sau 7 ngày)
+        if (daysElapsed >= 7 && !data.notified7Days) {
           try {
-            await member.send("Bạn ơi đã 1 tuần rồi mà sao chưa xin role Member để trò chuyện cùng mọi người nhỉ? Hãy vào <#1405214914662109294> và xin role Member để trò chuyện nhé");
+            await member.send("⚠️ Bạn có 1 ngày để xin role Member trước khi bị kick khỏi server. Hãy vào <#1405214914662109294> và xin role ngay nhé!");
           } catch(e) {}
-          data.notified7DaysMinus1Hour = true;
+          data.notified7Days = true;
           isModified = true;
         }
 
         // 3. Nhắc nhở 5 ngày
-        if (daysElapsed >= 5 && !data.notified5Days) {
+        if (daysElapsed >= 5 && daysElapsed < 7 && !data.notified5Days) {
           try {
             await member.send("Bạn ơi đã 5 ngày rồi mà sao chưa xin role Member để trò chuyện cùng tui nhỉ? Hãy vào <#1405214914662109294> và xin role Member để trò chuyện nhé");
           } catch(e) {}
@@ -2999,7 +3083,7 @@ client.on('guildMemberAdd', async (member) => {
         pendingUsersData[member.id] = {
           joinDate: Date.now(),
           notified5Days: false,
-          notified7DaysMinus1Hour: false
+          notified7Days: false // Đổi tên cho đồng bộ
         };
         savePendingUsers();
 
