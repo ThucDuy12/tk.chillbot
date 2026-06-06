@@ -513,7 +513,7 @@ vatsimWorker.on('message', async (data) => {
           currentEmbed = new EmbedBuilder().setColor(0x2ecc71);
           embeds.push(currentEmbed);
         }
-        const name = index === 0 ? `📡 ATC Online (${controllers.length})` : `📡 ATC Online (Tiếp ${index + 1})`;
+        const name = index === 0 ? `📡 ATC Online (${controllers.length})` : `📡 ATC Online`;
         currentEmbed.addFields({ name, value: chunk.join('\n'), inline: false });
       });
     }
@@ -532,7 +532,7 @@ vatsimWorker.on('message', async (data) => {
           currentEmbed = new EmbedBuilder().setColor(0x2ecc71);
           embeds.push(currentEmbed);
         }
-        const name = index === 0 ? `🛫 Pilots Online (${pilots.length})` : `🛫 Pilots Online (Tiếp ${index + 1})`;
+        const name = index === 0 ? `🛫 Pilots Online (${pilots.length})` : `🛫 Pilots Online`;
         currentEmbed.addFields({ name, value: chunk.join('\n'), inline: false });
       });
     }
