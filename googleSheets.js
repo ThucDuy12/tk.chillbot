@@ -410,6 +410,9 @@ async function loadPilotLeaderboard(month, year) {
 async function loadPendingUsersSheet() {
   const exists = await sheetExists(PENDING_USERS_SHEET_NAME);
   if (!exists) {
+    // Ép nó phải tạo sheet LUÔN VÀ NGAY nếu chưa có, thay vì bỏ qua
+    console.log('⚠️ Sheet PendingUsers chưa tồn tại, đang tiến hành tạo mới...');
+    await createPendingUsersSheet();
     return {};
   }
 
@@ -423,13 +426,13 @@ async function loadPendingUsersSheet() {
   const data = {};
 
   for (const row of rows) {
-    const [userId, joinDateStr, notified5DaysStr, notified7DaysStr] = row; // Cập nhật tên biến
+    const [userId, joinDateStr, notified5DaysStr, notified7DaysStr] = row;
     if (!userId) continue;
     
     data[userId] = {
       joinDate: parseInt(joinDateStr, 10) || 0,
       notified5Days: notified5DaysStr === 'true',
-      notified7Days: notified7DaysStr === 'true' // Cập nhật gán biến
+      notified7Days: notified7DaysStr === 'true'
     };
   }
   return data;
