@@ -370,23 +370,26 @@ vatsimWorker.on('message', async (data) => {
       if (annChannel) {
         const currentVclAtc = new Map();
         
-        // Lọc tất cả ATC bắt đầu bằng VV, VD, VL và không có chữ OBS
         // Lọc tất cả ATC theo tiêu chuẩn khắt khe:
-        // 1. Bắt đầu bằng VV, VD, VL, hoặc VCL
-        // 2. Phải có dấu gạch dưới '_' (VD: VVTS_TWR) để tránh dính pilot (như VLG8436)
-        // 3. Không chứa chữ OBS trong callsign và Rating phải khác OBS (rating > 1)
-        controllers.forEach(c => {
-          if (!c.callsign) return;
-          const cs = c.callsign.toUpperCase();
-          
-          const isVclRegion = cs.startsWith('VV') || cs.startsWith('VD') || cs.startsWith('VL') || cs.startsWith('VCL');
-          const hasUnderscore = cs.includes('_');
-          const isNotObserver = !cs.includes('OBS') && c.rating > 1;
+        // 1. Bắt đầu bằng VV, VD, VL, hoặc VCL
+        // 2. Phải có dấu gạch dưới '_' (VD: VVTS_TWR) để tránh dính pilot (như VLG8436)
+        // 3. Không chứa chữ OBS trong callsign và Rating phải khác OBS (rating > 1)
+        controllers.forEach(c => {
+          if (!c.callsign) return;
+          const cs = c.callsign.toUpperCase();
+          
+          const isVclRegion = cs.startsWith('VV') || cs.startsWith('VD') || cs.startsWith('VL') || cs.startsWith('VCL');
+          const hasUnderscore = cs.includes('_');
+          const isNotObserver = !cs.includes('OBS') && c.rating > 1;
 
-          if (isVclRegion && hasUnderscore && isNotObserver) {
-            currentVclAtc.set(cs, c);
-          }
-        });
+          // THÊM: Kiểm tra xem ATC đã set tần số thật chưa (khác 199.998)
+          const isFreqSet = c.frequency && c.frequency != '199.998' && c.frequency != 199.998;
+
+          // Chỉ ghi nhận ATC online và cho gửi thông báo khi họ ĐÃ SET tần số
+          if (isVclRegion && hasUnderscore && isNotObserver && isFreqSet) {
+            currentVclAtc.set(cs, c);
+          }
+        });
 
         // 1. Kiểm tra ATC mới Online
         for (const [cs, c] of currentVclAtc) {
@@ -441,7 +444,13 @@ vatsimWorker.on('message', async (data) => {
     // Xây dựng mảng nội dung cho ATC
     const ctrlLines = controllers.map(c => {
       const name = c.name || `CID: ${c.cid}`;
-      const freq = c.frequency || '199.998';
+      
+      // Đổi hiển thị trong danh sách tổng để đẹp hơn
+      let freq = c.frequency || 'N/A';
+      if (freq == '199.998' || freq == 199.998) {
+         freq = 'Đang thiết lập...';
+      }
+      
       const rating = getRatingStr(c.rating);
       return `📻 **${c.callsign}** | ${name} | 🎖️ ${rating} | 📶 ${freq}`;
     });
@@ -4642,33 +4651,33 @@ async function handleSetupAtcNoti(interaction) {
 
 async function ensureVatsimMessageExists() {
   try {
-    // Đọc data mảng (tương thích ngược với bản cũ dùng string)
-    let storedIds = vatsimMessageStore.messageIds || (vatsimMessageStore.messageId ? [vatsimMessageStore.messageId] : []);
+    const channel = await client.channels.fetch(VATSIM_CHANNEL_ID);
+    // Quét 50 tin nhắn gần nhất trong kênh xem có tin nhắn cũ không
+    const messages = await channel.messages.fetch({ limit: 50 });
     
-    if (storedIds.length > 0 && vatsimMessageStore.channelId) {
-      const channel = await client.channels.fetch(vatsimMessageStore.channelId);
-      if (!channel) throw new Error('channel not found');
-      // Thử fetch cái message gốc xem nó còn tồn tại không
-      const msg = await channel.messages.fetch(storedIds[0]);
-      if (!msg) throw new Error('message not found');
-      console.log('Found existing VATSIM messages to edit.');
+    // Tự tìm tin nhắn do chính con Bot này gửi và có tiêu đề VATSIM
+    const oldBotMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('VATSIM Online Update'));
+    
+    if (oldBotMsg) {
+      // Nếu tìm thấy, lập tức lấy ID của nó để dùng, không cần đọc file JSON nữa
+      vatsimMessageStore = { messageIds: [oldBotMsg.id], channelId: channel.id };
+      console.log(`✅ [VATSIM] Đã tìm lại được tin nhắn cũ (ID: ${oldBotMsg.id}) bằng cách quét kênh!`);
       return;
     }
   } catch (err) {
-    console.warn('Stored VATSIM messages invalid -> will create new:', err.message || err);
+    console.warn('⚠️ Lỗi khi quét tìm tin nhắn VATSIM cũ:', err.message);
   }
 
+  // Nếu KHÔNG tìm thấy tin nhắn cũ nào trong kênh thì mới tạo tin nhắn mới
   try {
     const channel = await client.channels.fetch(VATSIM_CHANNEL_ID);
     const embed = new EmbedBuilder().setTitle('🌐 VATSIM Online Update').setDescription('Đang tải dữ liệu...').setTimestamp();
     const sent = await channel.send({ embeds: [embed] });
     
-    // Lưu lại thành Array
     vatsimMessageStore = { messageIds: [sent.id], channelId: channel.id };
-    fs.writeFileSync(VATSIM_MSG_FILE, JSON.stringify(vatsimMessageStore, null, 2));
-    console.log('Created initial VATSIM message and saved its id.');
+    console.log('🆕 [VATSIM] Không thấy tin nhắn cũ, đã khởi tạo tin nhắn mới.');
   } catch (err) {
-    console.error('Cannot create initial VATSIM message:', err);
+    console.error('❌ Không thể tạo tin nhắn VATSIM gốc:', err);
   }
 }
 // ===================== LOGGING: MEMBER JOIN/LEAVE =====================
@@ -5508,28 +5517,32 @@ async function handleStats(interaction) {
 async function ensureACDMMessageExists() {
   if (!ACDM_CHANNEL_ID) return;
   try {
-    let storedIds = acdmMessageStore.messageIds || (acdmMessageStore.messageId ? [acdmMessageStore.messageId] : []);
+    const channel = await client.channels.fetch(ACDM_CHANNEL_ID);
+    // Quét 50 tin nhắn gần nhất trong kênh ACDM
+    const messages = await channel.messages.fetch({ limit: 50 });
     
-    if (storedIds.length > 0 && acdmMessageStore.channelId) {
-      const channel = await client.channels.fetch(acdmMessageStore.channelId);
-      await channel.messages.fetch(storedIds[0]); // Check xem ID đầu tiên còn không
-      console.log('✅ [ACDM] File log tồn tại tin nhắn Dashboard cũ.');
+    // Tìm tin nhắn do chính Bot gửi có tiêu đề ACDM Dashboard
+    const oldBotMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('ACDM Dashboard'));
+    
+    if (oldBotMsg) {
+      acdmMessageStore = { messageIds: [oldBotMsg.id], channelId: channel.id };
+      console.log(`✅ [ACDM] Đã tìm lại được tin nhắn cũ (ID: ${oldBotMsg.id}) bằng cách quét kênh!`);
       return;
     }
   } catch (err) {
-      console.warn('⚠️ [ACDM] Tin nhắn bị xóa hoặc không hợp lệ, chuẩn bị tạo mới.');
+      console.warn('⚠️ Lỗi khi quét tìm tin nhắn ACDM cũ:', err.message);
   }
 
+  // Nếu không tìm thấy thì mới tạo mới
   try {
     const channel = await client.channels.fetch(ACDM_CHANNEL_ID);
     const embed = new EmbedBuilder().setTitle('🛫 VCLvACC ACDM Dashboard').setDescription('Đang thiết lập kết nối API...').setTimestamp();
     const sent = await channel.send({ embeds: [embed] });
     
-    // Lưu lại dưới dạng array
     acdmMessageStore = { messageIds: [sent.id], channelId: channel.id };
-    fs.writeFileSync(ACDM_MSG_FILE, JSON.stringify(acdmMessageStore, null, 2));
+    console.log('🆕 [ACDM] Không thấy tin nhắn cũ, đã khởi tạo tin nhắn mới.');
   } catch (err) {
-      console.error('❌ [ACDM] Lỗi khi tạo tin nhắn Dashboard (Kiểm tra lại quyền gửi tin nhắn của Bot):', err);
+      console.error('❌ [ACDM] Lỗi khi tạo tin nhắn Dashboard gốc:', err);
   }
 }
 
@@ -5879,7 +5892,7 @@ if (BOT2_URL) {
         } catch (error) {
             console.error(`[Ping Chéo] Lỗi khi chọc Bot 2:`, error.message);
         }
-    }, 2 * 60 * 1000); // 14 phút ping 1 lần (Render ngủ sau 15p)
+    }, 14 * 60 * 1000); // 14 phút ping 1 lần (Render ngủ sau 15p)
 } else {
     console.log("⚠️ Chưa cài BOT2_URL, tính năng Ping chéo đang tắt.");
 }
