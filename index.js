@@ -2630,14 +2630,15 @@ async function scanAndAssignPendingRole() {
       
       // Nếu member đã có role Pending nhưng chưa có trong file JSON thì thêm vào (tính từ thời điểm quét)
       if (member.roles.cache.has(roles.pendingRoleId)) {
+        // Thay đoạn cũ bằng đoạn này:
         if (!pendingUsersData[member.id]) {
-          // Thay thế bằng cục này ở cả 3 chỗ nhé
-          pendingUsersData[member.id] = {
-            joinDate: Date.now(),
-            notified5Days: false,
-            notified7Days: false // Đổi tên cho đồng bộ
-          };
-          savePendingUsers();
+            pendingUsersData[member.id] = {
+                // Lấy ngày join thật từ Discord, nếu không có thì mới dùng Date.now()
+                joinDate: member.joinedTimestamp || Date.now(), 
+                notified5Days: false,
+                notified7Days: false
+            };
+            savePendingUsers();
         }
         return;
       }
