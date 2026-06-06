@@ -126,7 +126,7 @@ async function createPendingUsersSheet() {
   if (exists) return PENDING_USERS_SHEET_NAME;
 
   const sheets = await initGoogleSheets();
-  const headers = ['UserId', 'JoinDate', 'Notified5Days', 'Notified7Days']; // Đã đổi tên cột cuối
+  const headers = ['UserId', 'JoinDate', 'Notified5Days', 'Notified7Days', 'Ngày Gia Nhập'];
 
   try {
     await sheets.spreadsheets.batchUpdate({
@@ -310,7 +310,7 @@ async function savePendingUsersSheet(data) {
               startRowIndex: 1,
               endRowIndex: 5000,
               startColumnIndex: 0,
-              endColumnIndex: 4,
+              endColumnIndex: 5,
             },
             shiftDimension: 'ROWS',
           },
@@ -321,11 +321,15 @@ async function savePendingUsersSheet(data) {
 
   const rows = [];
   for (const [userId, info] of Object.entries(data)) {
+    // Ép kiểu format ngày giờ Việt Nam
+    const readableDate = new Date(info.joinDate || Date.now()).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+    
     rows.push([
       userId,
       info.joinDate || 0,
       info.notified5Days ? 'true' : 'false',
-      info.notified7Days ? 'true' : 'false' // Đã cập nhật
+      info.notified7Days ? 'true' : 'false',
+      readableDate // In thêm cột thứ 5 ra Sheet
     ]);
   }
 
