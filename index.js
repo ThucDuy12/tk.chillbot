@@ -531,7 +531,7 @@ vatsimWorker.on('message', async (data) => {
 
     // Đóng gói: Discord cho phép 10 Embeds/tin nhắn. Mình gom 5 Embeds/tin nhắn cho an toàn và đẹp.
     const messagesPayload = [];
-    for (let i = 0; i < embeds.length; i += 5) {
+    for (let i = 0; i < embeds.length; i += 1) {
       messagesPayload.push({ embeds: embeds.slice(i, i + 5) });
     }
 
