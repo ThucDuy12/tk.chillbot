@@ -4,7 +4,8 @@ const path = require('path');
 const http = require('http');
 const { Worker } = require('worker_threads');
 const cheerio = require('cheerio');
-const { initGoogleSheets, loadControllerLeaderboard, loadPilotLeaderboard, saveControllerLeaderboard, savePilotLeaderboard } = require('./googleSheets');
+const { initGoogleSheets, loadControllerLeaderboard, loadPilotLeaderboard, saveControllerLeaderboard, savePilotLeaderboard, loadPendingUsersSheet,   // <-- THÊM CÁI NÀY
+savePendingUsersSheet } = require('./googleSheets');
 const { createCanvas, loadImage, GlobalFonts } = require('canvas');
 const fetch = require('node-fetch'); // Thêm nếu chưa có
 
