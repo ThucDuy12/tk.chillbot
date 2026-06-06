@@ -437,8 +437,8 @@ vatsimWorker.on('message', async (data) => {
     // --- KẾT THÚC THÔNG BÁO ATC ---
 
     // Cấu hình chia nhỏ danh sách (tránh đụng trần giới hạn Discord)
-    const maxItemsPerField = 10; // Hiển thị 10 người mỗi field
-    const maxFieldsPerEmbed = 20; // Tối đa 20 fields (200 người) mỗi Embed để tin nhắn không quá dài
+    const maxItemsPerField = 6; // Hiển thị 10 người mỗi field
+    const maxFieldsPerEmbed = 4; // Tối đa 20 fields (200 người) mỗi Embed để tin nhắn không quá dài
     const embeds = [];
 
     // Xây dựng mảng nội dung cho ATC
