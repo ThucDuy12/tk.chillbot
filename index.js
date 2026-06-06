@@ -985,33 +985,42 @@ async function updateControllerLeaderboardEmbed() {
       inline: false
     });
     
-    // Update or create leaderboard message
+    // ================== CẬP NHẬT HOẶC TẠO MỚI TIN NHẮN ATC ==================
     let targetChannelId = leaderboardMessageStore.channelId || LEADERBOARD_CHANNEL_ID;
-    
-    // NẾU MẤT JSON: Tự động tìm lại tin nhắn cũ trong kênh
-    if (!leaderboardMessageStore.messageId) {
-      const oldMsgId = await findOldMessageByTitle(targetChannelId, '📊member-iron-mic-leaderboard-vvts');
-      if (oldMsgId) {
-        leaderboardMessageStore.messageId = oldMsgId;
-        leaderboardMessageStore.channelId = targetChannelId;
-      }
-    }
+    let msgToEdit = null;
 
-    if (leaderboardMessageStore.messageId && targetChannelId) {
-      try {
-        const channel = await client.channels.fetch(targetChannelId);
-        const msg = await channel.messages.fetch(leaderboardMessageStore.messageId);
-        if (msg) {
-          await msg.edit({ embeds: [embed] });
-          // Lưu lại vào JSON cho chắc ăn
-          fs.writeFileSync(LEADERBOARD_MSG_FILE, JSON.stringify(leaderboardMessageStore, null, 2));
-          console.log(`✅ Controller Leaderboard updated at ${utcTime}`);
-          return;
-        }
-      } catch (err) {
-        console.warn('Không tìm thấy tin nhắn Controller Leaderboard cũ, tiến hành tạo mới...');
-        leaderboardMessageStore.messageId = null; // Reset để tẹo nữa gửi mới
+    try {
+      const channel = await client.channels.fetch(targetChannelId);
+
+      // 1. Thử fetch tin nhắn theo ID đã lưu trong JSON
+      if (leaderboardMessageStore.messageId) {
+        msgToEdit = await channel.messages.fetch(leaderboardMessageStore.messageId).catch(() => null);
       }
+
+      // 2. Nếu file JSON mất ID, hoặc tin nhắn trôi mất khỏi cache -> Bật Radar quét kênh
+      if (!msgToEdit) {
+        const oldMsgId = await findOldMessageByTitle(targetChannelId, 'Member Iron Mic Awards Leaderboard');
+        if (oldMsgId) {
+          msgToEdit = await channel.messages.fetch(oldMsgId).catch(() => null);
+        }
+      }
+
+      // 3. Tùy tình hình mà Edit hoặc Gửi mới
+      if (msgToEdit) {
+        await msgToEdit.edit({ embeds: [embed] });
+        leaderboardMessageStore = { messageId: msgToEdit.id, channelId: targetChannelId };
+        console.log(`✅ Controller Leaderboard updated at ${utcTime}`);
+      } else {
+        const sent = await channel.send({ embeds: [embed] });
+        leaderboardMessageStore = { messageId: sent.id, channelId: targetChannelId };
+        console.log(`✅ Controller Leaderboard created at ${utcTime}`);
+      }
+
+      // Lưu cứng dữ liệu
+      fs.writeFileSync(LEADERBOARD_MSG_FILE, JSON.stringify(leaderboardMessageStore, null, 2));
+
+    } catch (err) {
+      console.error('Lỗi khi cập nhật Controller Leaderboard:', err.message);
     }
     
     // Create new message
@@ -1242,32 +1251,42 @@ async function updatePilotLeaderboardEmbed() {
       inline: false
     });
     
-    // Update or create pilot leaderboard message
+    // ================== CẬP NHẬT HOẶC TẠO MỚI TIN NHẮN PILOT ==================
     let targetChannelId = pilotLeaderboardMessageStore.channelId || LEADERBOARD_CHANNEL_ID;
+    let msgToEdit = null;
 
-    // NẾU MẤT JSON: Tự động tìm lại tin nhắn cũ
-    if (!pilotLeaderboardMessageStore.messageId) {
-      const oldMsgId = await findOldMessageByTitle(targetChannelId, '📊member-iron-mic-leaderboard-vvts');
-      if (oldMsgId) {
-        pilotLeaderboardMessageStore.messageId = oldMsgId;
-        pilotLeaderboardMessageStore.channelId = targetChannelId;
+    try {
+      const channel = await client.channels.fetch(targetChannelId);
+
+      // 1. Thử fetch tin nhắn theo ID đã lưu trong JSON
+      if (pilotLeaderboardMessageStore.messageId) {
+        msgToEdit = await channel.messages.fetch(pilotLeaderboardMessageStore.messageId).catch(() => null);
       }
-    }
 
-    if (pilotLeaderboardMessageStore.messageId && targetChannelId) {
-      try {
-        const channel = await client.channels.fetch(targetChannelId);
-        const msg = await channel.messages.fetch(pilotLeaderboardMessageStore.messageId);
-        if (msg) {
-          await msg.edit({ embeds: [embed] });
-          fs.writeFileSync(PILOT_LEADERBOARD_MSG_FILE, JSON.stringify(pilotLeaderboardMessageStore, null, 2));
-          console.log(`✅ Pilot Leaderboard updated at ${utcTime}`);
-          return;
+      // 2. Nếu file JSON mất ID, hoặc tin nhắn trôi mất khỏi cache -> Bật Radar quét kênh
+      if (!msgToEdit) {
+        const oldMsgId = await findOldMessageByTitle(targetChannelId, 'VCLvACC Pilot Leaderboard');
+        if (oldMsgId) {
+          msgToEdit = await channel.messages.fetch(oldMsgId).catch(() => null);
         }
-      } catch (err) {
-        console.warn('Không tìm thấy tin nhắn Pilot Leaderboard cũ, tiến hành tạo mới...');
-        pilotLeaderboardMessageStore.messageId = null; 
       }
+
+      // 3. Tùy tình hình mà Edit hoặc Gửi mới
+      if (msgToEdit) {
+        await msgToEdit.edit({ embeds: [embed] });
+        pilotLeaderboardMessageStore = { messageId: msgToEdit.id, channelId: targetChannelId };
+        console.log(`✅ Pilot Leaderboard updated at ${utcTime}`);
+      } else {
+        const sent = await channel.send({ embeds: [embed] });
+        pilotLeaderboardMessageStore = { messageId: sent.id, channelId: targetChannelId };
+        console.log(`✅ Pilot Leaderboard created at ${utcTime}`);
+      }
+
+      // Lưu cứng dữ liệu
+      fs.writeFileSync(PILOT_LEADERBOARD_MSG_FILE, JSON.stringify(pilotLeaderboardMessageStore, null, 2));
+
+    } catch (err) {
+      console.error('Lỗi khi cập nhật Pilot Leaderboard:', err.message);
     }
     
     // Create new message
