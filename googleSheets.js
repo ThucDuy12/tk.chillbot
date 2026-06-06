@@ -7,6 +7,7 @@ const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
 
 const CONTROLLER_SHEET_PREFIX = 'ATC_';
 const PILOT_SHEET_PREFIX = 'PILOT_';
+const PENDING_USERS_SHEET_NAME = 'PendingUsers'; // Tên sheet cho Pending Users
 
 let sheetsClient = null;
 
@@ -65,14 +66,12 @@ async function createControllerSheet(month, year) {
   ];
 
   try {
-    // Tạo sheet mới
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: SPREADSHEET_ID,
       requestBody: {
         requests: [{ addSheet: { properties: { title: sheetName } } }],
       },
     });
-    // Thêm header
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A1:H1`,
@@ -121,18 +120,45 @@ async function createPilotSheet(month, year) {
   }
 }
 
-// ========== LƯU CONTROLLER (ghi đè, xóa dữ liệu cũ) ==========
+// ========== TẠO SHEET PENDING USERS ==========
+async function createPendingUsersSheet() {
+  const exists = await sheetExists(PENDING_USERS_SHEET_NAME);
+  if (exists) return PENDING_USERS_SHEET_NAME;
+
+  const sheets = await initGoogleSheets();
+  const headers = ['UserId', 'JoinDate', 'Notified5Days', 'Notified7Days']; // Đã đổi tên cột cuối
+
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: PENDING_USERS_SHEET_NAME } } }],
+      },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${PENDING_USERS_SHEET_NAME}!A1:D1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [headers] },
+    });
+    console.log(`✅ Created sheet: ${PENDING_USERS_SHEET_NAME}`);
+    return PENDING_USERS_SHEET_NAME;
+  } catch (err) {
+    console.error('Error creating PendingUsers sheet:', err);
+    throw err;
+  }
+}
+
+// ========== LƯU CONTROLLER ==========
 async function saveControllerLeaderboard(month, year, stats) {
   const sheetName = getSheetName(CONTROLLER_SHEET_PREFIX, month, year);
   const sheets = await initGoogleSheets();
 
-  // Đảm bảo sheet tồn tại
   const sheetExistsFlag = await sheetExists(sheetName);
   if (!sheetExistsFlag) {
     await createControllerSheet(month, year);
   }
 
-  // Lấy sheetId để xóa vùng
   const spreadsheet = await sheets.spreadsheets.get({
     spreadsheetId: SPREADSHEET_ID,
     fields: 'sheets.properties',
@@ -141,7 +167,6 @@ async function saveControllerLeaderboard(month, year, stats) {
   if (!sheet) throw new Error(`Sheet ${sheetName} not found`);
   const sheetId = sheet.properties.sheetId;
 
-  // Xóa tất cả dòng dữ liệu cũ (giữ dòng header)
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId: SPREADSHEET_ID,
     requestBody: {
@@ -162,7 +187,6 @@ async function saveControllerLeaderboard(month, year, stats) {
     },
   });
 
-  // Chuyển dữ liệu thành mảng
   const rows = [];
   for (const [category, controllers] of Object.entries(stats)) {
     for (const [cid, data] of Object.entries(controllers)) {
@@ -181,7 +205,6 @@ async function saveControllerLeaderboard(month, year, stats) {
 
   if (rows.length === 0) return;
 
-  // Ghi đè từ dòng A2
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${sheetName}!A2`,
@@ -192,7 +215,7 @@ async function saveControllerLeaderboard(month, year, stats) {
   console.log(`✅ Saved ${rows.length} controller records to sheet ${sheetName}`);
 }
 
-// ========== LƯU PILOT (ghi đè, xóa dữ liệu cũ) ==========
+// ========== LƯU PILOT ==========
 async function savePilotLeaderboard(month, year, pilots) {
   const sheetName = getSheetName(PILOT_SHEET_PREFIX, month, year);
   const sheets = await initGoogleSheets();
@@ -210,7 +233,6 @@ async function savePilotLeaderboard(month, year, pilots) {
   if (!sheet) throw new Error(`Sheet ${sheetName} not found`);
   const sheetId = sheet.properties.sheetId;
 
-  // Xóa dữ liệu cũ
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId: SPREADSHEET_ID,
     requestBody: {
@@ -257,6 +279,66 @@ async function savePilotLeaderboard(month, year, pilots) {
   });
 
   console.log(`✅ Saved ${rows.length} pilot records to sheet ${sheetName}`);
+}
+
+// ========== LƯU PENDING USERS ==========
+async function savePendingUsersSheet(data) {
+  const sheets = await initGoogleSheets();
+
+  const sheetExistsFlag = await sheetExists(PENDING_USERS_SHEET_NAME);
+  if (!sheetExistsFlag) {
+    await createPendingUsersSheet();
+  }
+
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+    fields: 'sheets.properties',
+  });
+  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === PENDING_USERS_SHEET_NAME);
+  if (!sheet) throw new Error(`Sheet ${PENDING_USERS_SHEET_NAME} not found`);
+  const sheetId = sheet.properties.sheetId;
+
+  // Xóa dữ liệu cũ
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [
+        {
+          deleteRange: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
+              endRowIndex: 5000,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
+            },
+            shiftDimension: 'ROWS',
+          },
+        },
+      ],
+    },
+  });
+
+  const rows = [];
+  for (const [userId, info] of Object.entries(data)) {
+    rows.push([
+      userId,
+      info.joinDate || 0,
+      info.notified5Days ? 'true' : 'false',
+      info.notified7Days ? 'true' : 'false' // Đã cập nhật
+    ]);
+  }
+
+  if (rows.length === 0) return;
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${PENDING_USERS_SHEET_NAME}!A2`,
+    valueInputOption: 'RAW',
+    requestBody: { values: rows },
+  });
+
+  console.log(`✅ Saved ${rows.length} pending users to sheet ${PENDING_USERS_SHEET_NAME}`);
 }
 
 // ========== ĐỌC CONTROLLER TỪ SHEET ==========
@@ -324,6 +406,35 @@ async function loadPilotLeaderboard(month, year) {
   return { month, year, pilots };
 }
 
+// ========== ĐỌC PENDING USERS TỪ SHEET ==========
+async function loadPendingUsersSheet() {
+  const exists = await sheetExists(PENDING_USERS_SHEET_NAME);
+  if (!exists) {
+    return {};
+  }
+
+  const sheets = await initGoogleSheets();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${PENDING_USERS_SHEET_NAME}!A2:D`,
+  });
+  
+  const rows = response.data.values || [];
+  const data = {};
+
+  for (const row of rows) {
+    const [userId, joinDateStr, notified5DaysStr, notified7DaysStr] = row; // Cập nhật tên biến
+    if (!userId) continue;
+    
+    data[userId] = {
+      joinDate: parseInt(joinDateStr, 10) || 0,
+      notified5Days: notified5DaysStr === 'true',
+      notified7Days: notified7DaysStr === 'true' // Cập nhật gán biến
+    };
+  }
+  return data;
+}
+
 // ========== EXPORTS ==========
 module.exports = {
   initGoogleSheets,
@@ -334,4 +445,6 @@ module.exports = {
   createControllerSheet,
   createPilotSheet,
   sheetExists,
+  loadPendingUsersSheet, // Đã thêm
+  savePendingUsersSheet  // Đã thêm
 };
