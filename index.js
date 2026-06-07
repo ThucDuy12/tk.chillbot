@@ -992,12 +992,12 @@ async function updateControllerLeaderboardEmbed() {
     try {
       const channel = await client.channels.fetch(targetChannelId);
 
-      // 1. Thử fetch tin nhắn theo ID đã lưu trong JSON
+      // 1. Thử lấy tin nhắn bằng ID trong JSON
       if (leaderboardMessageStore.messageId) {
         msgToEdit = await channel.messages.fetch(leaderboardMessageStore.messageId).catch(() => null);
       }
 
-      // 2. Nếu file JSON mất ID, hoặc tin nhắn trôi mất khỏi cache -> Bật Radar quét kênh
+      // 2. Nếu không tìm thấy (JSON mất hoặc lỗi cache) -> Bật Radar tìm lại
       if (!msgToEdit) {
         const oldMsgId = await findOldMessageByTitle(targetChannelId, 'Member Iron Mic Awards Leaderboard');
         if (oldMsgId) {
@@ -1005,7 +1005,7 @@ async function updateControllerLeaderboardEmbed() {
         }
       }
 
-      // 3. Tùy tình hình mà Edit hoặc Gửi mới
+      // 3. Quyết định Edit đè lên hay Gửi tin mới
       if (msgToEdit) {
         await msgToEdit.edit({ embeds: [embed] });
         leaderboardMessageStore = { messageId: msgToEdit.id, channelId: targetChannelId };
@@ -1022,19 +1022,9 @@ async function updateControllerLeaderboardEmbed() {
     } catch (err) {
       console.error('Lỗi khi cập nhật Controller Leaderboard:', err.message);
     }
-    
-    // Create new message
-    if (LEADERBOARD_CHANNEL_ID) {
-      const channel = await client.channels.fetch(LEADERBOARD_CHANNEL_ID);
-      const sent = await channel.send({ embeds: [embed] });
-      leaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
-      fs.writeFileSync(LEADERBOARD_MSG_FILE, JSON.stringify(leaderboardMessageStore, null, 2));
-      console.log(`✅ Controller Leaderboard created at ${utcTime}`);
-    }
-    
-  } catch (err) {
-    console.error('Error updating controller leaderboard embed:', err);
-  }
+  } catch (err) {
+    console.error('Error updating controller leaderboard embed:', err);
+  }
 }
 
 // ===================== PILOT LEADERBOARD FUNCTIONS =====================
@@ -1258,12 +1248,12 @@ async function updatePilotLeaderboardEmbed() {
     try {
       const channel = await client.channels.fetch(targetChannelId);
 
-      // 1. Thử fetch tin nhắn theo ID đã lưu trong JSON
+      // 1. Thử lấy tin nhắn bằng ID trong JSON
       if (pilotLeaderboardMessageStore.messageId) {
         msgToEdit = await channel.messages.fetch(pilotLeaderboardMessageStore.messageId).catch(() => null);
       }
 
-      // 2. Nếu file JSON mất ID, hoặc tin nhắn trôi mất khỏi cache -> Bật Radar quét kênh
+      // 2. Nếu không tìm thấy -> Bật Radar quét tìm lại
       if (!msgToEdit) {
         const oldMsgId = await findOldMessageByTitle(targetChannelId, 'VCLvACC Pilot Leaderboard');
         if (oldMsgId) {
@@ -1271,7 +1261,7 @@ async function updatePilotLeaderboardEmbed() {
         }
       }
 
-      // 3. Tùy tình hình mà Edit hoặc Gửi mới
+      // 3. Quyết định Edit đè lên hay Gửi tin mới
       if (msgToEdit) {
         await msgToEdit.edit({ embeds: [embed] });
         pilotLeaderboardMessageStore = { messageId: msgToEdit.id, channelId: targetChannelId };
@@ -1288,19 +1278,9 @@ async function updatePilotLeaderboardEmbed() {
     } catch (err) {
       console.error('Lỗi khi cập nhật Pilot Leaderboard:', err.message);
     }
-    
-    // Create new message
-    if (LEADERBOARD_CHANNEL_ID) {
-      const channel = await client.channels.fetch(LEADERBOARD_CHANNEL_ID);
-      const sent = await channel.send({ embeds: [embed] });
-      pilotLeaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
-      fs.writeFileSync(PILOT_LEADERBOARD_MSG_FILE, JSON.stringify(pilotLeaderboardMessageStore, null, 2));
-      console.log(`✅ Pilot Leaderboard created at ${utcTime}`);
-    }
-    
-  } catch (err) {
-    console.error('Error updating pilot leaderboard embed:', err);
-  }
+  } catch (err) {
+    console.error('Error updating pilot leaderboard embed:', err);
+  }
 }
 
 async function generateFullPilotLeaderboardTxt() {
@@ -1369,56 +1349,54 @@ async function generateFullPilotLeaderboardTxt() {
 }
 
 async function ensureLeaderboardMessagesExist() {
-  try {
-    // Ensure controller leaderboard message exists
-    if (leaderboardMessageStore.messageId && leaderboardMessageStore.channelId) {
-      const channel = await client.channels.fetch(leaderboardMessageStore.channelId);
-      if (!channel) throw new Error('channel not found');
-      const msg = await channel.messages.fetch(leaderboardMessageStore.messageId);
-      if (!msg) throw new Error('message not found');
-      console.log('Found existing controller leaderboard message to edit.');
-    } else {
-      const channelId = LEADERBOARD_CHANNEL_ID || VATSIM_CHANNEL_ID;
-      const channel = await client.channels.fetch(channelId);
-      const embed = new EmbedBuilder()
-        .setTitle('Member Iron Mic Awards Leaderboard')
-        .setDescription('Đang tải dữ liệu...')
-        .setColor(0xFFD700)
-        .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
-        .setTimestamp();
-      
-      const sent = await channel.send({ embeds: [embed] });
-      leaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
-      fs.writeFileSync(LEADERBOARD_MSG_FILE, JSON.stringify(leaderboardMessageStore, null, 2));
-      console.log('Created initial controller leaderboard message.');
-    }
-    
-    // Ensure pilot leaderboard message exists
-    if (pilotLeaderboardMessageStore.messageId && pilotLeaderboardMessageStore.channelId) {
-      const channel = await client.channels.fetch(pilotLeaderboardMessageStore.channelId);
-      if (!channel) throw new Error('channel not found');
-      const msg = await channel.messages.fetch(pilotLeaderboardMessageStore.messageId);
-      if (!msg) throw new Error('message not found');
-      console.log('Found existing pilot leaderboard message to edit.');
-    } else {
-      const channelId = LEADERBOARD_CHANNEL_ID || VATSIM_CHANNEL_ID;
-      const channel = await client.channels.fetch(channelId);
-      const embed = new EmbedBuilder()
-        .setTitle('✈️ VCLvACC Pilot Leaderboard')
-        .setDescription('Đang tải dữ liệu...')
-        .setColor(0x1E90FF)
-        .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
-        .setTimestamp();
-      
-      const sent = await channel.send({ embeds: [embed] });
-      pilotLeaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
-      fs.writeFileSync(PILOT_LEADERBOARD_MSG_FILE, JSON.stringify(pilotLeaderboardMessageStore, null, 2));
-      console.log('Created initial pilot leaderboard message.');
-    }
-    
-  } catch (err) {
-    console.error('Cannot create leaderboard messages:', err);
-  }
+  try {
+    const channelId = LEADERBOARD_CHANNEL_ID || VATSIM_CHANNEL_ID;
+    const channel = await client.channels.fetch(channelId);
+    
+    // Quét kênh tìm tin nhắn cũ trước khi quyết định tạo
+    const messages = await channel.messages.fetch({ limit: 100 });
+
+    // 1. Dò radar cho Controller Leaderboard
+    const oldCtrlMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('Member Iron Mic Awards'));
+    if (oldCtrlMsg) {
+      leaderboardMessageStore = { messageId: oldCtrlMsg.id, channelId: channel.id };
+      console.log('✅ [Leaderboard] Khởi động: Đã tìm lại được tin nhắn Controller cũ.');
+    } else {
+      const embed = new EmbedBuilder()
+        .setTitle('Member Iron Mic Awards Leaderboard')
+        .setDescription('Đang tải dữ liệu...')
+        .setColor(0xFFD700)
+        .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
+        .setTimestamp();
+      
+      const sent = await channel.send({ embeds: [embed] });
+      leaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
+      console.log('🆕 [Leaderboard] Không có tin nhắn Controller cũ, tạo mới.');
+    }
+    fs.writeFileSync(LEADERBOARD_MSG_FILE, JSON.stringify(leaderboardMessageStore, null, 2));
+    
+    // 2. Dò radar cho Pilot Leaderboard
+    const oldPilotMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('Pilot Leaderboard'));
+    if (oldPilotMsg) {
+      pilotLeaderboardMessageStore = { messageId: oldPilotMsg.id, channelId: channel.id };
+      console.log('✅ [Leaderboard] Khởi động: Đã tìm lại được tin nhắn Pilot cũ.');
+    } else {
+      const embed = new EmbedBuilder()
+        .setTitle('✈️ VCLvACC Pilot Leaderboard')
+        .setDescription('Đang tải dữ liệu...')
+        .setColor(0x1E90FF)
+        .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
+        .setTimestamp();
+      
+      const sent = await channel.send({ embeds: [embed] });
+      pilotLeaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
+      console.log('🆕 [Leaderboard] Không có tin nhắn Pilot cũ, tạo mới.');
+    }
+    fs.writeFileSync(PILOT_LEADERBOARD_MSG_FILE, JSON.stringify(pilotLeaderboardMessageStore, null, 2));
+    
+  } catch (err) {
+    console.error('Lỗi khi kiểm tra/tạo Leaderboard messages:', err);
+  }
 }
 
 // ===================== VATSEA LEADERBOARD FUNCTIONS =====================
@@ -1656,13 +1634,12 @@ async function findOldMessageByTitle(channelId, titleSubstring) {
     const channel = await client.channels.fetch(channelId);
     if (!channel) return null;
     
-    // Quét 50 tin nhắn gần nhất trong kênh
-    const messages = await channel.messages.fetch({ limit: 50 });
+    // Quét 100 tin nhắn gần nhất trong kênh
+    const messages = await channel.messages.fetch({ limit: 100 });
     const found = messages.find(msg => 
       msg.author.id === client.user.id && 
       msg.embeds.length > 0 && 
-      msg.embeds[0].title && 
-      msg.embeds[0].title.includes(titleSubstring)
+      msg.embeds[0]?.title?.includes(titleSubstring) // Dùng ?. an toàn tuyệt đối
     );
     
     return found ? found.id : null;
