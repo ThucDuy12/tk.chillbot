@@ -3394,12 +3394,36 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
+
+// Khai báo biến này ở TRÊN CÙNG hoặc ngay sát trên client.on('messageCreate') nhé ba
+const deletedImageCache = new Map(); 
+
 // ===================== MESSAGE CREATE =====================
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  const userId = message.author.id;
-  if (bans.users[userId] && bans.users[userId].endTime > Date.now()) return;
+  // 📥 HỆ THỐNG GHI TRƯỚC ẢNH VÀO RAM PHÒNG HỜ BỊ XÓA (Bắt bài Discord)
+  if (message.attachments?.size > 0) {
+    (async () => {
+      const cachedFiles = [];
+      for (const [id, attachment] of message.attachments) {
+        try {
+          const response = await fetch(attachment.url, { timeout: 5000 });
+          if (response.ok) {
+            const buffer = typeof response.buffer === 'function' ? await response.buffer() : Buffer.from(await response.arrayBuffer());
+            cachedFiles.push({ buffer, name: attachment.name });
+          }
+        } catch (e) {
+          console.error('[Cache-Create] Lỗi tải trước ảnh:', e.message);
+        }
+      }
+      if (cachedFiles.length > 0) {
+        deletedImageCache.set(message.id, cachedFiles);
+        // Tự động xóa khỏi RAM sau 15 phút nếu không có ai xóa tin nhắn để tránh tràn bộ nhớ
+        setTimeout(() => deletedImageCache.delete(message.id), 15 * 60 * 1000);
+      }
+    })();
+  }
 
   // ================= TÍNH NĂNG 3: ANTI SPAM @everyone / @here =================
   const isEveryoneOrHere = message.mentions.everyone || message.content.includes('@everyone') || message.content.includes('@here');
@@ -4875,21 +4899,20 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 // ===================== LOGGING: MESSAGE DELETE =====================
 client.on('messageDelete', async (message) => {
   try {
-    // 1. NẾU LÀ TIN NHẮN CỦA BOT THÌ BỎ QUA
     if (message.author?.bot) return;
     if (!message.guild) return;
 
-    // 2. NẾU LÀ TIN NHẮN CŨ (CHƯA CACHE VÀO RAM)
+    // 1. NẾU LÀ TIN NHẮN CŨ (CHƯA ĐƯỢC LƯU TRONG RAM)
     if (message.partial) {
       const embed = createLogEmbed('🗑️ Message Deleted (Uncached)',
-        `**Channel:** <#${message.channelId}>\n**Message ID:** ${message.id}\n\n⚠️ **Lưu ý:** Tin nhắn này được gửi từ trước khi bot khởi động nên bot chưa kịp nhớ nội dung.`,
+        `**Channel:** <#${message.channelId}>\n**Message ID:** ${message.id}\n\n⚠️ **Lưu ý:** Tin nhắn này quá cũ hoặc gửi trước khi bot bật nên bot không lưu được nội dung chữ hay hình ảnh.`,
         0xe67e22
       );
       await sendLog(embed);
       return;
     }
 
-    // 3. LẤY NỘI DUNG CHỮ
+    // 2. LẤY NỘI DUNG CHỮ
     let content = message.content || '';
     if (content.length > 1000) content = content.slice(0, 1000) + '...';
     if (!content && message.attachments?.size > 0) content = '[Chỉ chứa hình ảnh/file đính kèm]';
@@ -4903,40 +4926,32 @@ client.on('messageDelete', async (message) => {
     const logFiles = [];
     const tasks = [];
 
-    // Tác vụ A: Tải ảnh từ Server Discord về RAM của Bot (ĐÃ VÁ LỖI PHIÊN BẢN)
-    if (message.attachments?.size > 0) {
+    // 3. RÚT ẢNH TỪ RAM RA ĐỂ RE-UPLOAD (BẤT CHẤP LINK CỦA DISCORD ĐÃ CHẾT)
+    const cachedFiles = deletedImageCache.get(message.id);
+    
+    if (cachedFiles) {
+      // Nếu có sẵn trong RAM (Tin nhắn xóa trong vòng 15 phút kể từ lúc gửi)
+      for (const file of cachedFiles) {
+        logFiles.push(new AttachmentBuilder(file.buffer, { name: `deleted_${file.name || 'image.png'}` }));
+      }
+      deletedImageCache.delete(message.id); // Xóa luôn kho lưu trữ tạm của tin nhắn này cho nhẹ RAM
+    } else if (message.attachments?.size > 0) {
+      // Phương án dự phòng: Nếu tin nhắn gửi lâu hơn 15 phút, thử cào vớt từ CDN (hên xui tùy tốc độ hủy của Discord)
       for (const [id, attachment] of message.attachments) {
         tasks.push((async () => {
           try {
             const targetUrl = attachment.proxyURL || attachment.url;
-            
-            const response = await fetch(targetUrl, {
-              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-              timeout: 5000
-            });
-            
+            const response = await fetch(targetUrl, { timeout: 3000 });
             if (response.ok) {
-              let buffer;
-              // ĐÃ SỬA: Tự động check hàm phù hợp với phiên bản node-fetch trên máy bạn để tránh crash
-              if (typeof response.buffer === 'function') {
-                buffer = await response.buffer(); // Dành cho node-fetch v2 (máy bạn đang dùng)
-              } else {
-                const arrayBuffer = await response.arrayBuffer(); // Dành cho node-fetch v3
-                buffer = Buffer.from(arrayBuffer);
-              }
-              
+              const buffer = typeof response.buffer === 'function' ? await response.buffer() : Buffer.from(await response.arrayBuffer());
               logFiles.push(new AttachmentBuilder(buffer, { name: `deleted_${attachment.name || 'image.png'}` }));
-            } else {
-              console.log(`[Log-Delete] Không thể tải file, CDN báo lỗi: ${response.status}`);
             }
-          } catch (e) {
-            console.error('Lỗi tải ảnh khi xóa:', e.message);
-          }
+          } catch (e) {}
         })());
       }
     }
 
-    // Tác vụ B: Tra cứu Audit Log xem ai xóa
+    // Tác vụ B: Tra cứu Audit Log xem ai xóa tin nhắn
     let deletedBy = null;
     tasks.push((async () => {
       try {
@@ -4952,14 +4967,14 @@ client.on('messageDelete', async (message) => {
       } catch (e) {}
     })());
 
-    // Đợi cả 2 tác vụ chạy xong song song
+    // Đợi chạy xong các tác vụ dự phòng và Audit Log
     await Promise.all(tasks);
 
     if (deletedBy) {
       embed.addFields({ name: '🗑️ Deleted by', value: deletedBy, inline: false });
     }
 
-    // 4. GỬI LOG KÈM FILE ẢNH VẬT LÝ VỪA TẢI VỀ
+    // 4. GỬI PHẢN HỒI LÊN KÊNH LOG KÈM FILE ẢNH VẬT LÝ THẬT
     await sendLog(embed, logFiles.length > 0 ? { files: logFiles } : {});
 
   } catch (err) {
