@@ -2637,6 +2637,30 @@ async function scanAndAssignPendingRole() {
   }
 }
 
+// ================= TÍNH NĂNG 2: HẸN GIỜ CHẴN LEADERBOARD =================
+function scheduleHourlyLeaderboard() {
+  const now = new Date();
+  // Tính chính xác số mili-giây còn lại cho đến giờ chẵn tiếp theo
+  const msUntilNextHour = (60 - now.getMinutes()) * 60000 - now.getSeconds() * 1000 - now.getMilliseconds();
+
+  console.log(`[Leaderboard] Đã lên lịch cập nhật. Chạy lần tới sau: ${Math.round(msUntilNextHour/60000)} phút nữa.`);
+
+  setTimeout(() => {
+    // Chạy lần đầu tiên vào đúng giờ chẵn
+    updateControllerLeaderboardEmbed();
+    updatePilotLeaderboardEmbed();
+
+    // Thiết lập vòng lặp mỗi 1 tiếng kể từ giờ chẵn đó
+    setInterval(() => {
+      updateControllerLeaderboardEmbed();
+      updatePilotLeaderboardEmbed();
+    }, 60 * 60 * 1000);
+  }, msUntilNextHour);
+}
+
+scheduleHourlyLeaderboard();
+// =========================================================================
+
 // ===================== READY =====================
 client.once('ready', async () => {
   console.log(`Bot logged in as ${client.user.tag}`);
@@ -2896,9 +2920,6 @@ client.once('ready', async () => {
   // ==========================================
   // HỆ THỐNG THEO DÕI VÀ KICK PENDING ROLE (Mỗi 1 tiếng check 1 lần)
   // ==========================================
-  // ==========================================
-  // HỆ THỐNG THEO DÕI VÀ KICK PENDING ROLE (Mỗi 1 tiếng check 1 lần)
-  // ==========================================
   setInterval(async () => {
     const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
     if (!guild) return;
@@ -2998,12 +3019,7 @@ client.once('ready', async () => {
   vatsimWorker.postMessage('update');
   setInterval(() => vatsimWorker.postMessage('update'), vatsimPeriodMs);
   console.log(`VATSIM updater running: immediate + every ${vatsimPeriodMs / 60000} minutes`);
-  
-  // Controller leaderboard embed update: mỗi giờ
-  setInterval(updateControllerLeaderboardEmbed, 60 * 60 * 1000); // 1 giờ
-  
-  // Pilot leaderboard embed update: mỗi giờ
-  setInterval(updatePilotLeaderboardEmbed, 60 * 60 * 1000); // 1 giờ
+ 
   
   // Cập nhật dữ liệu thường xuyên hơn (mỗi phút)
   setInterval(() => {
@@ -3380,51 +3396,71 @@ client.on('interactionCreate', async (interaction) => {
 
 // ===================== MESSAGE CREATE =====================
 client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
+  if (message.author.bot) return;
 
-  const userId = message.author.id;
+  const userId = message.author.id;
+  if (bans.users[userId] && bans.users[userId].endTime > Date.now()) return;
 
-  if (bans.users[userId] && bans.users[userId].endTime > Date.now()) return;
+  // ================= TÍNH NĂNG 3: ANTI SPAM @everyone / @here =================
+  const isEveryoneOrHere = message.mentions.everyone || message.content.includes('@everyone') || message.content.includes('@here');
+  
+  if (isEveryoneOrHere) {
+    const hasAdmin = message.member?.roles.cache.has(roles.adminRoleId);
+    const hasDev = message.member?.roles.cache.has(roles.devRoleId);
+    // Thay ID_ROLE_STAFF và ID_ROLE_BOT_NGAO bằng ID thật trong server của bạn
+    const hasStaff = message.member?.roles.cache.has('1493908725231128617'); 
+    const hasBotNgao = message.member?.roles.cache.has('1366035755079696405');
+    const isOwner = message.author.id === OWNER_ID;
 
-  if (message.mentions.has(client.user) && message.channel.id !== AI_CHANNEL_ID) {
-    await handleGeminiResponse(message, false);
-  }
+    // Nếu không có quyền mà dám ping tổng -> Xóa và Log
+    if (!hasAdmin && !hasDev && !hasStaff && !hasBotNgao && !isOwner) {
+      await message.delete().catch(() => {});
+      
+      // Gửi cảnh báo vào kênh tkchill-admin-bot (thay ID kênh tương ứng)
+      const adminChannel = message.guild.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
+      if (adminChannel) {
+        adminChannel.send(`🚨 **CẢNH BÁO BẢO MẬT:** Người dùng ${message.author} (\`${message.author.id}\`) vừa cố gắng tag \`@everyone\` hoặc \`@here\` trái phép ở kênh ${message.channel}.\n🛑 Tin nhắn đã bị xóa tự động vì nghi ngờ tài khoản bị hack.\n💬 **Nội dung:** ${message.content}`);
+      }
+      return; // Dừng việc xử lý các lệnh khác
+    }
+  }
 
-  if (message.channel.id === AI_CHANNEL_ID) {
-    await handleGeminiResponse(message, true);
-  }
-  
-  // Debug command for owner
-  if (message.content === '!debug_pilot_leaderboard' && message.author.id === OWNER_ID) {
-    const embed = new EmbedBuilder()
-      .setTitle('Debug Pilot Leaderboard Data')
-      .setDescription(`Dữ liệu từ file JSON:`)
-      .setColor(0xFF0000);
-    
-    const pilotEntries = Object.entries(pilotLeaderboardData.pilots || {});
-    
-    if (pilotEntries.length === 0) {
-      embed.addFields({
-        name: 'Pilots',
-        value: 'Không có dữ liệu',
-        inline: false
-      });
-    } else {
-      let fieldValue = '';
-      pilotEntries.slice(0, 10).forEach(([id, data]) => {
-        const hours = (data.seconds / 3600).toFixed(2);
-        fieldValue += `${data.name} (${id}) - ${data.seconds}s (${hours}h) - ${data.flights || 1} chuyến\n`;
-      });
-      
-      embed.addFields({
-        name: `Pilots (${pilotEntries.length})`,
-        value: fieldValue || 'Không có',
-        inline: false
-      });
-    }
-    
-    await message.channel.send({ embeds: [embed] });
-  }
+  // ================= TÍNH NĂNG 1: RÀNG BUỘC AI CHAT =================
+  // Chỉ nhận diện là ping khi tag thẳng ID bot, không tính việc reply tin nhắn thông thường
+  const isMentionedExplicitly = message.content.includes(`<@${client.user.id}>`) || message.content.includes(`<@!${client.user.id}>`);
+
+  // Nếu ở trong kênh AI thì cứ thoải mái trả lời
+  if (message.channel.id === AI_CHANNEL_ID) {
+    await handleGeminiResponse(message, true);
+    return;
+  }
+
+  // Ở kênh ngoài, CHỈ trả lời khi được ping trực tiếp thẳng mặt
+  if (isMentionedExplicitly) {
+    await handleGeminiResponse(message, false);
+  }
+
+  // Debug command for owner (giữ nguyên của bạn)
+  if (message.content === '!debug_pilot_leaderboard' && message.author.id === OWNER_ID) {
+    const embed = new EmbedBuilder()
+      .setTitle('Debug Pilot Leaderboard Data')
+      .setDescription(`Dữ liệu từ file JSON:`)
+      .setColor(0xFF0000);
+    
+    const pilotEntries = Object.entries(pilotLeaderboardData.pilots || {});
+    
+    if (pilotEntries.length === 0) {
+      embed.addFields({ name: 'Pilots', value: 'Không có dữ liệu', inline: false });
+    } else {
+      let fieldValue = '';
+      pilotEntries.slice(0, 10).forEach(([id, data]) => {
+        const hours = (data.seconds / 3600).toFixed(2);
+        fieldValue += `${data.name} (${id}) - ${data.seconds}s (${hours}h) - ${data.flights || 1} chuyến\n`;
+      });
+      embed.addFields({ name: `Pilots (${pilotEntries.length})`, value: fieldValue || 'Không có', inline: false });
+    }
+    await message.channel.send({ embeds: [embed] });
+  }
 });
 
 // ===================== /TIME =====================
@@ -4837,56 +4873,56 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 });
 // ===================== LOGGING: MESSAGE DELETE =====================
 client.on('messageDelete', async (message) => {
-  try {
-    if (message.partial) {
-      try { await message.fetch(); } catch (e) {}
-    }
-    if (message.author?.bot) return;
-    if (!message.guild) return;
+  try {
+    if (message.partial) {
+      try { await message.fetch(); } catch (e) {}
+    }
+    if (message.author?.bot) return;
+    if (!message.guild) return;
 
-    let content = message.content || '';
-    if (content.length > 1000) content = content.slice(0, 1000) + '...';
-    if (!content && message.attachments?.size > 0) content = '[Only attachments]';
-    if (!content) content = '[Empty message]';
+    let content = message.content || '';
+    if (content.length > 1000) content = content.slice(0, 1000) + '...';
+    if (!content && message.attachments?.size > 0) content = '[Chỉ chứa hình ảnh/file đính kèm]';
+    if (!content) content = '[Tin nhắn trống]';
 
-    const embed = createLogEmbed('🗑️ Message Deleted',
-      `**Author:** ${message.author ? getUserIdentifier(message.author) : 'Unknown'}\n**Channel:** ${getChannelIdentifier(message.channel)}\n**Message ID:** ${message.id}\n\n**Content:**\n\`\`\`\n${content}\n\`\`\``,
-      0xe67e22
-    );
+    const embed = createLogEmbed('🗑️ Message Deleted',
+      `**Author:** ${message.author ? getUserIdentifier(message.author) : 'Unknown'}\n**Channel:** ${getChannelIdentifier(message.channel)}\n**Message ID:** ${message.id}\n\n**Content:**\n\`\`\`\n${content}\n\`\`\``,
+      0xe67e22
+    );
 
-    if (message.attachments?.size > 0) {
-      const attachments = [...message.attachments.values()].map(a => `[${a.name}](${a.url})`).join('\n');
-      embed.addFields({ name: '📎 Attachments', value: attachments.substring(0, 1024), inline: false });
-    }
+    const logFiles = []; // Mảng chứa ảnh để gửi lại vào log
 
-    // Lấy audit log với timeout 15 giây
-    try {
-      const fetchedLogs = await message.guild.fetchAuditLogs({ type: 72, limit: 10 });
-      const deleteLog = fetchedLogs.entries.find(entry =>
-        entry.target.id === message.author?.id &&
-        entry.extra?.channel?.id === message.channel.id &&
-        Math.abs(entry.createdTimestamp - Date.now()) < 15000
-      );
-      if (deleteLog?.executor && deleteLog.executor.id !== client.user.id) {
-        embed.addFields({ name: '🗑️ Deleted by', value: getUserIdentifier(deleteLog.executor), inline: false });
-      } else {
-        // Fallback: tìm bất kỳ entry nào trong channel đó (có thể target null)
-        const anyLog = fetchedLogs.entries.find(entry =>
-          entry.extra?.channel?.id === message.channel.id &&
-          Math.abs(entry.createdTimestamp - Date.now()) < 15000
-        );
-        if (anyLog?.executor && anyLog.executor.id !== client.user.id) {
-          embed.addFields({ name: '🗑️ Deleted by (approx)', value: getUserIdentifier(anyLog.executor), inline: false });
-        }
-      }
-    } catch (auditErr) {
-      // Không có quyền audit log
-    }
+    if (message.attachments?.size > 0) {
+      // 1. Vẫn lưu URL gốc cho chắc cú
+      const attachmentsText = [...message.attachments.values()].map(a => `[${a.name}](${a.url})`).join('\n');
+      embed.addFields({ name: '📎 Attachments (Link gốc)', value: attachmentsText.substring(0, 1024), inline: false });
 
-    await sendLog(embed);
-  } catch (err) {
-    console.error('Error in messageDelete log:', err);
-  }
+      // 2. Kéo ảnh về và đính kèm vào tin nhắn bot chuẩn bị gửi
+      for (const [id, attachment] of message.attachments) {
+        logFiles.push(new AttachmentBuilder(attachment.url, { name: `deleted_${attachment.name || 'image.png'}` }));
+      }
+    }
+
+    // Lấy audit log để xem ai là người xóa (nếu có quyền)
+    try {
+      const fetchedLogs = await message.guild.fetchAuditLogs({ type: 72, limit: 10 });
+      const deleteLog = fetchedLogs.entries.find(entry =>
+        entry.target.id === message.author?.id &&
+        entry.extra?.channel?.id === message.channel.id &&
+        Math.abs(entry.createdTimestamp - Date.now()) < 15000
+      );
+      if (deleteLog?.executor && deleteLog.executor.id !== client.user.id) {
+        embed.addFields({ name: '🗑️ Deleted by', value: getUserIdentifier(deleteLog.executor), inline: false });
+      }
+    } catch (auditErr) {
+      // Bỏ qua nếu bot thiếu quyền Audit Log
+    }
+
+    // Quan trọng: Truyền mảng files vào sendLog để re-upload
+    await sendLog(embed, { files: logFiles });
+  } catch (err) {
+    console.error('Error in messageDelete log:', err);
+  }
 });
 
 // ===================== LOGGING: MESSAGE EDIT =====================
