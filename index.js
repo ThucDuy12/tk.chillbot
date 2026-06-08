@@ -4874,20 +4874,22 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 // ===================== LOGGING: MESSAGE DELETE =====================
 client.on('messageDelete', async (message) => {
   try {
-    // 1. Nếu tin nhắn bị xóa gửi từ trước khi bot bật (bot không có dữ liệu)
+    // 1. NẾU LÀ TIN NHẮN CỦA BOT THÌ BỎ QUA 
+    // (Đừng test bằng cách xóa tin nhắn của bot, nó sẽ không log đâu nhé)
+    if (message.author?.bot) return;
+    if (!message.guild) return;
+
+    // 2. NẾU LÀ TIN NHẮN CŨ (CHƯA CACHE VÀO RAM)
     if (message.partial) {
       const embed = createLogEmbed('🗑️ Message Deleted (Uncached)',
-        `**Channel:** ${getChannelIdentifier(message.channel)}\n**Message ID:** ${message.id}\n\n⚠️ **Lưu ý:** Đây là tin nhắn cũ gửi trước khi bot khởi động. Bot không có dữ liệu để lấy lại nội dung hay ảnh.`,
+        `**Channel:** <#${message.channelId}>\n**Message ID:** ${message.id}\n\n⚠️ **Lưu ý:** Tin nhắn này được gửi từ trước khi bot khởi động nên bot chưa kịp nhớ nội dung.`,
         0xe67e22
       );
       await sendLog(embed);
       return;
     }
 
-    if (message.author?.bot) return;
-    if (!message.guild) return;
-
-    // 2. Lấy nội dung text
+    // 3. LẤY NỘI DUNG CHỮ
     let content = message.content || '';
     if (content.length > 1000) content = content.slice(0, 1000) + '...';
     if (!content && message.attachments?.size > 0) content = '[Chỉ chứa hình ảnh/file đính kèm]';
@@ -4899,50 +4901,66 @@ client.on('messageDelete', async (message) => {
     );
 
     const logFiles = [];
+    
+    // ==============================================================
+    // CHẠY SONG SONG 2 TÁC VỤ: TẢI ẢNH VÀ KIỂM TRA NGƯỜI XÓA CÙNG LÚC
+    // ==============================================================
+    const tasks = [];
 
-    // 3. XỬ LÝ ẢNH BỊ XÓA (TẢI TRỰC TIẾP VỀ BOT ĐỂ RE-UPLOAD)
+    // Tác vụ A: Tải ảnh từ Server Discord về Bot
     if (message.attachments?.size > 0) {
-      // Import fetch linh hoạt đề phòng lỗi phiên bản node-fetch
-      const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-      
       for (const [id, attachment] of message.attachments) {
-        try {
-          const targetUrl = attachment.proxyURL || attachment.url;
-          
-          // Tải file thẳng về RAM của Bot
-          const response = await fetch(targetUrl);
-          if (response.ok) {
-            const arrayBuffer = await response.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
+        tasks.push((async () => {
+          try {
+            const targetUrl = attachment.proxyURL || attachment.url;
             
-            // Đóng gói thành file vật lý để gửi lại lên Discord
-            logFiles.push(new AttachmentBuilder(buffer, { name: `deleted_${attachment.name || 'image.png'}` }));
-          } else {
-            embed.addFields({ name: `⚠️ Lỗi tải ảnh`, value: `Không thể tải \`${attachment.name}\`. Máy chủ Discord đã xóa file quá nhanh!`, inline: false });
+            // Dùng hàm fetch đã require sẵn ở đầu file của bạn
+            const response = await fetch(targetUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+              timeout: 5000 // Chặn tối đa 5 giây tránh treo bot
+            });
+            
+            if (response.ok) {
+              const arrayBuffer = await response.arrayBuffer();
+              const buffer = Buffer.from(arrayBuffer);
+              logFiles.push(new AttachmentBuilder(buffer, { name: `deleted_${attachment.name || 'image.png'}` }));
+            }
+          } catch (e) {
+            console.error('Lỗi tải ảnh:', e.message);
           }
-        } catch (fetchErr) {
-          console.error('Lỗi download ảnh khi xóa:', fetchErr);
+        })());
+      }
+    }
+
+    // Tác vụ B: Tra cứu sổ Nam Tào (Audit Log) xem ai là người xóa
+    let deletedBy = null;
+    tasks.push((async () => {
+      try {
+        const fetchedLogs = await message.guild.fetchAuditLogs({ type: 72, limit: 5 });
+        const deleteLog = fetchedLogs.entries.find(entry =>
+          entry.target.id === message.author?.id &&
+          entry.extra?.channel?.id === message.channel.id &&
+          Math.abs(entry.createdTimestamp - Date.now()) < 5000 // Chỉ bắt log trong 5s gần nhất
+        );
+        if (deleteLog?.executor && deleteLog.executor.id !== client.user.id) {
+          deletedBy = getUserIdentifier(deleteLog.executor);
         }
+      } catch (e) {
+        // Bỏ qua nếu bot thiếu quyền View Audit Log
       }
+    })());
+
+    // Ép Bot đợi cả tác vụ A và B xong xuôi rồi mới đi tiếp
+    await Promise.all(tasks);
+
+    // Nếu phát hiện người xóa khác tác giả (Bị Admin/Mod xóa)
+    if (deletedBy) {
+      embed.addFields({ name: '🗑️ Deleted by', value: deletedBy, inline: false });
     }
 
-    // 4. Kiểm tra Audit Log xem ai là người ra tay xóa
-    try {
-      const fetchedLogs = await message.guild.fetchAuditLogs({ type: 72, limit: 5 });
-      const deleteLog = fetchedLogs.entries.find(entry =>
-        entry.target.id === message.author?.id &&
-        entry.extra?.channel?.id === message.channel.id &&
-        Math.abs(entry.createdTimestamp - Date.now()) < 15000
-      );
-      if (deleteLog?.executor && deleteLog.executor.id !== client.user.id) {
-        embed.addFields({ name: '🗑️ Deleted by', value: getUserIdentifier(deleteLog.executor), inline: false });
-      }
-    } catch (auditErr) {
-      // Bỏ qua nếu bot chưa có quyền View Audit Log
-    }
-
-    // 5. Gửi Log kèm theo ảnh vật lý đã tải
+    // 4. GỬI LOG VÀ HÌNH ẢNH LÊN KÊNH
     await sendLog(embed, logFiles.length > 0 ? { files: logFiles } : {});
+
   } catch (err) {
     console.error('Error in messageDelete log:', err);
   }
