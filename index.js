@@ -3420,26 +3420,8 @@ client.on('interactionCreate', async (interaction) => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  // 📥 LƯU TRƯỚC ẢNH VÀO RAM BẰNG HTTPS MẶC ĐỊNH
-  if (message.attachments?.size > 0) {
-    (async () => {
-      const cachedFiles = [];
-      for (const [id, attachment] of message.attachments) {
-        try {
-          const buffer = await downloadBuffer(attachment.url);
-          cachedFiles.push({ buffer, name: attachment.name });
-        } catch (e) {
-          console.error('[Cache-Create] Lỗi tải trước ảnh:', e.message);
-        }
-      }
-      
-      if (cachedFiles.length > 0) {
-        deletedImageCache.set(message.id, cachedFiles);
-        // Tự động xóa khỏi RAM sau 15 phút nếu không ai xóa tin nhắn
-        setTimeout(() => deletedImageCache.delete(message.id), 15 * 60 * 1000);
-      }
-    })();
-  }
+  const userId = message.author.id;
+  if (bans.users[userId] && bans.users[userId].endTime > Date.now()) return;
 
   // ================= TÍNH NĂNG 3: ANTI SPAM @everyone / @here =================
   const isEveryoneOrHere = message.mentions.everyone || message.content.includes('@everyone') || message.content.includes('@here');
@@ -4920,7 +4902,7 @@ client.on('messageDelete', async (message) => {
 
     if (message.partial) {
       const embed = createLogEmbed('🗑️ Message Deleted (Uncached)',
-        `**Channel:** <#${message.channelId}>\n**Message ID:** ${message.id}\n\n⚠️ **Lưu ý:** Tin nhắn này cũ, gửi trước khi bot khởi động nên không có dữ liệu hình ảnh.`,
+        `**Channel:** <#${message.channelId}>\n**Message ID:** ${message.id}\n\n⚠️ **Lưu ý:** Tin nhắn cũ gửi trước khi bot bật nên không lấy được dữ liệu.`,
         0xe67e22
       );
       await sendLog(embed);
@@ -4937,55 +4919,25 @@ client.on('messageDelete', async (message) => {
       0xe67e22
     );
 
-    const logFiles = [];
-    const tasks = [];
-
-    // RÚT ẢNH TỪ RAM RA GỬI
-    const cachedFiles = deletedImageCache.get(message.id);
-    
-    if (cachedFiles) {
-      for (const file of cachedFiles) {
-        logFiles.push(new AttachmentBuilder(file.buffer, { name: `deleted_${file.name || 'image.png'}` }));
-      }
-      deletedImageCache.delete(message.id);
-    } else if (message.attachments?.size > 0) {
-      // Nếu không có trong RAM, thử vớt bằng HTTPS
-      for (const [id, attachment] of message.attachments) {
-        tasks.push((async () => {
-          try {
-            const targetUrl = attachment.proxyURL || attachment.url;
-            const buffer = await downloadBuffer(targetUrl);
-            logFiles.push(new AttachmentBuilder(buffer, { name: `deleted_${attachment.name || 'image.png'}` }));
-          } catch (e) {}
-        })());
-      }
+    // Chỉ lưu Tên file và Link gốc, bỏ qua việc tải ảnh vật lý để cứu tốc độ
+    if (message.attachments?.size > 0) {
+      const attachmentsText = [...message.attachments.values()].map(a => `[${a.name}](${a.url})`).join('\n');
+      embed.addFields({ name: '📎 Tệp đính kèm (Link có thể đã hỏng do Discord xóa)', value: attachmentsText.substring(0, 1024), inline: false });
     }
 
-    // Tra cứu Audit Log
-    let deletedBy = null;
-    tasks.push((async () => {
-      try {
-        const fetchedLogs = await message.guild.fetchAuditLogs({ type: 72, limit: 5 });
-        const deleteLog = fetchedLogs.entries.find(entry =>
-          entry.target.id === message.author?.id &&
-          entry.extra?.channel?.id === message.channel.id &&
-          Math.abs(entry.createdTimestamp - Date.now()) < 5000
-        );
-        if (deleteLog?.executor && deleteLog.executor.id !== client.user.id) {
-          deletedBy = getUserIdentifier(deleteLog.executor);
+    // Tra cứu siêu tốc Audit Log (chỉ lấy 1 dòng gần nhất)
+    try {
+      const fetchedLogs = await message.guild.fetchAuditLogs({ type: 72, limit: 1 });
+      const deleteLog = fetchedLogs.entries.first();
+      
+      if (deleteLog && deleteLog.target.id === message.author.id && Math.abs(deleteLog.createdTimestamp - Date.now()) < 5000) {
+        if (deleteLog.executor.id !== client.user.id) {
+          embed.addFields({ name: '🗑️ Deleted by', value: getUserIdentifier(deleteLog.executor), inline: false });
         }
-      } catch (e) {}
-    })());
+      }
+    } catch (e) {}
 
-    await Promise.all(tasks);
-
-    if (deletedBy) {
-      embed.addFields({ name: '🗑️ Deleted by', value: deletedBy, inline: false });
-    }
-
-    // Gửi log lên Discord
-    await sendLog(embed, logFiles.length > 0 ? { files: logFiles } : {});
-
+    await sendLog(embed);
   } catch (err) {
     console.error('Error in messageDelete log:', err);
   }
@@ -5266,47 +5218,68 @@ async function fetchATIS(icao) {
   }
 }
 
+// ===================== HELPER: KÉO METAR TỪ CHECKWX =====================
+async function fetchMetarFromCheckWX(icao) {
+  if (!CHECKWX_API_KEY) return null;
+  try {
+    const fetch = (await import('node-fetch')).default;
+    const response = await fetch(`https://api.checkwx.com/metar/${icao}`, {
+      headers: { 'X-API-Key': CHECKWX_API_KEY }
+    });
+    
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    if (data && data.data && data.data.length > 0) {
+      return data.data[0]; // Trả về raw text METAR
+    }
+    return null;
+  } catch (err) {
+    console.error(`Lỗi CheckWX METAR cho ${icao}:`, err.message);
+    return null;
+  }
+}
+
 // ===================== COMMAND: METAR =====================
 async function handleMetar(interaction) {
-  const icao = interaction.options.getString('icao').toUpperCase();
-  await interaction.deferReply(); 
-  
-  try {
-    // Chỉ sử dụng duy nhất data từ ATIS.guru
-    const atisData = await fetchATIS(icao);
-    
-    if (!atisData) {
-      return await interaction.editReply({ content: `❌ Không lấy được dữ liệu thời tiết cho sân bay ${icao}.` });
-    }
-    
-    let replyContent = '';
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply(); 
+  
+  try {
+    // 1. Ưu tiên lấy từ ATIS.guru (Hàm fetchATIS đã bao gồm tính năng tự convert ATIS sang METAR)
+    const atisData = await fetchATIS(icao);
+    
+    let metarText = atisData ? atisData.metar : null;
+    let atisText = atisData ? (atisData.arrival || atisData.departure) : null;
 
-    // Xử lý METAR
-    if (atisData.metar) {
-      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`${atisData.metar}\`\`\``;
-    } else {
-      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`❌ Không tìm thấy METAR.\`\`\``;
-    }
-    
-    let hasAtis = false;
+    // 2. Fallback CheckWX: Chỉ gọi khi hoàn toàn trắng tay (Không D-ATIS và Không METAR)
+    if (!metarText && !atisText) {
+      metarText = await fetchMetarFromCheckWX(icao);
+    }
+    
+    let replyContent = '';
 
-    // Xử lý Arrival ATIS (áp dụng bộ lọc xuống dòng)
-    if (atisData.arrival) {
-      const formattedArr = formatATISText(atisData.arrival);
-      replyContent += `\n🛬 **Arrival ATIS (${icao}):**\n\`\`\`${formattedArr}\`\`\``;
-      hasAtis = true;
-    }
-    
-    if (!hasAtis) {
-      replyContent += `\n⚠️ Hiện tại không có dữ liệu D-ATIS cho ${icao} (hoặc atis.guru đang cập nhật). Pilot vui lòng tự đọc METAR ở trên nhé!`;
-    }
-    
-    await interaction.editReply({ content: replyContent });
-    
-  } catch (err) {
-    console.error('METAR/ATIS error:', err);
-    await interaction.editReply({ content: '❌ Đã có lỗi khi lấy dữ liệu METAR/ATIS. Bạn thử lại sau nhé!' });
-  }
+    // 3. Xử lý hiển thị METAR
+    if (metarText) {
+      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`${metarText}\`\`\``;
+    } else {
+      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`❌ Không tìm thấy METAR trên cả atis.guru lẫn CheckWX.\`\`\``;
+    }
+    
+    // 4. Xử lý hiển thị D-ATIS
+    if (atisText) {
+      const formattedAtis = formatATISText(atisText);
+      replyContent += `\n🛬 **D-ATIS (${icao}):**\n\`\`\`${formattedAtis}\`\`\``;
+    } else {
+      replyContent += `\n⚠️ Hiện tại không có dữ liệu D-ATIS cho ${icao} (hoặc atis.guru đang cập nhật). Pilot vui lòng tự đọc METAR ở trên nhé!`;
+    }
+    
+    await interaction.editReply({ content: replyContent });
+    
+  } catch (err) {
+    console.error('METAR/ATIS error:', err);
+    await interaction.editReply({ content: '❌ Đã có lỗi khi lấy dữ liệu METAR/ATIS. Bạn thử lại sau nhé!' });
+  }
 }
 
 // ===================== ACTIVE RUNWAY CALCULATOR =====================
@@ -5356,7 +5329,6 @@ async function handleRunway(interaction) {
       'VVCR': [{ id: '02', heading: 20 }, { id: '20', heading: 200 }],
       'VVPQ': [{ id: '10', heading: 100 }, { id: '28', heading: 280 }],
       'VVCI': [{ id: '04', heading: 40 }, { id: '22', heading: 220 }],
-      'VRMM': [{ id: '06', heading: 60 }, { id: '36', heading: 360 }]
     };
 
     const runways = airportRunways[icao];
@@ -5408,97 +5380,111 @@ async function handleRunway(interaction) {
 
 // ===================== TAF DECODER (CHECKWX API) =====================
 async function handleTaf(interaction) {
-  const icao = interaction.options.getString('icao').toUpperCase();
-  await interaction.deferReply();
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply();
 
-  if (!CHECKWX_API_KEY) {
-    return interaction.editReply({ content: '❌ Thiếu cấu hình CHECKWX_API_KEY trong biến môi trường. Admin cần kiểm tra lại!' });
-  }
+  if (!CHECKWX_API_KEY) {
+    return interaction.editReply({ content: '❌ Thiếu cấu hình CHECKWX_API_KEY trong biến môi trường. Admin cần kiểm tra lại!' });
+  }
 
-  try {
-    const fetch = (await import('node-fetch')).default;
-    // Gọi API của CheckWX để lấy TAF đã được Decode sẵn
-    const response = await fetch(`https://api.checkwx.com/taf/${icao}/decoded`, {
-      headers: { 'X-API-Key': CHECKWX_API_KEY }
-    });
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // Gọi API của CheckWX
+    const response = await fetch(`https://api.checkwx.com/taf/${icao}/decoded`, {
+      headers: { 'X-API-Key': CHECKWX_API_KEY }
+    });
 
-    if (!response.ok) {
-      return await interaction.editReply({ content: `❌ Lỗi khi lấy TAF từ server (Mã lỗi: ${response.status}).` });
-    }
+    if (!response.ok) {
+      return await interaction.editReply({ content: `❌ Lỗi khi lấy TAF từ server (Mã lỗi: ${response.status}).` });
+    }
 
-    const data = await response.json();
+    const data = await response.json();
 
-    if (!data || data.results === 0 || !data.data || data.data.length === 0) {
-      return await interaction.editReply({ content: `❌ Không tìm thấy dữ liệu TAF cho sân bay **${icao}**.` });
-    }
+    if (!data || data.results === 0 || !data.data || data.data.length === 0) {
+      return await interaction.editReply({ content: `❌ Không tìm thấy dữ liệu TAF cho sân bay **${icao}**.` });
+    }
 
-    const tafData = data.data[0];
-    const embed = new EmbedBuilder()
-      .setTitle(`🌦️ TAF Decoder - ${icao}`)
-      .setDescription(`**Nguyên gốc (Raw TAF):**\n\`\`\`${tafData.raw_text}\`\`\``)
-      .setColor(0xf39c12)
-      .setTimestamp()
-      .setFooter({ text: 'Powered by CheckWX API' });
+    const tafData = data.data[0];
+    const embed = new EmbedBuilder()
+      .setTitle(`🌦️ TAF Decoder - ${icao}`)
+      .setDescription(`**Nguyên gốc (Raw TAF):**\n\`\`\`${tafData.raw_text}\`\`\``)
+      .setColor(0xf39c12)
+      .setTimestamp()
+      .setFooter({ text: 'Powered by CheckWX API' });
 
-    // Hiển thị các khối dự báo (Tối đa hiển thị 4 khối để tránh bị quá dài trên Discord)
-    if (tafData.forecast && tafData.forecast.length > 0) {
-      const MAX_FORECASTS = 4;
-      
-      tafData.forecast.slice(0, MAX_FORECASTS).forEach((fcst, index) => {
-        // [FIXED] Sử dụng Optional Chaining (?.) để tránh crash bot khi API trả thiếu timestamp
-        const fromTime = fcst.timestamp?.from || 'Không rõ';
-        const toTime = fcst.timestamp?.to || 'Không rõ';
-        let timeStr = `Từ **${fromTime}** đến **${toTime}**`;
-        
-        let details = [];
+    if (tafData.forecast && tafData.forecast.length > 0) {
+      const MAX_FORECASTS = 5; // Tăng lên 5 giai đoạn cho thoải mái
+      
+      tafData.forecast.slice(0, MAX_FORECASTS).forEach((fcst, index) => {
+        // [ĐÃ SỬA] Đọc đúng trường thời gian của API (forecast_from / forecast_to)
+        let fromTime = fcst.timestamp?.forecast_from || fcst.timestamp?.from;
+        let toTime = fcst.timestamp?.forecast_to || fcst.timestamp?.to;
+        
+        let timeStr = (!fromTime && !toTime) ? 'Toàn bộ thời gian' : `Từ **${fromTime || 'Không rõ'}** đến **${toTime || 'Không rõ'}**`;
+        
+        let details = [];
 
-        // Hướng gió và tốc độ
-        if (fcst.wind) {
-          let windStr = `Gió: ${fcst.wind.degrees || 'VRB'}° ở ${fcst.wind.speed_kts || 0} KT`;
-          if (fcst.wind.gust_kts) windStr += ` (Giật ${fcst.wind.gust_kts} KT)`;
-          details.push(windStr);
-        }
-        
-        // Tầm nhìn
-        if (fcst.visibility?.meters) {
-          details.push(`Tầm nhìn: ${fcst.visibility.meters}m`);
-        }
-        
-        // Thời tiết hiện tại (Mưa, dông, sương mù...)
-        if (fcst.conditions && fcst.conditions.length > 0) {
-          details.push(`Thời tiết: ${fcst.conditions.map(c => c.text).join(', ')}`);
-        }
-        
-        // Mây
-        if (fcst.clouds && fcst.clouds.length > 0) {
-          details.push(`Mây: ${fcst.clouds.map(c => `${c.text} ở ${c.base_feet_agl || 'không rõ'} ft`).join(', ')}`);
-        }
+        // Hướng gió và tốc độ
+        if (fcst.wind) {
+          let windStr = `🌬️ Gió: ${fcst.wind.degrees || 'VRB'}° ở ${fcst.wind.speed_kts || 0} KT`;
+          if (fcst.wind.gust_kts) windStr += ` (Giật ${fcst.wind.gust_kts} KT)`;
+          details.push(windStr);
+        }
+        
+        // Tầm nhìn
+        if (fcst.visibility?.meters) {
+          details.push(`👁️ Tầm nhìn: ${fcst.visibility.meters}m`);
+        }
+        
+        // Thời tiết hiện tại
+        if (fcst.conditions && fcst.conditions.length > 0) {
+          details.push(`🌧️ Thời tiết: ${fcst.conditions.map(c => c.text || c.code).join(', ')}`);
+        }
+        
+        // Mây [ĐÃ VÁ LỖI KHÔNG RÕ FT]
+        if (fcst.clouds && fcst.clouds.length > 0) {
+          const cloudDetails = fcst.clouds.map(c => {
+            // Thử bắt nhiều trường trả về khác nhau của API
+            let height = c.base_feet_agl || c.feet || c.base_feet || c.base;
+            
+            // Nếu API vẫn không có độ cao, tự tách số từ Raw Code (VD: SCT017 -> 1700)
+            if (!height && c.code) {
+              const match = c.code.match(/\d{3}/);
+              if (match) height = parseInt(match[0]) * 100;
+            }
+            
+            const heightText = height ? `${height} ft` : 'Sát mặt đất';
+            return `${c.text || c.code} ở ${heightText}`;
+          });
+          details.push(`☁️ Mây: ${cloudDetails.join(', ')}`);
+        }
 
-        // Tên khối thay đổi (BECMG, TEMPO, FM, hoặc Gốc)
-        let indicatorName = fcst.change?.indicator || 'Dự báo gốc';
+        // Tên khối thay đổi (TEMPO, BECMG...)
+        let indicatorName = fcst.change?.indicator?.code || fcst.change?.indicator?.text || fcst.change?.indicator || 'Dự báo gốc';
 
-        embed.addFields({
-          name: `🕒 Giai đoạn ${index + 1} (${indicatorName})`,
-          value: `${timeStr}\n${details.length > 0 ? details.join('\n') : '*Không có hiện tượng đặc biệt*'}`,
-          inline: false
-        });
-      });
+        embed.addFields({
+          name: `🕒 Giai đoạn ${index + 1} (${indicatorName})`,
+          value: `${timeStr}\n${details.length > 0 ? details.join('\n') : '*Không có hiện tượng đặc biệt*'}`,
+          inline: false
+        });
+      });
 
-      if (tafData.forecast.length > MAX_FORECASTS) {
-        embed.addFields({
-          name: '...',
-          value: `*Còn ${tafData.forecast.length - MAX_FORECASTS} giai đoạn thay đổi nữa không được hiển thị để tránh trôi chat.*`,
-          inline: false
-        });
-      }
-    }
+      // Nếu còn nhiều hơn 5 giai đoạn, báo cho người dùng biết
+      if (tafData.forecast.length > MAX_FORECASTS) {
+        embed.addFields({
+          name: '...',
+          value: `*Còn ${tafData.forecast.length - MAX_FORECASTS} giai đoạn thay đổi nữa bị ẩn đi để tránh trôi chat.*`,
+          inline: false
+        });
+      }
+    }
 
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
 
-  } catch (error) {
-    console.error('TAF fetch error:', error);
-    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi gọi CheckWX API để giải mã TAF.' });
-  }
+  } catch (error) {
+    console.error('TAF fetch error:', error);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi gọi CheckWX API để giải mã TAF. Vui lòng thử lại sau!' });
+  }
 }
 
 // ===================== REACTION ROLES =====================
