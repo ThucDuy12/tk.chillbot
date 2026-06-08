@@ -4874,38 +4874,61 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 // ===================== LOGGING: MESSAGE DELETE =====================
 client.on('messageDelete', async (message) => {
   try {
+    // 1. Nếu tin nhắn bị xóa gửi từ trước khi bot bật (bot không có dữ liệu)
     if (message.partial) {
-      try { await message.fetch(); } catch (e) {}
+      const embed = createLogEmbed('🗑️ Message Deleted (Uncached)',
+        `**Channel:** ${getChannelIdentifier(message.channel)}\n**Message ID:** ${message.id}\n\n⚠️ **Lưu ý:** Đây là tin nhắn cũ gửi trước khi bot khởi động. Bot không có dữ liệu để lấy lại nội dung hay ảnh.`,
+        0xe67e22
+      );
+      await sendLog(embed);
+      return;
     }
+
     if (message.author?.bot) return;
     if (!message.guild) return;
 
+    // 2. Lấy nội dung text
     let content = message.content || '';
     if (content.length > 1000) content = content.slice(0, 1000) + '...';
     if (!content && message.attachments?.size > 0) content = '[Chỉ chứa hình ảnh/file đính kèm]';
     if (!content) content = '[Tin nhắn trống]';
 
     const embed = createLogEmbed('🗑️ Message Deleted',
-      `**Author:** ${message.author ? getUserIdentifier(message.author) : 'Unknown'}\n**Channel:** ${getChannelIdentifier(message.channel)}\n**Message ID:** ${message.id}\n\n**Content:**\n\`\`\`\n${content}\n\`\`\``,
+      `**Author:** ${getUserIdentifier(message.author)}\n**Channel:** ${getChannelIdentifier(message.channel)}\n**Message ID:** ${message.id}\n\n**Content:**\n\`\`\`\n${content}\n\`\`\``,
       0xe67e22
     );
 
-    const logFiles = []; // Mảng chứa ảnh để gửi lại vào log
+    const logFiles = [];
 
+    // 3. XỬ LÝ ẢNH BỊ XÓA (TẢI TRỰC TIẾP VỀ BOT ĐỂ RE-UPLOAD)
     if (message.attachments?.size > 0) {
-      // 1. Vẫn lưu URL gốc cho chắc cú
-      const attachmentsText = [...message.attachments.values()].map(a => `[${a.name}](${a.url})`).join('\n');
-      embed.addFields({ name: '📎 Attachments (Link gốc)', value: attachmentsText.substring(0, 1024), inline: false });
-
-      // 2. Kéo ảnh về và đính kèm vào tin nhắn bot chuẩn bị gửi
+      // Import fetch linh hoạt đề phòng lỗi phiên bản node-fetch
+      const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+      
       for (const [id, attachment] of message.attachments) {
-        logFiles.push(new AttachmentBuilder(attachment.url, { name: `deleted_${attachment.name || 'image.png'}` }));
+        try {
+          const targetUrl = attachment.proxyURL || attachment.url;
+          
+          // Tải file thẳng về RAM của Bot
+          const response = await fetch(targetUrl);
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            
+            // Đóng gói thành file vật lý để gửi lại lên Discord
+            logFiles.push(new AttachmentBuilder(buffer, { name: `deleted_${attachment.name || 'image.png'}` }));
+          } else {
+            embed.addFields({ name: `⚠️ Lỗi tải ảnh`, value: `Không thể tải \`${attachment.name}\`. Máy chủ Discord đã xóa file quá nhanh!`, inline: false });
+          }
+        } catch (fetchErr) {
+          console.error('Lỗi download ảnh khi xóa:', fetchErr);
+        }
       }
     }
 
-    // Lấy audit log để xem ai là người xóa (nếu có quyền)
+    // 4. Kiểm tra Audit Log xem ai là người ra tay xóa
     try {
-      const fetchedLogs = await message.guild.fetchAuditLogs({ type: 72, limit: 10 });
+      const fetchedLogs = await message.guild.fetchAuditLogs({ type: 72, limit: 5 });
       const deleteLog = fetchedLogs.entries.find(entry =>
         entry.target.id === message.author?.id &&
         entry.extra?.channel?.id === message.channel.id &&
@@ -4915,11 +4938,11 @@ client.on('messageDelete', async (message) => {
         embed.addFields({ name: '🗑️ Deleted by', value: getUserIdentifier(deleteLog.executor), inline: false });
       }
     } catch (auditErr) {
-      // Bỏ qua nếu bot thiếu quyền Audit Log
+      // Bỏ qua nếu bot chưa có quyền View Audit Log
     }
 
-    // Quan trọng: Truyền mảng files vào sendLog để re-upload
-    await sendLog(embed, { files: logFiles });
+    // 5. Gửi Log kèm theo ảnh vật lý đã tải
+    await sendLog(embed, logFiles.length > 0 ? { files: logFiles } : {});
   } catch (err) {
     console.error('Error in messageDelete log:', err);
   }
