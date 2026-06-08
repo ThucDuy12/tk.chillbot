@@ -4871,11 +4871,11 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     console.error('Error in guildMemberUpdate:', err);
   }
 });
+
 // ===================== LOGGING: MESSAGE DELETE =====================
 client.on('messageDelete', async (message) => {
   try {
-    // 1. NẾU LÀ TIN NHẮN CỦA BOT THÌ BỎ QUA 
-    // (Đừng test bằng cách xóa tin nhắn của bot, nó sẽ không log đâu nhé)
+    // 1. NẾU LÀ TIN NHẮN CỦA BOT THÌ BỎ QUA
     if (message.author?.bot) return;
     if (!message.guild) return;
 
@@ -4901,38 +4901,42 @@ client.on('messageDelete', async (message) => {
     );
 
     const logFiles = [];
-    
-    // ==============================================================
-    // CHẠY SONG SONG 2 TÁC VỤ: TẢI ẢNH VÀ KIỂM TRA NGƯỜI XÓA CÙNG LÚC
-    // ==============================================================
     const tasks = [];
 
-    // Tác vụ A: Tải ảnh từ Server Discord về Bot
+    // Tác vụ A: Tải ảnh từ Server Discord về RAM của Bot (ĐÃ VÁ LỖI PHIÊN BẢN)
     if (message.attachments?.size > 0) {
       for (const [id, attachment] of message.attachments) {
         tasks.push((async () => {
           try {
             const targetUrl = attachment.proxyURL || attachment.url;
             
-            // Dùng hàm fetch đã require sẵn ở đầu file của bạn
             const response = await fetch(targetUrl, {
               headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-              timeout: 5000 // Chặn tối đa 5 giây tránh treo bot
+              timeout: 5000
             });
             
             if (response.ok) {
-              const arrayBuffer = await response.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
+              let buffer;
+              // ĐÃ SỬA: Tự động check hàm phù hợp với phiên bản node-fetch trên máy bạn để tránh crash
+              if (typeof response.buffer === 'function') {
+                buffer = await response.buffer(); // Dành cho node-fetch v2 (máy bạn đang dùng)
+              } else {
+                const arrayBuffer = await response.arrayBuffer(); // Dành cho node-fetch v3
+                buffer = Buffer.from(arrayBuffer);
+              }
+              
               logFiles.push(new AttachmentBuilder(buffer, { name: `deleted_${attachment.name || 'image.png'}` }));
+            } else {
+              console.log(`[Log-Delete] Không thể tải file, CDN báo lỗi: ${response.status}`);
             }
           } catch (e) {
-            console.error('Lỗi tải ảnh:', e.message);
+            console.error('Lỗi tải ảnh khi xóa:', e.message);
           }
         })());
       }
     }
 
-    // Tác vụ B: Tra cứu sổ Nam Tào (Audit Log) xem ai là người xóa
+    // Tác vụ B: Tra cứu Audit Log xem ai xóa
     let deletedBy = null;
     tasks.push((async () => {
       try {
@@ -4940,25 +4944,22 @@ client.on('messageDelete', async (message) => {
         const deleteLog = fetchedLogs.entries.find(entry =>
           entry.target.id === message.author?.id &&
           entry.extra?.channel?.id === message.channel.id &&
-          Math.abs(entry.createdTimestamp - Date.now()) < 5000 // Chỉ bắt log trong 5s gần nhất
+          Math.abs(entry.createdTimestamp - Date.now()) < 5000
         );
         if (deleteLog?.executor && deleteLog.executor.id !== client.user.id) {
           deletedBy = getUserIdentifier(deleteLog.executor);
         }
-      } catch (e) {
-        // Bỏ qua nếu bot thiếu quyền View Audit Log
-      }
+      } catch (e) {}
     })());
 
-    // Ép Bot đợi cả tác vụ A và B xong xuôi rồi mới đi tiếp
+    // Đợi cả 2 tác vụ chạy xong song song
     await Promise.all(tasks);
 
-    // Nếu phát hiện người xóa khác tác giả (Bị Admin/Mod xóa)
     if (deletedBy) {
       embed.addFields({ name: '🗑️ Deleted by', value: deletedBy, inline: false });
     }
 
-    // 4. GỬI LOG VÀ HÌNH ẢNH LÊN KÊNH
+    // 4. GỬI LOG KÈM FILE ẢNH VẬT LÝ VỪA TẢI VỀ
     await sendLog(embed, logFiles.length > 0 ? { files: logFiles } : {});
 
   } catch (err) {
