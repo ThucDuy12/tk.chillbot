@@ -9,7 +9,24 @@ savePendingUsersSheet } = require('./googleSheets');
 const { createCanvas, loadImage, GlobalFonts } = require('canvas');
 const fetch = require('node-fetch'); // Thêm nếu chưa có
 const nodeFetch = require('node-fetch');
+
+const https = require('https');
 const deletedImageCache = new Map();
+
+// Cỗ máy tải file vật lý bằng HTTPS chuẩn của Node.js (Chống mọi lỗi thư viện)
+function downloadBuffer(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      if (res.statusCode === 200) {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+      } else {
+        reject(new Error(`Mã lỗi: ${res.statusCode}`));
+      }
+    }).on('error', reject);
+  });
+}
 
 const {
   Client,
@@ -239,6 +256,8 @@ let isLeaderboardLoaded = false;
 const ANNOUNCEMENTS_FILE = path.join(__dirname, 'scheduled_announcements.json');
 let scheduledAnnouncements = fs.existsSync(ANNOUNCEMENTS_FILE) ? JSON.parse(fs.readFileSync(ANNOUNCEMENTS_FILE, 'utf8')) : [];
 const pendingAnnouncements = new Map(); // Bộ nhớ tạm để lưu tin nhắn chờ user bấm nút Okay/Reject
+
+
 
 let reactionRoleData = fs.existsSync(REACTION_ROLES_FILE) 
   ? JSON.parse(fs.readFileSync(REACTION_ROLES_FILE, 'utf8')) 
@@ -3401,18 +3420,14 @@ client.on('interactionCreate', async (interaction) => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  // 📥 HỆ THỐNG LƯU TRƯỚC ẢNH VÀO RAM (DÙNG NODEFETCH CHUẨN)
+  // 📥 LƯU TRƯỚC ẢNH VÀO RAM BẰNG HTTPS MẶC ĐỊNH
   if (message.attachments?.size > 0) {
     (async () => {
       const cachedFiles = [];
       for (const [id, attachment] of message.attachments) {
         try {
-          // Dùng nodeFetch thay vì safeFetch hay fetch
-          const response = await nodeFetch(attachment.url, { timeout: 5000 });
-          if (response.ok) {
-            const buffer = typeof response.buffer === 'function' ? await response.buffer() : Buffer.from(await response.arrayBuffer());
-            cachedFiles.push({ buffer, name: attachment.name });
-          }
+          const buffer = await downloadBuffer(attachment.url);
+          cachedFiles.push({ buffer, name: attachment.name });
         } catch (e) {
           console.error('[Cache-Create] Lỗi tải trước ảnh:', e.message);
         }
@@ -3420,6 +3435,7 @@ client.on('messageCreate', async (message) => {
       
       if (cachedFiles.length > 0) {
         deletedImageCache.set(message.id, cachedFiles);
+        // Tự động xóa khỏi RAM sau 15 phút nếu không ai xóa tin nhắn
         setTimeout(() => deletedImageCache.delete(message.id), 15 * 60 * 1000);
       }
     })();
@@ -4904,7 +4920,7 @@ client.on('messageDelete', async (message) => {
 
     if (message.partial) {
       const embed = createLogEmbed('🗑️ Message Deleted (Uncached)',
-        `**Channel:** <#${message.channelId}>\n**Message ID:** ${message.id}\n\n⚠️ **Lưu ý:** Tin nhắn này quá cũ, gửi từ trước khi bot khởi động nên bot chưa kịp lưu hình ảnh.`,
+        `**Channel:** <#${message.channelId}>\n**Message ID:** ${message.id}\n\n⚠️ **Lưu ý:** Tin nhắn này cũ, gửi trước khi bot khởi động nên không có dữ liệu hình ảnh.`,
         0xe67e22
       );
       await sendLog(embed);
@@ -4924,7 +4940,7 @@ client.on('messageDelete', async (message) => {
     const logFiles = [];
     const tasks = [];
 
-    // RÚT ẢNH TỪ RAM RA GỬI (NẾU CÓ)
+    // RÚT ẢNH TỪ RAM RA GỬI
     const cachedFiles = deletedImageCache.get(message.id);
     
     if (cachedFiles) {
@@ -4933,16 +4949,13 @@ client.on('messageDelete', async (message) => {
       }
       deletedImageCache.delete(message.id);
     } else if (message.attachments?.size > 0) {
-      // Phương án cào vớt nếu ảnh chưa lưu vào RAM
+      // Nếu không có trong RAM, thử vớt bằng HTTPS
       for (const [id, attachment] of message.attachments) {
         tasks.push((async () => {
           try {
             const targetUrl = attachment.proxyURL || attachment.url;
-            const response = await nodeFetch(targetUrl, { timeout: 3000 });
-            if (response.ok) {
-              const buffer = typeof response.buffer === 'function' ? await response.buffer() : Buffer.from(await response.arrayBuffer());
-              logFiles.push(new AttachmentBuilder(buffer, { name: `deleted_${attachment.name || 'image.png'}` }));
-            }
+            const buffer = await downloadBuffer(targetUrl);
+            logFiles.push(new AttachmentBuilder(buffer, { name: `deleted_${attachment.name || 'image.png'}` }));
           } catch (e) {}
         })());
       }
