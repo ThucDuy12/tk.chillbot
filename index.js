@@ -2390,7 +2390,7 @@ async function setupACDMStream() {
   };
 
   // Các Event trả ra từ hệ thống VCLvACC
-  es.addEventListener('pilot:sync', handleData); // THÊM DÒNG NÀY ĐỂ NHẬN LIST TỔNG
+  es.addEventListener('pilot:sync', handleData);
   es.addEventListener('pilot:update', handleData);
   es.addEventListener('pilot:create', handleData);
   
@@ -2408,8 +2408,20 @@ async function setupACDMStream() {
      }
   });
 
+  // ==========================================
+  // ĐÃ SỬA: CƠ CHẾ AUTO-RECONNECT KHI RỚT MẠNG
+  // ==========================================
   es.onerror = (err) => {
-    console.error('🔴 [ACDM] Bị ngắt luồng (Hệ thống sẽ tự động thử kết nối lại)');
+    console.error('🔴 [ACDM] Bị ngắt kết nối với máy chủ API!');
+    
+    // 1. Bắt buộc đóng hẳn luồng bị hỏng để tránh kẹt rác bộ nhớ
+    es.close(); 
+    
+    // 2. Hẹn giờ 15 giây sau tự động gọi lại hàm này để kết nối lại từ đầu
+    console.log('⏳ [ACDM] Đang thử kết nối lại sau 15 giây...');
+    setTimeout(() => {
+        setupACDMStream();
+    }, 15000);
   };
 }
 
@@ -5914,15 +5926,13 @@ client.login(TOKEN);
 // === WEB SERVER & PING CHÉO ===
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
-    // Mỗi khi Bot 2 ping vào đây, nó sẽ trả lời để báo "Tao còn sống"
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Bot 1 is alive!');
 }).listen(port, () => {
     console.log(`HTTP server running on port ${port}`);
 });
 
-// Code đi Ping Bot 2
-const BOT2_URL = process.env.BOT2_URL; // Link Render của Bot 2
+const BOT2_URL = process.env.BOT2_URL; 
 
 if (BOT2_URL) {
     setInterval(async () => {
@@ -5932,7 +5942,7 @@ if (BOT2_URL) {
         } catch (error) {
             console.error(`[Ping Chéo] Lỗi khi chọc Bot 2:`, error.message);
         }
-    }, 14 * 60 * 1000); // 14 phút ping 1 lần (Render ngủ sau 15p)
+    }, 14 * 60 * 1000);
 } else {
     console.log("⚠️ Chưa cài BOT2_URL, tính năng Ping chéo đang tắt.");
 }
