@@ -3395,21 +3395,26 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 
-// Khai báo biến này ở TRÊN CÙNG hoặc ngay sát trên client.on('messageCreate') nhé ba
+// Khai báo biến này ở TRÊN CÙNG hoặc ngay sát trên client.on('messageCreate')
 const deletedImageCache = new Map(); 
 
 // ===================== MESSAGE CREATE =====================
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  // 📥 HỆ THỐNG GHI TRƯỚC ẢNH VÀO RAM PHÒNG HỜ BỊ XÓA (Bắt bài Discord)
+  // 📥 HỆ THỐNG GHI TRƯỚC ẢNH VÀO RAM PHÒNG HỜ BỊ XÓA (Đã vá lỗi Fetch)
   if (message.attachments?.size > 0) {
     (async () => {
       const cachedFiles = [];
+      
+      // Gọi thư viện fetch linh hoạt (chống crash trên mọi phiên bản Node.js)
+      const safeFetch = typeof fetch !== 'undefined' ? fetch : (...args) => import('node-fetch').then(({default: f}) => f(...args));
+
       for (const [id, attachment] of message.attachments) {
         try {
-          const response = await fetch(attachment.url, { timeout: 5000 });
+          const response = await safeFetch(attachment.url, { timeout: 5000 });
           if (response.ok) {
+            // Tương thích với cả node-fetch v2 lẫn v3
             const buffer = typeof response.buffer === 'function' ? await response.buffer() : Buffer.from(await response.arrayBuffer());
             cachedFiles.push({ buffer, name: attachment.name });
           }
@@ -3417,9 +3422,10 @@ client.on('messageCreate', async (message) => {
           console.error('[Cache-Create] Lỗi tải trước ảnh:', e.message);
         }
       }
+      
       if (cachedFiles.length > 0) {
         deletedImageCache.set(message.id, cachedFiles);
-        // Tự động xóa khỏi RAM sau 15 phút nếu không có ai xóa tin nhắn để tránh tràn bộ nhớ
+        // Tự động xóa khỏi RAM sau 15 phút nếu không ai xóa tin nhắn
         setTimeout(() => deletedImageCache.delete(message.id), 15 * 60 * 1000);
       }
     })();
