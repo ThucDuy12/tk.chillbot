@@ -8,6 +8,7 @@ const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
 const CONTROLLER_SHEET_PREFIX = 'ATC_';
 const PILOT_SHEET_PREFIX = 'PILOT_';
 const PENDING_USERS_SHEET_NAME = 'PendingUsers'; // Tên sheet cho Pending Users
+const SIMBRIEF_USERS_SHEET_NAME = 'SimbriefUsers';
 
 let sheetsClient = null;
 
@@ -442,6 +443,117 @@ async function loadPendingUsersSheet() {
   return data;
 }
 
+// ========== TẠO SHEET SIMBRIEF USERS ==========
+async function createSimbriefUsersSheet() {
+  const exists = await sheetExists(SIMBRIEF_USERS_SHEET_NAME);
+  if (exists) return SIMBRIEF_USERS_SHEET_NAME;
+
+  const sheets = await initGoogleSheets();
+  const headers = ['DiscordId', 'SimbriefUsername'];
+
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: SIMBRIEF_USERS_SHEET_NAME } } }],
+      },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${SIMBRIEF_USERS_SHEET_NAME}!A1:B1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [headers] },
+    });
+    console.log(`✅ Created sheet: ${SIMBRIEF_USERS_SHEET_NAME}`);
+    return SIMBRIEF_USERS_SHEET_NAME;
+  } catch (err) {
+    console.error('Error creating SimbriefUsers sheet:', err);
+    throw err;
+  }
+}
+
+// ========== LƯU DỮ LIỆU SIMBRIEF USERS ==========
+async function saveSimbriefUsersSheet(data) {
+  const sheets = await initGoogleSheets();
+
+  const sheetExistsFlag = await sheetExists(SIMBRIEF_USERS_SHEET_NAME);
+  if (!sheetExistsFlag) {
+    await createSimbriefUsersSheet();
+  }
+
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+    fields: 'sheets.properties',
+  });
+  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === SIMBRIEF_USERS_SHEET_NAME);
+  if (!sheet) throw new Error(`Sheet ${SIMBRIEF_USERS_SHEET_NAME} not found`);
+  const sheetId = sheet.properties.sheetId;
+
+  // Xóa dữ liệu cũ
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [
+        {
+          deleteRange: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
+              endRowIndex: 5000,
+              startColumnIndex: 0,
+              endColumnIndex: 2,
+            },
+            shiftDimension: 'ROWS',
+          },
+        },
+      ],
+    },
+  });
+
+  const rows = [];
+  for (const [discordId, username] of Object.entries(data)) {
+    rows.push([discordId, username]);
+  }
+
+  if (rows.length === 0) return;
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SIMBRIEF_USERS_SHEET_NAME}!A2`,
+    valueInputOption: 'RAW',
+    requestBody: { values: rows },
+  });
+
+  console.log(`✅ Saved ${rows.length} Simbrief users to sheet ${SIMBRIEF_USERS_SHEET_NAME}`);
+}
+
+// ========== ĐỌC DỮ LIỆU SIMBRIEF USERS ==========
+async function loadSimbriefUsersSheet() {
+  const exists = await sheetExists(SIMBRIEF_USERS_SHEET_NAME);
+  if (!exists) {
+    console.log('⚠️ Sheet SimbriefUsers chưa tồn tại, đang tiến hành tạo mới...');
+    await createSimbriefUsersSheet();
+    return {};
+  }
+
+  const sheets = await initGoogleSheets();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${SIMBRIEF_USERS_SHEET_NAME}!A2:B`,
+  });
+  
+  const rows = response.data.values || [];
+  const data = {};
+
+  for (const row of rows) {
+    const [discordId, username] = row;
+    if (discordId && username) {
+      data[discordId] = username;
+    }
+  }
+  return data;
+}
+
 // ========== EXPORTS ==========
 module.exports = {
   initGoogleSheets,
@@ -453,5 +565,7 @@ module.exports = {
   createPilotSheet,
   sheetExists,
   loadPendingUsersSheet, // Đã thêm
-  savePendingUsersSheet  // Đã thêm
+  savePendingUsersSheet,  // Đã thêm
+  loadSimbriefUsersSheet,
+  saveSimbriefUsersSheet
 };
