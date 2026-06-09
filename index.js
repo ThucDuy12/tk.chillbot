@@ -6077,12 +6077,12 @@ async function handleNotam(interaction) {
   await interaction.deferReply();
 
   if (!CHECKWX_API_KEY) {
-    return interaction.editReply({ content: '❌ Thiếu cấu hình CHECKWX_API_KEY. Admin cần kiểm tra lại!' });
+    return interaction.editReply({ content: '❌ Thiếu cấu hình CHECKWX_API_KEY trong biến môi trường. Admin cần kiểm tra lại!' });
   }
 
   try {
     const fetch = (await import('node-fetch')).default;
-    // Tận dụng API của CheckWX để kéo NOTAM
+    // [ĐÃ SỬA LỖI 404 TẠI ĐÂY] Endpoint đúng là notam, không phải notams
     const response = await fetch(`https://api.checkwx.com/notam/${icao}`, {
       headers: { 'X-API-Key': CHECKWX_API_KEY }
     });
@@ -6093,9 +6093,8 @@ async function handleNotam(interaction) {
 
     const data = await response.json();
 
-    // Xử lý nếu sân bay không có NOTAM nào
     if (!data || data.results === 0 || !data.data || data.data.length === 0) {
-      return await interaction.editReply({ content: `✅ Tuyệt vời! Hiện tại không có NOTAM (cảnh báo) nào được ban hành cho sân bay **${icao}**.` });
+      return await interaction.editReply({ content: `✅ Hiện tại không có NOTAM (thông báo hàng không) nào được ban hành cho sân bay **${icao}**.` });
     }
 
     const embed = new EmbedBuilder()
@@ -6104,13 +6103,13 @@ async function handleNotam(interaction) {
       .setTimestamp()
       .setFooter({ text: 'Powered by CheckWX API' });
 
-    // Một sân bay có thể có vài chục NOTAM, mình lấy 5 cái mới/quan trọng nhất để tránh trôi chat
+    // Một sân bay có thể có rất nhiều NOTAM, chỉ hiển thị 5 cái mới/quan trọng nhất
     const MAX_NOTAMS = Math.min(data.data.length, 5);
     for (let i = 0; i < MAX_NOTAMS; i++) {
-      // Dùng decoded nếu có, không thì lấy raw_text
+      // Ưu tiên dùng dữ liệu decoded, nếu không thì lấy raw_text
       const notamText = data.data[i].decoded || data.data[i].raw_text || 'Không có nội dung';
       
-      // Chống lỗi giới hạn 1024 ký tự của Discord
+      // Xử lý nếu một NOTAM quá dài (chống lỗi giới hạn 1024 ký tự của Discord)
       const safeText = notamText.length > 1000 ? notamText.slice(0, 1000) + '...' : notamText;
       
       embed.addFields({ 
@@ -6132,7 +6131,7 @@ async function handleNotam(interaction) {
 
   } catch (error) {
     console.error('NOTAM fetch error:', error);
-    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu NOTAM. Vui lòng thử lại sau.' });
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu NOTAM. Vui lòng thử lại sau!' });
   }
 }
 
@@ -6143,7 +6142,7 @@ async function handleSimbrief(interaction) {
 
   try {
     const fetch = (await import('node-fetch')).default;
-    // API miễn phí của SimBrief (Thêm &json=1 để lấy dữ liệu chuẩn JSON)
+    // API SimBrief trả về dữ liệu chuẩn JSON khi thêm &json=1
     const response = await fetch(`https://www.simbrief.com/api/xml.fetcher.php?username=${encodeURIComponent(username)}&json=1`);
 
     if (!response.ok) {
@@ -6152,14 +6151,14 @@ async function handleSimbrief(interaction) {
 
     const data = await response.json();
 
-    // [ĐÃ SỬA LỖI TẠI ĐÂY] Đổi từ data.fetch_status thành data.fetch
+    // [ĐÃ SỬA LỖI TẠI ĐÂY] Sửa fetch_status thành fetch
     if (data.fetch?.status !== 'Success') {
       return await interaction.editReply({ 
-        content: `❌ **Lỗi:** Không tìm thấy kế hoạch bay nào của \`${username}\`.\n⚠️ *Mẹo: Nếu nhập tên không được, hãy thử nhập **Pilot ID** (các con số) của bạn trên SimBrief nhé!*` 
+        content: `❌ **Lỗi:** Không tìm thấy kế hoạch bay nào của \`${username}\`.\n⚠️ *Lưu ý: Bạn phải nhấn nút "Generate Flight" trên web SimBrief trước thì bot mới đọc được nhé!*` 
       });
     }
 
-    // Bóc tách dữ liệu JSON từ SimBrief
+    // Bóc tách dữ liệu
     const dep = data.origin?.icao_code || 'N/A';
     const arr = data.destination?.icao_code || 'N/A';
     const acft = data.aircraft?.icaocode || 'N/A';
@@ -6167,7 +6166,7 @@ async function handleSimbrief(interaction) {
     const fltNum = data.general?.flight_number || '';
     const callsign = airline + fltNum;
     
-    // Xử lý Cruise Alt (Bỏ chữ FL thừa nếu có)
+    // Xử lý Cruise Alt
     let crzAlt = data.general?.initial_alt || 'N/A';
     if (!crzAlt.startsWith('FL') && !isNaN(crzAlt)) {
       crzAlt = `FL${crzAlt.substring(0, 3)}`; // Convert "35000" thành "FL350"
@@ -6178,7 +6177,6 @@ async function handleSimbrief(interaction) {
     const blockFuel = data.fuel?.plan_ramp || 0;
     const ci = data.general?.costindex || 'AUTO';
 
-    // Xây dựng bảng hiển thị
     const embed = new EmbedBuilder()
       .setTitle(`✈️ Kế Hoạch Bay (OFP) - ${username}`)
       .setDescription(`**${dep} ➔ ${arr}** | Callsign: **${callsign || 'N/A'}**`)
@@ -6198,7 +6196,7 @@ async function handleSimbrief(interaction) {
 
   } catch (error) {
     console.error('SimBrief fetch error:', error);
-    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra. Có thể Username không tồn tại hoặc API của SimBrief đang bị sập.' });
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra. Username không tồn tại hoặc API SimBrief bị sập.' });
   }
 }
 
