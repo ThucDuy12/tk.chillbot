@@ -130,19 +130,6 @@ async function savePendingUsers() {
   }
 }
 
-// --- KÉO DATA SIMBRIEF TỪ SHEET ---
-  try {
-    if (typeof loadSimbriefUsersSheet === 'function') {
-      const data = await loadSimbriefUsersSheet();
-      if (data) {
-        simbriefUsersData = data;
-        console.log(`✅ Đã tải thành công ${Object.keys(simbriefUsersData).length} Simbrief Users từ Google Sheets.`);
-      }
-    }
-  } catch (error) {
-    console.error('❌ Lỗi kéo dữ liệu Simbrief Users:', error);
-  }
-  // ---------------------------------------------------
 
 // Bộ nhớ tạm để lưu ảnh khi user mở Form (Modal)
 const userSellImages = new Map();
@@ -2953,6 +2940,19 @@ client.once('ready', async () => {
     }
   } catch (error) {
     console.error('❌ Lỗi kéo dữ liệu Pending Users:', error);
+  }
+  // ---------------------------------------------------
+  // --- KÉO DATA SIMBRIEF TỪ SHEET ---
+  try {
+    if (typeof loadSimbriefUsersSheet === 'function') {
+      const data = await loadSimbriefUsersSheet();
+      if (data) {
+        simbriefUsersData = data;
+        console.log(`✅ Đã tải thành công ${Object.keys(simbriefUsersData).length} Simbrief Users từ Google Sheets.`);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Lỗi kéo dữ liệu Simbrief Users:', error);
   }
   // ---------------------------------------------------
 
