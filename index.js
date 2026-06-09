@@ -2898,6 +2898,15 @@ client.once('ready', async () => {
       .addAttachmentOption(option => option.setName('anh2').setDescription('Ảnh phụ 1').setRequired(false))
       .addAttachmentOption(option => option.setName('anh3').setDescription('Ảnh phụ 2').setRequired(false))
       .addAttachmentOption(option => option.setName('anh4').setDescription('Ảnh phụ 3').setRequired(false)),
+    new SlashCommandBuilder()
+      .setName('notam')
+      .setDescription('Tra cứu thông báo hàng không (NOTAM) của sân bay')
+      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+      
+    new SlashCommandBuilder()
+      .setName('simbrief')
+      .setDescription('Tóm tắt kế hoạch bay (OFP)')
+      .addStringOption((option) => option.setName('username').setDescription('Tên tài khoản SimBrief của bạn').setRequired(true)),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3252,6 +3261,12 @@ client.on('interactionCreate', async (interaction) => {
           break;
         case 'vatsea_rank':
           await handleVatseaRankCommand(interaction);
+          break;
+        case 'notam':
+          await handleNotam(interaction);
+          break;
+        case 'simbrief':
+          await handleSimbrief(interaction);
           break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
@@ -6053,6 +6068,137 @@ async function handleVatseaRankCommand(interaction) {
     await interaction.editReply({ content: '✅ Đã cập nhật thành công bảng xếp hạng VATSEA!', embeds: [embed] });
   } catch (error) {
     await interaction.editReply({ content: `❌ Đã xảy ra lỗi khi tạo bảng xếp hạng VATSEA: ${error.message}` });
+  }
+}
+
+// ===================== COMMAND: NOTAM =====================
+async function handleNotam(interaction) {
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply();
+
+  if (!CHECKWX_API_KEY) {
+    return interaction.editReply({ content: '❌ Thiếu cấu hình CHECKWX_API_KEY. Admin cần kiểm tra lại!' });
+  }
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // Tận dụng API của CheckWX để kéo NOTAM
+    const response = await fetch(`https://api.checkwx.com/notam/${icao}`, {
+      headers: { 'X-API-Key': CHECKWX_API_KEY }
+    });
+
+    if (!response.ok) {
+      return await interaction.editReply({ content: `❌ Lỗi kết nối đến máy chủ CheckWX (Mã lỗi: ${response.status}).` });
+    }
+
+    const data = await response.json();
+
+    // Xử lý nếu sân bay không có NOTAM nào
+    if (!data || data.results === 0 || !data.data || data.data.length === 0) {
+      return await interaction.editReply({ content: `✅ Tuyệt vời! Hiện tại không có NOTAM (cảnh báo) nào được ban hành cho sân bay **${icao}**.` });
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle(`⚠️ Thông Báo Hàng Không (NOTAM) - ${icao}`)
+      .setColor(0xe74c3c)
+      .setTimestamp()
+      .setFooter({ text: 'Powered by CheckWX API' });
+
+    // Một sân bay có thể có vài chục NOTAM, mình lấy 5 cái mới/quan trọng nhất để tránh trôi chat
+    const MAX_NOTAMS = Math.min(data.data.length, 5);
+    for (let i = 0; i < MAX_NOTAMS; i++) {
+      // Dùng decoded nếu có, không thì lấy raw_text
+      const notamText = data.data[i].decoded || data.data[i].raw_text || 'Không có nội dung';
+      
+      // Chống lỗi giới hạn 1024 ký tự của Discord
+      const safeText = notamText.length > 1000 ? notamText.slice(0, 1000) + '...' : notamText;
+      
+      embed.addFields({ 
+        name: `📌 NOTAM #${i + 1}`, 
+        value: `\`\`\`\n${safeText}\n\`\`\``, 
+        inline: false 
+      });
+    }
+
+    if (data.data.length > MAX_NOTAMS) {
+      embed.addFields({ 
+        name: '...', 
+        value: `*Còn ${data.data.length - MAX_NOTAMS} thông báo khác bị ẩn đi để tránh quá tải tin nhắn.*`, 
+        inline: false 
+      });
+    }
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (error) {
+    console.error('NOTAM fetch error:', error);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu NOTAM. Vui lòng thử lại sau.' });
+  }
+}
+
+// ===================== COMMAND: SIMBRIEF FETCHER =====================
+async function handleSimbrief(interaction) {
+  const username = interaction.options.getString('username');
+  await interaction.deferReply();
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // API miễn phí của SimBrief (Thêm &json=1 để lấy dữ liệu chuẩn JSON)
+    const response = await fetch(`https://www.simbrief.com/api/xml.fetcher.php?username=${encodeURIComponent(username)}&json=1`);
+
+    if (!response.ok) {
+      return await interaction.editReply({ content: '❌ Không thể kết nối đến máy chủ SimBrief.' });
+    }
+
+    const data = await response.json();
+
+    // Check xem user đã Generate Flight chưa hay nhập sai tên
+    if (data.fetch_status?.status !== 'Success') {
+      return await interaction.editReply({ 
+        content: `❌ **Lỗi:** Không tìm thấy kế hoạch bay nào của \`${username}\`.\n⚠️ *Lưu ý: Bạn phải nhấn nút "Generate Flight" trên web SimBrief trước thì bot mới đọc được nhé!*` 
+      });
+    }
+
+    // Bóc tách dữ liệu JSON từ SimBrief
+    const dep = data.origin?.icao_code || 'N/A';
+    const arr = data.destination?.icao_code || 'N/A';
+    const acft = data.aircraft?.icaocode || 'N/A';
+    const airline = data.general?.icao_airline || '';
+    const fltNum = data.general?.flight_number || '';
+    const callsign = airline + fltNum;
+    
+    // Xử lý Cruise Alt (Bỏ chữ FL thừa nếu có)
+    let crzAlt = data.general?.initial_alt || 'N/A';
+    if (!crzAlt.startsWith('FL') && !isNaN(crzAlt)) {
+      crzAlt = `FL${crzAlt.substring(0, 3)}`; // Convert "35000" thành "FL350"
+    }
+
+    const route = data.general?.route || 'N/A';
+    const zfw = data.weights?.est_zfw || 0;
+    const blockFuel = data.fuel?.plan_ramp || 0;
+    const ci = data.general?.costindex || 'AUTO';
+
+    // Xây dựng bảng hiển thị
+    const embed = new EmbedBuilder()
+      .setTitle(`✈️ Kế Hoạch Bay (OFP) - ${username}`)
+      .setDescription(`**${dep} ➔ ${arr}** | Callsign: **${callsign || 'N/A'}**`)
+      .setColor(0x3498db)
+      .addFields(
+        { name: '🛩️ Aircraft', value: `**${acft}**`, inline: true },
+        { name: '🛫 Cruise Alt', value: `**${crzAlt}**`, inline: true },
+        { name: '📈 Cost Index', value: `**${ci}**`, inline: true },
+        { name: '⚖️ ZFW', value: `**${zfw}** kgs`, inline: true },
+        { name: '⛽ Block Fuel', value: `**${blockFuel}** kgs`, inline: true },
+        { name: '🧭 Route', value: `\`\`\`\n${route}\n\`\`\``, inline: false }
+      )
+      .setFooter({ text: 'Dữ liệu trực tiếp từ SimBrief', iconURL: 'https://www.simbrief.com/logo/simbrief_logo_icon.png' })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (error) {
+    console.error('SimBrief fetch error:', error);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra. Có thể Username không tồn tại hoặc API của SimBrief đang bị sập.' });
   }
 }
 
