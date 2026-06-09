@@ -80,6 +80,11 @@ const GEMINI_MAX_USER_TEXT_CHARS = parseInt(process.env.GEMINI_MAX_USER_TEXT_CHA
 // Thay ID channel này bằng ID channel Dashboard ACDM của bạn
 const ACDM_CHANNEL_ID = process.env.ACDM_CHANNEL_ID || '1503763584105058434'; 
 
+// Thay bằng ID thực tế của 3 kênh bạn vừa tạo
+const STATS_TOTAL_ID = process.env.STATS_TOTAL_ID || '1513738193986388140';
+const STATS_HUMAN_ID = process.env.STATS_HUMAN_ID || '1513738397938618508';
+const STATS_BOT_ID = process.env.STATS_BOT_ID || '1513738533188272218';
+
 // ===================== VATSEA CONFIG =====================
 const STATSIM_API_KEY = process.env.STATSIM_API_KEY || '564eNsuJE8wTQw1hAZKGwHicOyVbmucoe3tZujdd';
 const VATSEA_CHANNEL_ID = process.env.VATSEA_CHANNEL_ID || '1478382913455259781';
@@ -1648,6 +1653,41 @@ function parseMarketplaceDataFromEmbed(embed) {
 }
 
 // ===================== HELPERS =====================
+// ===================== THỐNG KÊ SERVER (HOUSE STATS) =====================
+async function updateServerStats(client) {
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
+    if (!guild) return;
+
+    // Phải fetch toàn bộ member thì đếm mới chính xác 100%
+    await guild.members.fetch(); 
+
+    // Tính toán số lượng
+    const totalMembers = guild.memberCount;
+    const botCount = guild.members.cache.filter(m => m.user.bot).size;
+    const humanCount = totalMembers - botCount;
+
+    // Lấy object của 3 kênh
+    const totalChannel = guild.channels.cache.get(STATS_TOTAL_ID);
+    const humanChannel = guild.channels.cache.get(STATS_HUMAN_ID);
+    const botChannel = guild.channels.cache.get(STATS_BOT_ID);
+
+    // Tiến hành đổi tên kênh (Chỉ đổi khi số lượng có sự khác biệt để né Rate Limit)
+    if (totalChannel && totalChannel.name !== `👥 Tất Cả: ${totalMembers}`) {
+      await totalChannel.setName(`👥 Tất Cả: ${totalMembers}`);
+    }
+    if (humanChannel && humanChannel.name !== `🗣️ Thành Viên: ${humanCount}`) {
+      await humanChannel.setName(`🗣️ Thành Viên: ${humanCount}`);
+    }
+    if (botChannel && botChannel.name !== `🤖 Bot Ngáo: ${botCount}`) {
+      await botChannel.setName(`🤖 Bot Ngáo: ${botCount}`);
+    }
+
+    console.log(`[Stats] Đã cập nhật thống kê: ${totalMembers} Tổng | ${humanCount} Người | ${botCount} Bot`);
+  } catch (err) {
+    console.error('[Stats] Lỗi khi cập nhật thống kê Server:', err.message);
+  }
+}
 // Hàm hỗ trợ: Quét lịch sử kênh để tìm lại tin nhắn cũ do bot gửi dựa vào tiêu đề
 async function findOldMessageByTitle(channelId, titleSubstring) {
   try {
@@ -3011,6 +3051,14 @@ client.once('ready', async () => {
   
   // Thêm dòng này để bật kết nối lấy dữ liệu ACDM liên tục
   await setupACDMStream();
+
+  // Kích hoạt cập nhật House Stats lần đầu khi bot vừa online
+  setTimeout(() => updateServerStats(client), 5000); // Chờ 5s cho bot load xong dữ liệu
+
+  // Cài đặt vòng lặp tự động cập nhật mỗi 15 phút (An toàn với Discord API)
+  setInterval(() => {
+    updateServerStats(client);
+  }, 15 * 60 * 1000);
 
   // ==========================================
   // CẬP NHẬT VATSEA ATC LEADERBOARD
