@@ -110,7 +110,6 @@ const EXCLUDED_IDS = new Set(['M', 'I', 'X', 'Y', 'Z']);
 const MARKETPLACE_CHANNEL_ID = process.env.MARKETPLACE_CHANNEL_ID || '1461357458252365984';
 const ADMIN_CHANNEL_ID = process.env.ADMIN_CHANNEL_ID || '1448258683627638895';
 
-let pendingUsersData = {};
 let simbriefUsersData = {};
 
 // ===================== PENDING USERS DATA =====================
