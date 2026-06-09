@@ -2649,60 +2649,69 @@ async function updateACDMDashboard() {
   }
 }
 
-// ===================== AUTO-SCAN PENDING ROLE =====================
+// ===================== AUTO-SCAN PENDING ROLE (ĐÃ FIX RATE LIMIT) =====================
 async function scanAndAssignPendingRole() {
   if (!roles.pendingRoleId) return;
   
   try {
     const guild = await client.guilds.fetch(GUILD_ID);
-    await guild.members.fetch();
+    
+    // 1. Tải danh sách thành viên một cách an toàn
+    try {
+      await guild.members.fetch();
+    } catch (fetchErr) {
+      console.warn(`⚠️ [Auto-Role] Discord tạm chặn tải danh sách (Rate Limit). Bot sẽ dùng dữ liệu cũ trong bộ nhớ để quét tiếp...`);
+    }
     
     let assignedCount = 0;
     
-    guild.members.cache.forEach(async (member) => {
-      if (member.user.bot) return; 
-      if (roles.banRoleId && member.roles.cache.has(roles.banRoleId)) return;
+    // 2. Dùng for...of thay vì forEach để kiểm soát tốc độ (Tránh spam API)
+    for (const [memberId, member] of guild.members.cache) {
+      if (member.user.bot) continue; 
+      if (roles.banRoleId && member.roles.cache.has(roles.banRoleId)) continue;
       
-      // Nếu member đã có role Pending nhưng chưa có trong file JSON thì thêm vào (tính từ thời điểm quét)
+      // Kiểm tra user đã có role Pending nhưng chưa có trong file JSON
       if (member.roles.cache.has(roles.pendingRoleId)) {
-        // Thay đoạn cũ bằng đoạn này:
         if (!pendingUsersData[member.id]) {
             pendingUsersData[member.id] = {
-                // Lấy ngày join thật từ Discord, nếu không có thì mới dùng Date.now()
                 joinDate: member.joinedTimestamp || Date.now(), 
                 notified5Days: false,
                 notified7Days: false
             };
             savePendingUsers();
         }
-        return;
+        continue; // Bỏ qua người này, chuyển sang người tiếp theo
       }
 
+      // Nếu user chỉ có 1 role duy nhất (là role @everyone mặc định)
       if (member.roles.cache.size === 1) {
         try {
           await member.roles.add(roles.pendingRoleId);
           
-          // Thay thế bằng cục này ở cả 3 chỗ nhé
           pendingUsersData[member.id] = {
             joinDate: member.joinedTimestamp || Date.now(), 
             notified5Days: false,
-            notified7Days: false // Đổi tên cho đồng bộ
+            notified7Days: false 
           };
           savePendingUsers();
 
           assignedCount++;
           console.log(`[Auto-Role] Đã cấp role Welcome/Pending cho ${member.user.tag}`);
+          
+          // 3. NGHỈ 1.5 GIÂY GIỮA MỖI LẦN CẤP ROLE ĐỂ CHỐNG SPAM API
+          await new Promise(resolve => setTimeout(resolve, 1500));
+
         } catch (e) {
           console.error(`Không thể cấp role cho ${member.user.tag}:`, e.message);
         }
       }
-    });
+    }
     
     if (assignedCount > 0) {
       console.log(`✅ [Auto-Role] Hoàn tất quét! Đã cấp role cho ${assignedCount} người dùng vô gia cư.`);
     }
   } catch (err) {
-    console.error('❌ Lỗi khi chạy auto-scan role:', err);
+    console.error('❌ Lỗi hệ thống khi chạy auto-scan role:', err.message);
   }
 }
 
