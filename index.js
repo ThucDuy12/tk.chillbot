@@ -4,8 +4,13 @@ const path = require('path');
 const http = require('http');
 const { Worker } = require('worker_threads');
 const cheerio = require('cheerio');
-const { initGoogleSheets, loadControllerLeaderboard, loadPilotLeaderboard, saveControllerLeaderboard, savePilotLeaderboard, loadPendingUsersSheet,   // <-- THÊM CÁI NÀY
-savePendingUsersSheet } = require('./googleSheets');
+const { 
+  initGoogleSheets, loadControllerLeaderboard, loadPilotLeaderboard, 
+  saveControllerLeaderboard, savePilotLeaderboard, loadPendingUsersSheet, 
+  savePendingUsersSheet, 
+  loadSimbriefUsersSheet,    
+  saveSimbriefUsersSheet     
+} = require('./googleSheets');
 const { createCanvas, loadImage, GlobalFonts } = require('canvas');
 const fetch = require('node-fetch'); // Thêm nếu chưa có
 const nodeFetch = require('node-fetch');
@@ -105,6 +110,9 @@ const EXCLUDED_IDS = new Set(['M', 'I', 'X', 'Y', 'Z']);
 const MARKETPLACE_CHANNEL_ID = process.env.MARKETPLACE_CHANNEL_ID || '1461357458252365984';
 const ADMIN_CHANNEL_ID = process.env.ADMIN_CHANNEL_ID || '1448258683627638895';
 
+let pendingUsersData = {};
+let simbriefUsersData = {};
+
 // ===================== PENDING USERS DATA =====================
 // Khởi tạo biến rỗng, dữ liệu sẽ được kéo từ Sheet về lúc bot ready
 let pendingUsersData = {};
@@ -122,6 +130,20 @@ async function savePendingUsers() {
     console.error('❌ Lỗi đẩy dữ liệu Pending Users lên Google Sheets:', error);
   }
 }
+
+// --- KÉO DATA SIMBRIEF TỪ SHEET ---
+  try {
+    if (typeof loadSimbriefUsersSheet === 'function') {
+      const data = await loadSimbriefUsersSheet();
+      if (data) {
+        simbriefUsersData = data;
+        console.log(`✅ Đã tải thành công ${Object.keys(simbriefUsersData).length} Simbrief Users từ Google Sheets.`);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Lỗi kéo dữ liệu Simbrief Users:', error);
+  }
+  // ---------------------------------------------------
 
 // Bộ nhớ tạm để lưu ảnh khi user mở Form (Modal)
 const userSellImages = new Map();
@@ -2906,7 +2928,7 @@ client.once('ready', async () => {
     new SlashCommandBuilder()
       .setName('simbrief')
       .setDescription('Tóm tắt kế hoạch bay (OFP)')
-      .addStringOption((option) => option.setName('username').setDescription('Tên tài khoản SimBrief của bạn').setRequired(true)),
+      .addStringOption((option) => option.setName('username').setDescription('Tên tài khoản SimBrief (chỉ cần nhập lần đầu)').setRequired(false)),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -6137,8 +6159,31 @@ async function handleNotam(interaction) {
 
 // ===================== COMMAND: SIMBRIEF FETCHER =====================
 async function handleSimbrief(interaction) {
-  const username = interaction.options.getString('username');
+  let username = interaction.options.getString('username');
+  const discordId = interaction.user.id;
+
   await interaction.deferReply();
+
+  // 1. Kiểm tra xem user có nhập username không, nếu không thì lấy từ Google Sheets
+  if (!username) {
+    if (simbriefUsersData[discordId]) {
+      username = simbriefUsersData[discordId];
+    } else {
+      return await interaction.editReply({ 
+        content: '❌ Bạn chưa nhập username SimBrief. Lần đầu tiên sử dụng lệnh, vui lòng gõ tên username để bot ghi nhớ lại nhé!' 
+      });
+    }
+  } else {
+    // 2. Nếu có nhập thủ công, tiến hành cập nhật vào hệ thống lưu trữ
+    if (simbriefUsersData[discordId] !== username) {
+      simbriefUsersData[discordId] = username;
+      try {
+        await saveSimbriefUsersSheet(simbriefUsersData);
+      } catch (err) {
+        console.error('Lỗi khi đẩy Simbrief username lên Sheets:', err);
+      }
+    }
+  }
 
   try {
     const fetch = (await import('node-fetch')).default;
@@ -6151,7 +6196,7 @@ async function handleSimbrief(interaction) {
 
     const data = await response.json();
 
-    // [ĐÃ SỬA LỖI TẠI ĐÂY] Sửa fetch_status thành fetch
+    // Giữ nguyên phần code còn lại của bạn...
     if (data.fetch?.status !== 'Success') {
       return await interaction.editReply({ 
         content: `❌ **Lỗi:** Không tìm thấy kế hoạch bay nào của \`${username}\`.\n⚠️ *Lưu ý: Bạn phải nhấn nút "Generate Flight" trên web SimBrief trước thì bot mới đọc được nhé!*` 
