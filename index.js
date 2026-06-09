@@ -6152,10 +6152,10 @@ async function handleSimbrief(interaction) {
 
     const data = await response.json();
 
-    // Check xem user đã Generate Flight chưa hay nhập sai tên
-    if (data.fetch_status?.status !== 'Success') {
+    // [ĐÃ SỬA LỖI TẠI ĐÂY] Đổi từ data.fetch_status thành data.fetch
+    if (data.fetch?.status !== 'Success') {
       return await interaction.editReply({ 
-        content: `❌ **Lỗi:** Không tìm thấy kế hoạch bay nào của \`${username}\`.\n⚠️ *Lưu ý: Bạn phải nhấn nút "Generate Flight" trên web SimBrief trước thì bot mới đọc được nhé!*` 
+        content: `❌ **Lỗi:** Không tìm thấy kế hoạch bay nào của \`${username}\`.\n⚠️ *Mẹo: Nếu nhập tên không được, hãy thử nhập **Pilot ID** (các con số) của bạn trên SimBrief nhé!*` 
       });
     }
 
