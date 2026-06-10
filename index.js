@@ -1722,6 +1722,28 @@ async function findOldMessageByTitle(channelId, titleSubstring) {
   }
 }
 
+// Helper: Chuyển đổi ngày sang định dạng "25 Tháng 7 2022 (4 năm trước)"
+function formatVatsimDate(dateString) {
+  if (!dateString) return 'N/A';
+  const date = new Date(dateString);
+  const now = new Date();
+  
+  const diffTime = Math.abs(now - date);
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  const diffYears = Math.floor(diffDays / 365);
+
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = date.getMonth() + 1;
+  const year = date.getFullYear();
+
+  let relativeStr = '';
+  if (diffYears > 0) relativeStr = `(${diffYears} năm trước)`;
+  else if (diffDays > 30) relativeStr = `(${Math.floor(diffDays / 30)} tháng trước)`;
+  else relativeStr = `(${diffDays} ngày trước)`;
+
+  return `${day} Tháng ${month} ${year} ${relativeStr}`;
+}
+
 function formatDateTime(date) {
   return `<t:${Math.floor(date.getTime() / 1000)}:F>`;
 }
@@ -2929,6 +2951,10 @@ client.once('ready', async () => {
       .setName('simbrief')
       .setDescription('Tóm tắt kế hoạch bay (OFP)')
       .addStringOption((option) => option.setName('username').setDescription('Tên tài khoản SimBrief (chỉ cần nhập lần đầu)').setRequired(false)),
+    new SlashCommandBuilder()
+      .setName('online_atc')
+      .setDescription('Tra cứu danh sách ATC đang online tại một sân bay')
+      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3302,6 +3328,9 @@ client.on('interactionCreate', async (interaction) => {
           break;
         case 'simbrief':
           await handleSimbrief(interaction);
+          break;
+        case 'online_atc':
+          await handleOnlineAtc(interaction);
           break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
@@ -5641,64 +5670,54 @@ client.on('messageReactionRemove', async (reaction, user) => {
 // ===================== VATSIM STATS & ID CARD FUNCTIONS =====================
 
 /**
- * Helper: Lấy dữ liệu VATSIM Stats qua API (Kết hợp 2 API)
+ * Helper: Lấy dữ liệu VATSIM Stats qua API
  */
 async function fetchVatsimStatsById(cid) {
   try {
     const fetch = (await import('node-fetch')).default;
     
-    // 1. Lấy thông tin cơ bản (Rating, Ngày tham gia) từ public API
+    // 1. Lấy thông tin cơ bản
     const infoUrl = `https://api.vatsim.net/api/ratings/${cid}/`;
     const infoRes = await fetch(infoUrl);
     if (!infoRes.ok) return null; // CID không tồn tại
     const infoData = await infoRes.json();
 
-    // 2. Lấy thống kê giờ bay (Pilot hours, ATC hours) từ Stats API
+    // 2. Lấy thống kê giờ bay & ATC
     const statsUrl = `https://api.vatsim.net/v2/members/${cid}/stats`;
     const statsRes = await fetch(statsUrl);
+    
     let pilotHours = 0;
     let atcHours = 0; 
+    let atcBreakdown = {}; // Chứa chi tiết giờ S1, S2...
     
     if (statsRes.ok) {
       const statsData = await statsRes.json();
       pilotHours = statsData.pilot || 0; 
       atcHours = statsData.atc || 0;     
+      
+      // Lấy chi tiết giờ theo từng cấp bậc ATC
+      atcBreakdown = {
+        s1: statsData.s1 || 0,
+        s2: statsData.s2 || 0,
+        s3: statsData.s3 || 0,
+        c1: statsData.c1 || 0,
+        c3: statsData.c3 || 0,
+        i1: statsData.i1 || 0,
+        i3: statsData.i3 || 0
+      };
     }
 
-    // 3. XỬ LÝ TÊN (Tránh hiển thị VATSIM MEMBER)
-    let fullName = '';
-    
-    // Thử lấy từ API api/ratings trước
-    if (infoData.name_first && infoData.name_last) {
-        fullName = `${infoData.name_first} ${infoData.name_last}`.trim();
-    }
-    
-    // Nếu trống (do privacy), thử "vớt" bằng API V2
-    if (!fullName) {
-        try {
-            const v2Res = await fetch(`https://api.vatsim.net/v2/members/${cid}`);
-            if (v2Res.ok) {
-                const v2Data = await v2Res.json();
-                if (v2Data.name) fullName = v2Data.name.trim();
-            }
-        } catch (e) {
-            // Bỏ qua nếu lỗi
-        }
-    }
-
-    // Fallback cuối cùng nếu người dùng bảo mật quá kỹ
-    if (!fullName || fullName.toUpperCase() === 'VATSIM MEMBER') {
-        fullName = 'Thành Viên Ẩn Danh'; // Hoặc 'Private User' tùy bạn thích
-    }
-
-    // Gộp dữ liệu trả về cho Bot xử lý
     return {
       id: infoData.id,
-      name: fullName, // Trả về 1 chuỗi name chung cho gọn
       rating: infoData.rating,
+      pilotrating: infoData.pilotrating,
+      region: infoData.region,
+      division: infoData.division,
+      subdivision: infoData.subdivision,
       pilot_hours: pilotHours, 
       atc_hours: atcHours,       
-      reg_date: infoData.reg_date
+      reg_date: infoData.reg_date,
+      atc_breakdown: atcBreakdown
     };
   } catch (err) {
     console.error(`Lỗi lấy stats cho CID ${cid}:`, err.message);
@@ -5717,37 +5736,71 @@ async function handleStats(interaction) {
   const stats = await fetchVatsimStatsById(cid);
 
   if (!stats) {
-    return interaction.editReply(`❌ Không tìm thấy dữ liệu trên VATSIM cho CID **${cid}**. (Vui lòng kiểm tra lại ID hoặc API VATSIM đang lỗi)`);
+    return interaction.editReply(`❌ Không tìm thấy dữ liệu trên VATSIM cho CID **${cid}**.`);
   }
 
-  // Tra cứu Rating nói
-  // Chuẩn của VATSIM API
+  // Chuyển đổi Rating ATC
   const vatsimRatingsSpoken = {
     0: 'Susp', 1: 'OBS', 2: 'S1', 3: 'S2', 4: 'S3', 5: 'C1', 
     6: 'C2', 7: 'C3', 8: 'I1', 9: 'I2', 10: 'I3', 11: 'SUP', 12: 'ADM'
   };
   const ratingStr = vatsimRatingsSpoken[stats.rating] || `R${stats.rating}`;
 
-  // Khởi tạo các trường thông tin cơ bản
-  const embedFields = [
-    { name: '🎖️ ATC Rating', value: `**${ratingStr}**`, inline: true },
-    { name: '✈️ Pilot Hours', value: `**${Math.round(stats.pilot_hours || 0)}h**`, inline: true }
-  ];
+  // Chuyển đổi Rating Pilot (VATSIM dùng bitmask, nhưng ta làm tròn thành Px cho chuẩn)
+  const pilotRatingMap = { 0: 'P0', 1: 'P1', 3: 'P2', 7: 'P3', 15: 'P4', 31: 'P5', 63: 'P6' };
+  const pRatingStr = pilotRatingMap[stats.pilotrating] || `P${stats.pilotrating}`;
 
-  // Nếu rating lớn hơn 1 (nghĩa là có bằng ATC thật sự từ S1 trở lên) hoặc có giờ ATC thì hiển thị thêm cột ATC Hours
-  if (stats.rating > 1 || stats.atc_hours > 0) {
-    embedFields.push({ name: '📡 ATC Hours', value: `**${Math.round(stats.atc_hours || 0)}h**`, inline: true });
-  }
-
-  // Thêm ngày tham gia vào cuối
-  embedFields.push({ name: '📅 Tham gia', value: `<t:${Math.floor(new Date(stats.reg_date).getTime() / 1000)}:R>`, inline: true });
-
-  // Update lại chỗ này: Dùng stats.name thay vì stats.name_first / stats.name_last
+  // Xây dựng Giao Diện (Embed)
   const embed = new EmbedBuilder()
-    .setTitle(`📊 Thống kê VATSIM: ${stats.name} (${stats.id})`)
-    .setColor(0x3498db)
-    .addFields(embedFields)
+    .setTitle(`🔍 ${stats.id} - MEMBER INFO`)
+    .setColor(0x2b2d31) // Màu nền tối giống trong ảnh
+    .addFields(
+      // Hàng 1
+      { name: '📡 PID', value: `${stats.id}`, inline: true },
+      { name: '🗓️ REGISTER DATE', value: formatVatsimDate(stats.reg_date), inline: true },
+      { name: '\u200b', value: '\u200b', inline: true }, // Cột tàng hình để ép xuống dòng
+      
+      // Hàng 2
+      { name: '🔵 ATC RATING', value: ratingStr, inline: true },
+      { name: '✈️ PILOT RATING', value: pRatingStr, inline: true },
+      { name: '\u200b', value: '\u200b', inline: true },
+      
+      // Hàng 3
+      { name: '🌐 REGION', value: stats.region || 'N/A', inline: true },
+      { name: '🌐 DIVISION', value: stats.division || 'N/A', inline: true },
+      { name: '🌐 SUBDIVISION', value: stats.subdivision || 'N/A', inline: true },
+      
+      // Hàng 4 (Stats Time)
+      { name: '✈️ FLIGHT TIME', value: stats.pilot_hours.toFixed(2), inline: true },
+      { name: '📡 ATC TIME', value: stats.atc_hours.toFixed(2), inline: true },
+      { name: '\u200b', value: '\u200b', inline: true }
+    )
+    .setFooter({ 
+      text: `${interaction.user.username} • Via VATSIM API`, 
+      iconURL: interaction.user.displayAvatarURL() 
+    })
     .setTimestamp();
+
+  // Thêm chi tiết giờ ATC (S1, S2...) nếu họ có làm ATC
+  if (stats.atc_hours > 0) {
+    const breakdownFields = [];
+    
+    // Duyệt qua từng cấp bậc, nếu có giờ thì mới hiển thị
+    for (const [pos, hours] of Object.entries(stats.atc_breakdown)) {
+      if (hours > 0) {
+        breakdownFields.push({ 
+          name: `🔵 ${pos.toUpperCase()}`, 
+          value: hours.toFixed(2), 
+          inline: true 
+        });
+      }
+    }
+
+    // Nếu có chi tiết, nhét thêm vào cuối Embed (tối đa 3 cột 1 hàng)
+    if (breakdownFields.length > 0) {
+      embed.addFields(breakdownFields);
+    }
+  }
 
   await interaction.editReply({ embeds: [embed] });
 }
@@ -6255,6 +6308,80 @@ async function handleSimbrief(interaction) {
   } catch (error) {
     console.error('SimBrief fetch error:', error);
     await interaction.editReply({ content: '❌ Đã có lỗi xảy ra. Username không tồn tại hoặc API SimBrief bị sập.' });
+  }
+}
+
+// ===================== COMMAND: ONLINE ATC =====================
+async function handleOnlineAtc(interaction) {
+  // Lấy mã ICAO do người dùng nhập và viết hoa lên (VD: vvts -> VVTS)
+  const icao = interaction.options.getString('icao').toUpperCase();
+  
+  // Báo cho Discord biết bot đang xử lý để không bị lỗi timeout 3 giây
+  await interaction.deferReply();
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // Gọi thẳng API dữ liệu tổng của VATSIM để lấy thông tin mới nhất (Real-time)
+    const response = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
+
+    if (!response.ok) {
+      return await interaction.editReply({ content: '❌ Không thể kết nối đến máy chủ VATSIM lúc này.' });
+    }
+
+    const data = await response.json();
+    const controllers = data.controllers || [];
+
+    // Lọc ra các ATC thuộc sân bay đó
+    // Tiêu chuẩn: Callsign bắt đầu bằng "ICAO_" (VD: VVTS_TWR) và không phải là OBS
+    const airportATCs = controllers.filter(c => {
+      if (!c.callsign) return false;
+      const cs = c.callsign.toUpperCase();
+      
+      const isMatch = cs.startsWith(`${icao}_`);
+      const isNotObserver = !cs.includes('OBS') && c.rating > 1; // Bỏ qua người đang học việc/ngồi ngó
+      
+      return isMatch && isNotObserver;
+    });
+
+    // Nếu không có ai online
+    if (airportATCs.length === 0) {
+      return await interaction.editReply({ content: `📡 Hiện tại không có ATC nào đang online tại sân bay **${icao}**.` });
+    }
+
+    // Xây dựng Embed hiển thị danh sách
+    const embed = new EmbedBuilder()
+      .setTitle(`📡 ATC Đang Online - ${icao}`)
+      .setColor(0x2ecc71)
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/8144/8144342.png')
+      .setTimestamp()
+      .setFooter({ text: 'Dữ liệu trực tiếp từ VATSIM' });
+
+    // Bộ dịch Rating
+    const vatsimRatings = {
+      0: 'Susp', 1: 'OBS', 2: 'S1', 3: 'S2', 4: 'S3', 5: 'C1', 6: 'C2', 7: 'C3', 8: 'I1', 9: 'I2', 10: 'I3', 11: 'SUP', 12: 'ADM'
+    };
+
+    airportATCs.forEach(c => {
+      const rating = vatsimRatings[c.rating] || `R${c.rating}`;
+      const logonUnix = Math.floor(new Date(c.logon_time).getTime() / 1000);
+      
+      // Xử lý tần số nếu chưa set
+      const freq = (c.frequency && c.frequency !== '199.998' && c.frequency !== 199.998) 
+        ? c.frequency 
+        : 'Đang thiết lập...';
+
+      embed.addFields({
+        name: `📻 ${c.callsign}`,
+        value: `👤 **Controller:** ${c.name || 'Ẩn danh'}\n🎖️ **Rating:** ${rating}\n📶 **Tần số:** ${freq}\n⏰ **Online từ:** <t:${logonUnix}:R>`,
+        inline: false
+      });
+    });
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (error) {
+    console.error('Lỗi khi tra cứu ATC online:', error);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu từ VATSIM.' });
   }
 }
 
