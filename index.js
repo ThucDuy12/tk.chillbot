@@ -212,8 +212,13 @@ function createLogEmbed(title, description, color = 0x2b2d31, fields = []) {
 }
 
 function getUserIdentifier(user) {
-  if (!user) return 'Unknown User';
-  return `<@${user.id}>`; // Ping trực tiếp
+  if (!user) return 'Unknown User';
+  
+  // Lấy tên thật (globalName) hoặc tên đăng nhập (username)
+  const name = user.globalName || user.username || 'Unknown';
+  
+  // Kết hợp Text và Ping. VD: Louis Ly (<@12345...>)
+  return `**${name}** (<@${user.id}>)`; 
 }
 
 function getChannelIdentifier(channel) {
