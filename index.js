@@ -4923,35 +4923,41 @@ async function startEvent(eventId) {
 async function handleSubmitProfile(interaction) {
   const modal = new ModalBuilder().setCustomId('profile_modal').setTitle('Submit / Edit Profile');
   
-  // Xét ID người dùng xem đã có dữ liệu cũ trên sheet chưa
-  // Nếu chưa có, mặc định các ô sẽ để chuỗi trống ''
-  const existingProfile = profiles[interaction.user.id] || { name: '', age: '', bio: '' };
+  // Lấy dữ liệu cũ nếu có
+  const existingProfile = profiles[interaction.user.id] || {};
 
+  // 1. Tạo ô nhập Tên
+  const nameInput = new TextInputBuilder()
+    .setCustomId('name')
+    .setLabel('Tên')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+  // Chỉ điền sẵn nếu có tên cũ
+  if (existingProfile.name) nameInput.setValue(existingProfile.name);
+
+  // 2. Tạo ô nhập Tuổi
+  const ageInput = new TextInputBuilder()
+    .setCustomId('age')
+    .setLabel('Tuổi')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false);
+  // Chỉ điền sẵn nếu có tuổi cũ
+  if (existingProfile.age) ageInput.setValue(existingProfile.age);
+
+  // 3. Tạo ô nhập Bio
+  const bioInput = new TextInputBuilder()
+    .setCustomId('bio')
+    .setLabel('Bio')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false);
+  // Chỉ điền sẵn nếu có bio cũ
+  if (existingProfile.bio) bioInput.setValue(existingProfile.bio);
+
+  // Đóng gói tất cả vào Modal
   modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('name')
-        .setLabel('Tên')
-        .setStyle(TextInputStyle.Short)
-        .setDefaultValue(existingProfile.name || '') // Trả đúng tên cũ về ô nhập
-        .setRequired(true)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('age')
-        .setLabel('Tuổi')
-        .setStyle(TextInputStyle.Short)
-        .setDefaultValue(existingProfile.age || '') // Trả đúng tuổi cũ về ô nhập
-        .setRequired(false)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('bio')
-        .setLabel('Bio')
-        .setStyle(TextInputStyle.Paragraph)
-        .setDefaultValue(existingProfile.bio || '') // Trả đúng bio cũ về ô nhập
-        .setRequired(false)
-    )
+    new ActionRowBuilder().addComponents(nameInput),
+    new ActionRowBuilder().addComponents(ageInput),
+    new ActionRowBuilder().addComponents(bioInput)
   );
   
   await interaction.showModal(modal);
