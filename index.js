@@ -2105,11 +2105,26 @@ async function geminiChatReply(userId, userText, allowSwear) {
 
 // ===================== OPENROUTER CHAT (AUTO FALLBACK) =====================
 // Danh sách các model xịn và miễn phí (bạn có thể thêm model trả phí vào đây nếu có nạp tiền)
+// Danh sách "Tiểu đội gánh tạ" - Gồm các model miễn phí trên OpenRouter
+// Nhét càng nhiều càng tốt, con này sập thì vòng lặp tự lấy con khác đỡ!
 const OPENROUTER_MODELS = [
-  'google/gemini-2.0-flash-exp:free', 
+  // --- Hàng tuyển của Google (Rất thông minh, hay sống dai) ---
+  'google/gemini-2.0-flash-lite-preview-02-05:free',
+  'google/gemini-2.0-flash-thinking-exp:free',
+  'google/gemma-2-9b-it:free',
+  
+  // --- Hàng tuyển của Meta (Llama) ---
+  'meta-llama/llama-3.1-8b-instruct:free',
   'meta-llama/llama-3.2-3b-instruct:free',
-  'qwen/qwen-2.5-7b-instruct:free',
-  'mistralai/mistral-nemo:free'
+  'meta-llama/llama-3.2-11b-vision-instruct:free',
+  
+  // --- Các pháp sư mã nguồn mở khác (Chuyên dự phòng) ---
+  'huggingfaceh4/zephyr-7b-beta:free',
+  'mistralai/mistral-7b-instruct:free',
+  'openchat/openchat-7b:free',
+  'gryphe/mythomax-l2-13b:free',
+  'cognitivecomputations/dolphin-2.9-llama3-8b:free',
+  'undi95/toppy-m-7b:free'
 ];
 
 async function openRouterChatReply(userId, userText, allowSwear) {
