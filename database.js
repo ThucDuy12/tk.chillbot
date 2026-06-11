@@ -69,11 +69,33 @@ async function saveChatHistory(channelId, messages) {
   );
 }
 
+// ================= XỬ LÝ LỊCH HẸN THÔNG BÁO =================
+const announSchema = new mongoose.Schema({
+  _id: { type: String, default: "master_announ" },
+  data: Array
+});
+const AnnounDB = mongoose.model('Announ', announSchema);
+
+async function getAnnouncements() {
+  const doc = await AnnounDB.findOne({ _id: "master_announ" });
+  return doc ? doc.data : [];
+}
+
+async function saveAnnouncements(arr) {
+  await AnnounDB.findOneAndUpdate(
+    { _id: "master_announ" },
+    { $set: { data: arr } },
+    { upsert: true }
+  );
+}
+
 module.exports = {
   connectDB,
   getProfile,
   getAllProfiles,
   saveProfile,
   getChatHistory,
-  saveChatHistory
+  saveChatHistory,
+  getAnnouncements, // <-- Thêm dòng này
+  saveAnnouncements // <-- Thêm dòng này
 };
