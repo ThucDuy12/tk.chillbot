@@ -1999,6 +1999,101 @@ function getProfilesString() {
   return profileStr;
 }
 
+// ===================== GROQ CHAT (SIÊU NHANH & ỔN ĐỊNH) =====================
+const GROQ_MODELS = [
+  'llama-3.3-70b-versatile', // Con này cực kỳ thông minh
+  'llama-3.1-8b-instant',    // Con này siêu nhanh
+  'mixtral-8x7b-32768'       // Con này văn phong rất mượt
+];
+
+async function groqChatReply(userId, userText, allowSwear) {
+  const histories = allowSwear ? swearHistories : normalHistories;
+  let history = histories.get(userId) || [];
+  if (!Array.isArray(history)) history = [];
+
+  if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
+
+  const fixedPrompt = `You were created by the owner with ID ${OWNER_ID}.`;
+  const birthday = 'Bạn sinh ngày 25 tháng 10 năm 2025.';
+  const profilesPrompt = getProfilesString();
+  const timePrompt = getCurrentTimeForGemini();
+
+  const modePrompt = allowSwear
+    ? 'Bạn là một bot thân thiện, hoà đồng, giúp mọi người thư giãn. Nếu người khác chửi thề thì bạn có thể chửi thề nhẹ lại cho vui (đừng quá đà).'
+    : 'You are a helpful bot. You can use natural Vietnamese.';
+
+  const systemPrompt = `${fixedPrompt}\n${profilesPrompt}\n${timePrompt}\n${modePrompt}\n\nIMPORTANT: Keep your responses under 1000 words when possible. Be concise and to the point.\n${birthday}`;
+
+  const sanitizedUserText = String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS);
+
+  const apiMessages = [
+    { role: 'system', content: systemPrompt },
+    ...history,
+    { role: 'user', content: sanitizedUserText }
+  ];
+
+  let responseText = null;
+  let lastErrorMsg = '';
+  
+  const fetch = (await import('node-fetch')).default;
+
+  // Trộn danh sách model để giảm tải
+  const shuffledModels = [...GROQ_MODELS].sort(() => 0.5 - Math.random());
+
+  for (const modelName of shuffledModels) {
+    try {
+      console.log(`[AI Chat] Đang gọi Groq (Model: ${modelName})...`);
+      
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          // Lưu ý: Nhớ thêm GROQ_API_KEY vào biến môi trường
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: apiMessages,
+          temperature: 0.7,
+          max_tokens: 4000
+        })
+      });
+
+      if (!res.ok) {
+        const errBody = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errBody}`);
+      }
+
+      const data = await res.json();
+      if (data.choices && data.choices.length > 0) {
+        responseText = data.choices[0].message.content;
+        console.log(`✅ [AI Chat] Groq trả lời thành công!`);
+        break;
+      }
+
+    } catch (err) {
+      console.warn(`⚠️ [AI Chat] Groq model ${modelName} lỗi: ${err.message}. Đang đổi...`);
+      lastErrorMsg = err.message;
+    }
+  }
+
+  if (!responseText) {
+    console.error('[AI Chat] Toàn bộ Groq model đều thất bại. Lỗi cuối:', lastErrorMsg);
+    return '❌ Hệ thống AI đang tạm bảo trì. Bạn đợi mình xíu rồi hỏi lại nhé!';
+  }
+
+  responseText = String(responseText || '').trim();
+
+  // Lưu lịch sử
+  history.push({ role: 'user', content: sanitizedUserText });
+  history.push({ role: 'assistant', content: responseText });
+  if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
+
+  histories.set(userId, history);
+
+  return responseText;
+}
+
 // ===================== GEMINI CHAT (FIXED) =====================
 async function geminiChatReply(userId, userText, allowSwear) {
   const histories = allowSwear ? swearHistories : normalHistories;
@@ -2127,8 +2222,7 @@ async function handleGeminiResponse(message, allowSwear) {
       if (message.attachments.size > 3) text += `\n(+${message.attachments.size - 3} more)`;
     }
 
-    // Gửi đến Gemini
-    const responseText = await geminiChatReply(userId, text, allowSwear);
+    const responseText = await groqChatReply(userId, text, allowSwear);
 
     // Cắt tin nhắn tránh limit 2000 ký tự của Discord
     const chunks = splitMessage(responseText, 1900);
