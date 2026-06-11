@@ -2106,14 +2106,12 @@ async function geminiChatReply(userId, userText, allowSwear) {
 // ===================== OPENROUTER CHAT (AUTO FALLBACK) =====================
 // Danh sách các model xịn và miễn phí (bạn có thể thêm model trả phí vào đây nếu có nạp tiền)
 const OPENROUTER_MODELS = [
-  'google/gemini-2.5-flash-api', 
-  'meta-llama/llama-3-8b-instruct:free',
-  'mistralai/mistral-7b-instruct:free',
-  'microsoft/phi-3-mini-128k-instruct:free',
-  'openchat/openchat-7b:free'
+  'google/gemini-2.0-flash-exp:free', 
+  'meta-llama/llama-3.2-3b-instruct:free',
+  'qwen/qwen-2.5-7b-instruct:free',
+  'mistralai/mistral-nemo:free'
 ];
 
-// ===================== POLLINATIONS CHAT (HỆ ĐỘI LỐT) =====================
 async function openRouterChatReply(userId, userText, allowSwear) {
   const histories = allowSwear ? swearHistories : normalHistories;
   let history = histories.get(userId) || [];
@@ -2134,44 +2132,67 @@ async function openRouterChatReply(userId, userText, allowSwear) {
 
   const sanitizedUserText = String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS);
 
-  // Cấu trúc mảng lịch sử trò chuyện
+  // Cấu trúc lại mảng lịch sử chuẩn OpenRouter/OpenAI
   const apiMessages = [
     { role: 'system', content: systemPrompt },
     ...history,
     { role: 'user', content: sanitizedUserText }
   ];
 
+  // Trộn ngẫu nhiên danh sách model để giảm tải cho 1 model duy nhất
+  const shuffledModels = [...OPENROUTER_MODELS].sort(() => 0.5 - Math.random());
+  
   let responseText = null;
+  let lastErrorMsg = '';
 
-  try {
-    console.log(`[AI Chat] Đang gửi yêu cầu tới Pollinations...`);
-    
-    // Gọi lại thư viện node-fetch để fix lỗi "fetch is not a function"
-    const fetch = (await import('node-fetch')).default;
+  const fetch = (await import('node-fetch')).default;
 
-    const res = await fetch('https://text.pollinations.ai/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ 
-        messages: apiMessages,
-        model: 'openai' 
-      })
-    });
+  // Vòng lặp sinh tử: Thử từng model, cái nào sập thì bắt lỗi chạy cái tiếp theo
+  for (const modelName of shuffledModels) {
+    try {
+      console.log(`[AI Chat] Đang thử gọi model: ${modelName}...`);
+      
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          // Hãy chắc chắn bạn đã cấu hình OPENROUTER_API_KEY trong Environment Variables của Render
+          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://discord.com', // Bắt buộc theo policy của OpenRouter
+          'X-Title': 'VCL_Discord_Bot'
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: apiMessages,
+          temperature: 0.7,
+          max_tokens: 4000
+        })
+      });
 
-    if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errText}`);
+      if (!res.ok) {
+        const errBody = await res.text();
+        throw new Error(`HTTP Error ${res.status}: ${errBody}`);
+      }
+
+      const data = await res.json();
+      if (data.choices && data.choices.length > 0) {
+        responseText = data.choices[0].message.content;
+        console.log(`✅ [AI Chat] Model ${modelName} đã trả lời thành công!`);
+        break; // Lấy được câu trả lời thì thoát vòng lặp ngay
+      } else {
+        throw new Error('OpenRouter không trả về nội dung.');
+      }
+
+    } catch (err) {
+      console.warn(`⚠️ [AI Chat] Model ${modelName} sập/quá tải: ${err.message}. Đang đổi model...`);
+      lastErrorMsg = err.message;
     }
+  }
 
-    responseText = await res.text();
-    console.log(`✅ [AI Chat] Nhận phản hồi thành công!`);
-
-  } catch (err) {
-    // In toàn bộ chi tiết lỗi ra Terminal của Render/VPS
-    console.error(`⚠️ [AI Chat LỖI CHI TIẾT]:`, err);
-    return '❌ AI đang ngủ trưa rồi ba, hệ thống trung chuyển bị quá tải. Lát gõ lại nhé!';
+  // Nếu tất cả model trong mảng đều sập
+  if (!responseText) {
+    console.error('[AI Chat] Toàn bộ model đều thất bại. Lỗi cuối:', lastErrorMsg);
+    return '❌ Hiện tại tất cả các lõi AI đều đang bận. Bạn đợi một chút rồi hỏi lại mình nhé!';
   }
 
   responseText = String(responseText || '').trim();
@@ -2185,6 +2206,7 @@ async function openRouterChatReply(userId, userText, allowSwear) {
 
   return responseText;
 }
+
 async function handleGeminiResponse(message, allowSwear) {
   const userId = message.author?.id;
   if (!userId) return;
