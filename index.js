@@ -2113,6 +2113,7 @@ const OPENROUTER_MODELS = [
   'openchat/openchat-7b:free'
 ];
 
+// ===================== POLLINATIONS CHAT (HỆ ĐỘI LỐT) =====================
 async function openRouterChatReply(userId, userText, allowSwear) {
   const histories = allowSwear ? swearHistories : normalHistories;
   let history = histories.get(userId) || [];
@@ -2133,67 +2134,40 @@ async function openRouterChatReply(userId, userText, allowSwear) {
 
   const sanitizedUserText = String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS);
 
-  // Cấu trúc lại mảng lịch sử chuẩn OpenRouter/OpenAI
+  // Cấu trúc mảng lịch sử trò chuyện
   const apiMessages = [
     { role: 'system', content: systemPrompt },
     ...history,
     { role: 'user', content: sanitizedUserText }
   ];
 
-  // Trộn ngẫu nhiên danh sách model để giảm tải cho 1 model duy nhất
-  const shuffledModels = [...OPENROUTER_MODELS].sort(() => 0.5 - Math.random());
-  
   let responseText = null;
-  let lastErrorMsg = '';
 
-  const fetch = (await import('node-fetch')).default;
+  try {
+    console.log(`[AI Chat] Đang nhờ trạm trung chuyển (Pollinations) đội lốt...`);
+    const fetch = (await import('node-fetch')).default;
+    
+    // Gọi thẳng vào API đội lốt, không cần vòng lặp, không cần API Key
+    const res = await fetch('https://text.pollinations.ai/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ 
+        messages: apiMessages,
+        model: 'openai' // Trạm sẽ tự động mượn model xịn nhất cho bạn
+      })
+    });
 
-  // Vòng lặp sinh tử: Thử từng model, cái nào sập thì bắt lỗi chạy cái tiếp theo
-  for (const modelName of shuffledModels) {
-    try {
-      console.log(`[AI Chat] Đang thử gọi model: ${modelName}...`);
-      
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://discord.com', // Bắt buộc theo policy của OpenRouter
-          'X-Title': 'VCL_Discord_Bot'
-        },
-        body: JSON.stringify({
-          model: modelName,
-          messages: apiMessages,
-          temperature: 0.7,
-          max_tokens: 4000
-        })
-      });
+    if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
 
-      if (!res.ok) {
-        throw new Error(`HTTP Error ${res.status}`);
-      }
+    // Dịch vụ này trả thẳng về text chữ
+    responseText = await res.text();
+    console.log(`✅ [AI Chat] Đội lốt thành công!`);
 
-      const data = await res.json();
-      if (data.choices && data.choices.length > 0) {
-        responseText = data.choices[0].message.content;
-        console.log(`✅ [AI Chat] Model ${modelName} đã trả lời thành công!`);
-        break; // Lấy được câu trả lời thì thoát vòng lặp ngay
-      } else {
-        throw new Error('No choices in response');
-      }
-
-    } catch (err) {
-      console.warn(`⚠️ [AI Chat] Model ${modelName} sập/quá tải: ${err.message}. Đang đổi model...`);
-      lastErrorMsg = err.message;
-      // Nghỉ 1 giây trước khi thử model tiếp theo để tránh bị OpenRouter ban IP
-      await new Promise(r => setTimeout(r, 1000)); 
-    }
-  }
-
-  // Nếu tất cả model trong mảng đều sập (cực kỳ hiếm)
-  if (!responseText) {
-    console.error('[AI Chat] Toàn bộ model đều thất bại. Lỗi cuối:', lastErrorMsg);
-    return '❌ Hiện tại tất cả các lõi AI đều đang quá tải. Bạn đợi vài phút rồi hỏi lại mình nhé!';
+  } catch (err) {
+    console.error(`⚠️ [AI Chat] Trạm trung chuyển sập: ${err.message}`);
+    return '❌ AI đang ngủ trưa rồi ba, hệ thống trung chuyển bị quá tải. Lát gõ lại nhé!';
   }
 
   responseText = String(responseText || '').trim();
