@@ -2003,10 +2003,6 @@ function getProfilesString() {
 
 // ===================== ULTIMATE AI CHAT (GEMINI -> GROQ -> POLLINATIONS) =====================
 
-// Lấy lịch sử trực tiếp từ MongoDB (không sợ mất khi restart)
-let history = await db.getChatHistory(channelId) || [];
-if (!Array.isArray(history)) history = [];
-
 const GROQ_MODELS = [
   'llama-3.3-70b-versatile', 
   'deepseek-r1-distill-llama-70b', 
@@ -2015,10 +2011,9 @@ const GROQ_MODELS = [
 
 // Đổi tham số để nhận thêm channelId và userName
 async function ultimateChatReply(channelId, userId, userName, userText, allowSwear) {
-  const histories = allowSwear ? swearHistories : normalHistories;
   
-  // DÙNG KÊNH LÀM CHÌA KHÓA: Mọi người trong cùng 1 kênh sẽ xài chung 1 cuốn sổ lịch sử
-  let history = histories.get(channelId) || [];
+  // ✅ ĐÚNG: Lấy lịch sử trực tiếp từ MongoDB phải nằm BÊN TRONG hàm async này
+  let history = await db.getChatHistory(channelId) || [];
   if (!Array.isArray(history)) history = [];
 
   // Tăng lên 15 tin nhắn để bot nhớ được mạch truyện nhóm lâu hơn
