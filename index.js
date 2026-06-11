@@ -273,8 +273,7 @@ let pilotLeaderboardMessageStore = fs.existsSync(PILOT_LEADERBOARD_MSG_FILE) ? J
 let leaderboardData = { month: null, year: null, stats: {} };
 let pilotLeaderboardData = { month: null, year: null, pilots: {} };
 let isLeaderboardLoaded = false;
-const ANNOUNCEMENTS_FILE = path.join(__dirname, 'scheduled_announcements.json');
-let scheduledAnnouncements = fs.existsSync(ANNOUNCEMENTS_FILE) ? JSON.parse(fs.readFileSync(ANNOUNCEMENTS_FILE, 'utf8')) : [];
+let scheduledAnnouncements = [];
 const pendingAnnouncements = new Map(); // Bộ nhớ tạm để lưu tin nhắn chờ user bấm nút Okay/Reject
 
 
@@ -2943,6 +2942,13 @@ client.once('ready', async () => {
   } catch (e) {
     console.error('Lỗi nạp profiles:', e);
   }
+  // Load lịch hẹn thông báo
+  try {
+    scheduledAnnouncements = await db.getAnnouncements();
+    console.log(`✅ Đã nạp ${scheduledAnnouncements.length} lịch hẹn thông báo từ MongoDB.`);
+  } catch (e) {
+    console.error('Lỗi nạp lịch thông báo:', e);
+  }
 
   // Kiểm tra ngay khi khởi động
   setTimeout(() => {
@@ -3246,7 +3252,7 @@ client.once('ready', async () => {
     
     // Nếu có thông báo vừa được gửi/xóa, cập nhật lại file JSON
     if (hasChanges) {
-      fs.writeFileSync(ANNOUNCEMENTS_FILE, JSON.stringify(scheduledAnnouncements, null, 2));
+      await db.saveAnnouncements(scheduledAnnouncements);
     }
   }, 60 * 1000);
 
@@ -4650,7 +4656,7 @@ async function handleButton(interaction) {
         time: pendingData.targetTime,
         author: interaction.user.id
       });
-      fs.writeFileSync(ANNOUNCEMENTS_FILE, JSON.stringify(scheduledAnnouncements, null, 2));
+      await db.saveAnnouncements(scheduledAnnouncements);
 
       await interaction.update({ 
         content: `✅ Đã lên lịch gửi thông báo vào <t:${Math.floor(pendingData.targetTime/1000)}:F>!\n**ID Lịch trình:** \`${reqId}\` (Dùng để sửa/hủy)`, 
@@ -6320,7 +6326,7 @@ async function handleEditAnnoun(interaction) {
   const scheduledIndex = scheduledAnnouncements.findIndex(a => a.id === id);
   if (scheduledIndex !== -1) {
     scheduledAnnouncements[scheduledIndex].content = newContent;
-    fs.writeFileSync(ANNOUNCEMENTS_FILE, JSON.stringify(scheduledAnnouncements, null, 2));
+    await db.saveAnnouncements(scheduledAnnouncements);
     return interaction.editReply({ content: '✅ Đã cập nhật nội dung cho thông báo đã lên lịch!' });
   }
 
@@ -6348,7 +6354,7 @@ async function handleCancelAnnoun(interaction) {
   scheduledAnnouncements = scheduledAnnouncements.filter(a => a.id !== id);
 
   if (scheduledAnnouncements.length < initialLength) {
-    fs.writeFileSync(ANNOUNCEMENTS_FILE, JSON.stringify(scheduledAnnouncements, null, 2));
+    await db.saveAnnouncements(scheduledAnnouncements);
     return interaction.reply({ content: `✅ Đã hủy lịch trình gửi thông báo (ID: \`${id}\`)!`, ephemeral: true });
   } else {
     return interaction.reply({ content: `❌ Không tìm thấy lịch trình nào với ID: \`${id}\` (Có thể nó đã được gửi đi rồi)`, ephemeral: true });
