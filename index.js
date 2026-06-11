@@ -7,9 +7,9 @@ const cheerio = require('cheerio');
 const { 
   initGoogleSheets, loadControllerLeaderboard, loadPilotLeaderboard, 
   saveControllerLeaderboard, savePilotLeaderboard, loadPendingUsersSheet, 
-  savePendingUsersSheet, 
-  loadSimbriefUsersSheet,    
-  saveSimbriefUsersSheet     
+  savePendingUsersSheet, loadSimbriefUsersSheet, saveSimbriefUsersSheet,
+  loadProfilesSheet,  // <-- Thêm vào
+  saveProfilesSheet   // <-- Thêm vào
 } = require('./googleSheets');
 const { createCanvas, loadImage, GlobalFonts } = require('canvas');
 const fetch = require('node-fetch'); // Thêm nếu chưa có
@@ -264,7 +264,7 @@ if (fs.existsSync(ROLES_FILE)) roles = JSON.parse(fs.readFileSync(ROLES_FILE, 'u
 
 let bans = fs.existsSync(BANS_FILE) ? JSON.parse(fs.readFileSync(BANS_FILE, 'utf8')) : { users: {} };
 let vatsimMessageStore = fs.existsSync(VATSIM_MSG_FILE) ? JSON.parse(fs.readFileSync(VATSIM_MSG_FILE, 'utf8')) : {};
-let profiles = fs.existsSync(PROFILES_FILE) ? JSON.parse(fs.readFileSync(PROFILES_FILE, 'utf8')) : {};
+let profiles = {};
 let leaderboardMessageStore = fs.existsSync(LEADERBOARD_MSG_FILE) ? JSON.parse(fs.readFileSync(LEADERBOARD_MSG_FILE, 'utf8')) : {};
 let pilotLeaderboardMessageStore = fs.existsSync(PILOT_LEADERBOARD_MSG_FILE) ? JSON.parse(fs.readFileSync(PILOT_LEADERBOARD_MSG_FILE, 'utf8')) : {};
 
@@ -3075,6 +3075,47 @@ client.once('ready', async () => {
   } catch (error) {
     console.error('❌ Lỗi kéo dữ liệu Pending Users:', error);
   }
+  // --- KÉO DATA PROFILES TỪ SHEET ---
+  try {
+    if (typeof loadProfilesSheet === 'function') {
+      const data = await loadProfilesSheet();
+      if (data) {
+        profiles = data;
+        console.log(`✅ Đã tải thành công ${Object.keys(profiles).length} Profiles từ Google Sheets.`);
+      }
+      
+      // ==================== ĐOẠN NÀY ĐỂ NẠP DỮ LIỆU CŨ ====================
+      const oldData = {
+        "1094252826357670038": {
+          "name": "Lý Thúc Duy",
+          "age": "14",
+          "bio": "Tui là người tạo ra bot tk.chill và đang là Admin, DEV của server tk.chill, tên gọi khác của tôi là Louis Ly(hãy dùng tên này để gọi tôi)."
+        },
+        "856704693215166474": {
+          "name": "Nguyễn Trần Tuấn Kiệt",
+          "age": "18",
+          "bio": "Biệt danh là しいな まひる, @kiet1510 là tài khoản discord của tôi. Hiện tôi là Admin tạo ra server này, thấy tôi có role DEV và Coder nữa. Và tôi cũng sở hữu kênh TikTok với hơn 1k7 người theo dõi có nội dung về máy bay. Tôi đang là ATC trên mạng bay VATSIM với ranting S2 và AS3 ở IVAO."
+        }
+      };
+
+      let hasMigration = false;
+      for (const [id, info] of Object.entries(oldData)) {
+        // Nếu trên sheet chưa có ID này thì mới nạp vào để tránh ghi đè dữ liệu mới
+        if (!profiles[id]) {
+          profiles[id] = info;
+          hasMigration = true;
+        }
+      }
+
+      if (hasMigration) {
+        await saveProfilesSheet(profiles);
+        console.log("▲ [Profiles Data] Đã tự động nạp dữ liệu cũ của Louis Ly và Tuấn Kiệt lên Google Sheets!");
+      }
+      // ===================================================================
+    }
+  } catch (error) {
+    console.error('❌ Lỗi kéo dữ liệu Profiles:', error);
+  }
   // ---------------------------------------------------
   // --- KÉO DATA SIMBRIEF TỪ SHEET ---
   try {
@@ -4736,14 +4777,23 @@ async function handleModal(interaction) {
   }
 
   if (interaction.customId === 'profile_modal') {
-    const name = interaction.fields.getTextInputValue('name');
-    const age = interaction.fields.getTextInputValue('age');
-    const bio = interaction.fields.getTextInputValue('bio');
-    profiles[interaction.user.id] = { name, age, bio };
-    fs.writeFileSync(PROFILES_FILE, JSON.stringify(profiles, null, 2));
-    await interaction.reply({ content: '✅ Profile đã được lưu!', ephemeral: true });
-    return;
-  }
+    const name = interaction.fields.getTextInputValue('name');
+    const age = interaction.fields.getTextInputValue('age');
+    const bio = interaction.fields.getTextInputValue('bio');
+    
+    // Lưu vào RAM
+    profiles[interaction.user.id] = { name, age, bio };
+    
+    // ✅ Dòng mới: Đẩy lên Google Sheets
+    try {
+      await saveProfilesSheet(profiles);
+      await interaction.reply({ content: '✅ Profile của bạn đã được lưu vĩnh viễn lên hệ thống!', ephemeral: true });
+    } catch (err) {
+      console.error('Lỗi khi lưu profile lên sheet:', err);
+      await interaction.reply({ content: '⚠️ Đã lưu vào bộ nhớ tạm nhưng lỗi khi đẩy lên Google Sheets.', ephemeral: true });
+    }
+    return;
+  }
 
   // Trong handleModal, xử lý role_info_modal_
 if (interaction.customId.startsWith('role_info_modal_')) {
@@ -4871,19 +4921,40 @@ async function startEvent(eventId) {
 }
 
 async function handleSubmitProfile(interaction) {
-  const modal = new ModalBuilder().setCustomId('profile_modal').setTitle('Submit Profile');
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('name').setLabel('Tên').setStyle(TextInputStyle.Short).setRequired(true)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('age').setLabel('Tuổi').setStyle(TextInputStyle.Short).setRequired(false)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('bio').setLabel('Bio').setStyle(TextInputStyle.Paragraph).setRequired(false)
-    )
-  );
-  await interaction.showModal(modal);
+  const modal = new ModalBuilder().setCustomId('profile_modal').setTitle('Submit / Edit Profile');
+  
+  // Xét ID người dùng xem đã có dữ liệu cũ trên sheet chưa
+  // Nếu chưa có, mặc định các ô sẽ để chuỗi trống ''
+  const existingProfile = profiles[interaction.user.id] || { name: '', age: '', bio: '' };
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('name')
+        .setLabel('Tên')
+        .setStyle(TextInputStyle.Short)
+        .setDefaultValue(existingProfile.name || '') // Trả đúng tên cũ về ô nhập
+        .setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('age')
+        .setLabel('Tuổi')
+        .setStyle(TextInputStyle.Short)
+        .setDefaultValue(existingProfile.age || '') // Trả đúng tuổi cũ về ô nhập
+        .setRequired(false)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId('bio')
+        .setLabel('Bio')
+        .setStyle(TextInputStyle.Paragraph)
+        .setDefaultValue(existingProfile.bio || '') // Trả đúng bio cũ về ô nhập
+        .setRequired(false)
+    )
+  );
+  
+  await interaction.showModal(modal);
 }
 
 async function handleAnnouncement(interaction) {
