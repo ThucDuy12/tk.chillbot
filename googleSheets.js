@@ -9,6 +9,7 @@ const CONTROLLER_SHEET_PREFIX = 'ATC_';
 const PILOT_SHEET_PREFIX = 'PILOT_';
 const PENDING_USERS_SHEET_NAME = 'PendingUsers'; // Tên sheet cho Pending Users
 const SIMBRIEF_USERS_SHEET_NAME = 'SimbriefUsers';
+const PROFILES_SHEET_NAME = 'Profiles';
 
 let sheetsClient = null;
 
@@ -554,6 +555,117 @@ async function loadSimbriefUsersSheet() {
   return data;
 }
 
+// ========== TẠO SHEET PROFILES ==========
+async function createProfilesSheet() {
+  const exists = await sheetExists(PROFILES_SHEET_NAME);
+  if (exists) return PROFILES_SHEET_NAME;
+
+  const sheets = await initGoogleSheets();
+  const headers = ['DiscordId', 'Name', 'Age', 'Bio'];
+
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: PROFILES_SHEET_NAME } } }],
+      },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${PROFILES_SHEET_NAME}!A1:D1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [headers] },
+    });
+    console.log(`✅ Created sheet: ${PROFILES_SHEET_NAME}`);
+    return PROFILES_SHEET_NAME;
+  } catch (err) {
+    console.error('Error creating Profiles sheet:', err);
+    throw err;
+  }
+}
+
+// ========== LƯU DỮ LIỆU PROFILES ==========
+async function saveProfilesSheet(data) {
+  const sheets = await initGoogleSheets();
+
+  const sheetExistsFlag = await sheetExists(PROFILES_SHEET_NAME);
+  if (!sheetExistsFlag) {
+    await createProfilesSheet();
+  }
+
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+    fields: 'sheets.properties',
+  });
+  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === PROFILES_SHEET_NAME);
+  if (!sheet) throw new Error(`Sheet ${PROFILES_SHEET_NAME} not found`);
+  const sheetId = sheet.properties.sheetId;
+
+  // Xóa dữ liệu cũ
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [
+        {
+          deleteRange: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
+              endRowIndex: 5000,
+              startColumnIndex: 0,
+              endColumnIndex: 4,
+            },
+            shiftDimension: 'ROWS',
+          },
+        },
+      ],
+    },
+  });
+
+  const rows = [];
+  for (const [discordId, info] of Object.entries(data)) {
+    rows.push([discordId, info.name || '', info.age || '', info.bio || '']);
+  }
+
+  if (rows.length === 0) return;
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${PROFILES_SHEET_NAME}!A2`,
+    valueInputOption: 'RAW',
+    requestBody: { values: rows },
+  });
+
+  console.log(`✅ Saved ${rows.length} profiles to sheet ${PROFILES_SHEET_NAME}`);
+}
+
+// ========== ĐỌC DỮ LIỆU PROFILES ==========
+async function loadProfilesSheet() {
+  const exists = await sheetExists(PROFILES_SHEET_NAME);
+  if (!exists) {
+    console.log('⚠️ Sheet Profiles chưa tồn tại, đang tiến hành tạo mới...');
+    await createProfilesSheet();
+    return {};
+  }
+
+  const sheets = await initGoogleSheets();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${PROFILES_SHEET_NAME}!A2:D`,
+  });
+  
+  const rows = response.data.values || [];
+  const data = {};
+
+  for (const row of rows) {
+    const [discordId, name, age, bio] = row;
+    if (discordId) {
+      data[discordId] = { name, age, bio };
+    }
+  }
+  return data;
+}
+
 // ========== EXPORTS ==========
 module.exports = {
   initGoogleSheets,
@@ -564,8 +676,10 @@ module.exports = {
   createControllerSheet,
   createPilotSheet,
   sheetExists,
-  loadPendingUsersSheet, // Đã thêm
-  savePendingUsersSheet,  // Đã thêm
+  loadPendingUsersSheet, 
+  savePendingUsersSheet,  
   loadSimbriefUsersSheet,
-  saveSimbriefUsersSheet
+  saveSimbriefUsersSheet,
+  loadProfilesSheet,   
+  saveProfilesSheet
 };
