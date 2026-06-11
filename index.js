@@ -82,14 +82,6 @@ const SUMMARY_MAX_TRANSCRIPT_CHARS = parseInt(process.env.SUMMARY_MAX_TRANSCRIPT
 const GEMINI_MAX_HISTORY_ITEMS = parseInt(process.env.GEMINI_MAX_HISTORY_ITEMS || '20', 10);
 const GEMINI_MAX_USER_TEXT_CHARS = parseInt(process.env.GEMINI_MAX_USER_TEXT_CHARS || '1800', 10);
 
-// ✅ THÊM dòng này vào
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-
-if (!OPENROUTER_API_KEY) {
-  console.error('Missing OPENROUTER_API_KEY in environment.');
-  process.exit(1);
-}
-
 // Thay ID channel này bằng ID channel Dashboard ACDM của bạn
 const ACDM_CHANNEL_ID = process.env.ACDM_CHANNEL_ID || '1503763584105058434'; 
 
@@ -2103,125 +2095,6 @@ async function geminiChatReply(userId, userText, allowSwear) {
   return responseText;
 }
 
-// ===================== OPENROUTER CHAT (AUTO FALLBACK) =====================
-// Danh sách các model xịn và miễn phí (bạn có thể thêm model trả phí vào đây nếu có nạp tiền)
-// Danh sách "Tiểu đội gánh tạ" - Gồm các model miễn phí trên OpenRouter
-// Nhét càng nhiều càng tốt, con này sập thì vòng lặp tự lấy con khác đỡ!
-const OPENROUTER_MODELS = [
-  // --- Hàng tuyển của Google (Rất thông minh, hay sống dai) ---
-  'google/gemini-2.0-flash-lite-preview-02-05:free',
-  'google/gemini-2.0-flash-thinking-exp:free',
-  'google/gemma-2-9b-it:free',
-  
-  // --- Hàng tuyển của Meta (Llama) ---
-  'meta-llama/llama-3.1-8b-instruct:free',
-  'meta-llama/llama-3.2-3b-instruct:free',
-  'meta-llama/llama-3.2-11b-vision-instruct:free',
-  
-  // --- Các pháp sư mã nguồn mở khác (Chuyên dự phòng) ---
-  'huggingfaceh4/zephyr-7b-beta:free',
-  'mistralai/mistral-7b-instruct:free',
-  'openchat/openchat-7b:free',
-  'gryphe/mythomax-l2-13b:free',
-  'cognitivecomputations/dolphin-2.9-llama3-8b:free',
-  'undi95/toppy-m-7b:free'
-];
-
-async function openRouterChatReply(userId, userText, allowSwear) {
-  const histories = allowSwear ? swearHistories : normalHistories;
-  let history = histories.get(userId) || [];
-  if (!Array.isArray(history)) history = [];
-
-  if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
-
-  const fixedPrompt = `You were created by the owner with ID ${OWNER_ID}.`;
-  const birthday = 'Bạn sinh ngày 25 tháng 10 năm 2025.';
-  const profilesPrompt = getProfilesString();
-  const timePrompt = getCurrentTimeForGemini();
-
-  const modePrompt = allowSwear
-    ? 'Bạn là một bot thân thiện, hoà đồng, giúp mọi người thư giãn. Nếu người khác chửi thề thì bạn có thể chửi thề nhẹ lại cho vui (đừng quá đà).'
-    : 'You are a helpful bot. You can use natural Vietnamese.';
-
-  const systemPrompt = `${fixedPrompt}\n${profilesPrompt}\n${timePrompt}\n${modePrompt}\n\nIMPORTANT: Keep your responses under 1000 words when possible. Be concise and to the point.\n${birthday}`;
-
-  const sanitizedUserText = String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS);
-
-  // Cấu trúc lại mảng lịch sử chuẩn OpenRouter/OpenAI
-  const apiMessages = [
-    { role: 'system', content: systemPrompt },
-    ...history,
-    { role: 'user', content: sanitizedUserText }
-  ];
-
-  // Trộn ngẫu nhiên danh sách model để giảm tải cho 1 model duy nhất
-  const shuffledModels = [...OPENROUTER_MODELS].sort(() => 0.5 - Math.random());
-  
-  let responseText = null;
-  let lastErrorMsg = '';
-
-  const fetch = (await import('node-fetch')).default;
-
-  // Vòng lặp sinh tử: Thử từng model, cái nào sập thì bắt lỗi chạy cái tiếp theo
-  for (const modelName of shuffledModels) {
-    try {
-      console.log(`[AI Chat] Đang thử gọi model: ${modelName}...`);
-      
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          // Hãy chắc chắn bạn đã cấu hình OPENROUTER_API_KEY trong Environment Variables của Render
-          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://discord.com', // Bắt buộc theo policy của OpenRouter
-          'X-Title': 'VCL_Discord_Bot'
-        },
-        body: JSON.stringify({
-          model: modelName,
-          messages: apiMessages,
-          temperature: 0.7,
-          max_tokens: 4000
-        })
-      });
-
-      if (!res.ok) {
-        const errBody = await res.text();
-        throw new Error(`HTTP Error ${res.status}: ${errBody}`);
-      }
-
-      const data = await res.json();
-      if (data.choices && data.choices.length > 0) {
-        responseText = data.choices[0].message.content;
-        console.log(`✅ [AI Chat] Model ${modelName} đã trả lời thành công!`);
-        break; // Lấy được câu trả lời thì thoát vòng lặp ngay
-      } else {
-        throw new Error('OpenRouter không trả về nội dung.');
-      }
-
-    } catch (err) {
-      console.warn(`⚠️ [AI Chat] Model ${modelName} sập/quá tải: ${err.message}. Đang đổi model...`);
-      lastErrorMsg = err.message;
-    }
-  }
-
-  // Nếu tất cả model trong mảng đều sập
-  if (!responseText) {
-    console.error('[AI Chat] Toàn bộ model đều thất bại. Lỗi cuối:', lastErrorMsg);
-    return '❌ Hiện tại tất cả các lõi AI đều đang bận. Bạn đợi một chút rồi hỏi lại mình nhé!';
-  }
-
-  responseText = String(responseText || '').trim();
-
-  // Lưu lịch sử lại để giữ ngữ cảnh cho câu sau
-  history.push({ role: 'user', content: sanitizedUserText });
-  history.push({ role: 'assistant', content: responseText });
-  if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
-
-  histories.set(userId, history);
-
-  return responseText;
-}
-
 async function handleGeminiResponse(message, allowSwear) {
   const userId = message.author?.id;
   if (!userId) return;
@@ -2254,8 +2127,8 @@ async function handleGeminiResponse(message, allowSwear) {
       if (message.attachments.size > 3) text += `\n(+${message.attachments.size - 3} more)`;
     }
 
-    // Gửi đến OpenRouter (Đã tích hợp auto-fallback)
-    const responseText = await openRouterChatReply(userId, text, allowSwear);
+    // Gửi đến Gemini
+    const responseText = await geminiChatReply(userId, text, allowSwear);
 
     // Cắt tin nhắn tránh limit 2000 ký tự của Discord
     const chunks = splitMessage(responseText, 1900);
