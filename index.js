@@ -6624,7 +6624,7 @@ async function handleOnlineAtc(interaction) {
   }
 }
 
-// ===================== LOGIN =====================
+// ===================== LOGINS =====================
 client.login(TOKEN);
 
 // === WEB SERVER & PING CHÉO ===
