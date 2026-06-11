@@ -1999,109 +1999,139 @@ function getProfilesString() {
   return profileStr;
 }
 
-// ===================== GROQ CHAT (BẢN THÔNG MINH - KHÔNG TRỘN RANDOM) =====================
-// Xếp theo thứ tự ƯU TIÊN: Con nào khôn nhất để trên cùng!
+// ===================== ULTIMATE AI CHAT (GEMINI -> GROQ -> POLLINATIONS) =====================
 const GROQ_MODELS = [
-  'llama-3.3-70b-versatile',        // Ưu tiên 1: Cực kỳ thông minh, kiến thức rộng
-  'deepseek-r1-distill-llama-70b',  // Ưu tiên 2: Vua suy luận logic hiện tại
-  'gemma2-9b-it',                   // Ưu tiên 3: Của Google, xài dự phòng
-  'llama-3.1-8b-instant'            // Cuối cùng: Nhanh nhưng hơi ngáo, chỉ xài khi 3 con kia sập
+  'llama-3.3-70b-versatile', 
+  'deepseek-r1-distill-llama-70b', 
+  'gemma2-9b-it'
 ];
 
-async function groqChatReply(userId, userText, allowSwear) {
+async function ultimateChatReply(userId, userText, allowSwear) {
   const histories = allowSwear ? swearHistories : normalHistories;
   let history = histories.get(userId) || [];
   if (!Array.isArray(history)) history = [];
 
-  if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
+  // Giới hạn 10 tin nhắn để không bị tràn RAM
+  if (history.length > 10) history = history.slice(-10);
 
   const profilesPrompt = getProfilesString();
   const timePrompt = getCurrentTimeForGemini();
 
-  // ĐÃ SỬA LẠI LỜI NHẮC HỆ THỐNG: Kỷ luật thép chống bệnh "lanh chanh"
-  const systemPrompt = `Bạn là tk.chill, một trợ lý AI thông minh trên server Discord.
-Người tạo ra bạn là Lý Thúc Duy (Discord ID: ${OWNER_ID}).
+  const systemPrompt = `Bạn là tk.chill, một trợ lý AI thông minh trên Discord. Người tạo ra bạn là Lý Thúc Duy (Discord ID: ${OWNER_ID}).
 
-[KIẾN THỨC THỰC TẾ - GENERAL KNOWLEDGE]
-- BẮT BUỘC sử dụng dữ liệu huấn luyện của bạn để trả lời chính xác các câu hỏi về luật pháp, lịch sử, thế giới thực, hoặc tổ chức hàng không (VD: VATSIM, IVAO, VCLvACC).
+[KIẾN THỨC VÀ TÌM KIẾM]
+- Nếu bạn có khả năng tìm kiếm Google, hãy TỰ ĐỘNG TRA CỨU thông tin về VATSIM (VD: Director VATSEA1, VCLvACC), thời tiết, luật pháp, chuyến bay để trả lời thật chính xác.
+- (Lưu ý: Director VCLvACC hiện tại là Vũ Việt Phương).
 
-[CƠ SỞ DỮ LIỆU THÀNH VIÊN - LOCAL PROFILES]
-Đây là dữ liệu ẨN về thành viên server. ĐỌC KỸ LUẬT SAU:
-1. KHÔNG BAO GIỜ tự động nhắc đến bất kỳ ai trong danh sách này nếu người dùng không hỏi trực tiếp về họ.
-2. Nếu người dùng hỏi về một người/tổ chức lạ (VD: VATSEA1), hãy trả lời theo kiến thức thực tế. TUYỆT ĐỐI KHÔNG tự ý bẻ lái, so sánh hay lôi các thành viên trong server (như Tuấn Kiệt, Louis Ly...) vào câu trả lời để lấp liếm.
---- BẮT ĐẦU DANH SÁCH ---
+[CƠ SỞ DỮ LIỆU LOCAL DISCORD]
+- Dưới đây là thông tin thành viên server. CHỈ DÙNG khi người dùng hỏi đích danh về họ. KHÔNG được dùng để suy diễn các chức vụ bên ngoài như VATSIM.
 ${profilesPrompt}
---- KẾT THÚC DANH SÁCH ---
 
 [THÔNG TIN HIỆN TẠI]
-- Người đang chat trực tiếp với bạn ngay lúc này có Discord ID là: ${userId}. Hãy xưng hô cho phù hợp nếu ID này trùng khớp với danh sách ở trên.
+- ID người đang chat trực tiếp với bạn: ${userId}. Xưng hô cho đúng nếu ID có trong Profile.
 - ${timePrompt}
-- ${allowSwear ? 'Bạn là một bot thân thiện, hoà đồng. Được phép chửi thề nhẹ nhàng cho vui nếu người dùng chửi thề trước.' : 'Hãy trả lời bằng tiếng Việt tự nhiên, lịch sự và giúp ích.'}
-
-IMPORTANT: Keep your responses concise, accurate, and under 1000 words. DO NOT hallucinate connections.`;
+- ${allowSwear ? 'Bạn là một bot vui vẻ, có thể chửi thề nhẹ nhàng nếu người dùng bắt đầu trước.' : 'Trả lời lịch sự, chuyên nghiệp.'}`;
 
   const sanitizedUserText = String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS);
-
-  const apiMessages = [
-    { role: 'system', content: systemPrompt },
-    ...history,
-    { role: 'user', content: sanitizedUserText }
-  ];
-
   let responseText = null;
-  let lastErrorMsg = '';
-  
-  const fetch = (await import('node-fetch')).default;
 
-  // XÓA BỎ LỆNH RANDOM MODEL. BÂY GIỜ CHẠY THEO THỨ TỰ TỪ TRÊN XUỐNG!
-  for (const modelName of GROQ_MODELS) {
-    try {
-      console.log(`[AI Chat] Đang gọi Groq (Model: ${modelName})...`);
+  // ----------------------------------------------------------------
+  // TẦNG 1: THỬ GỌI GEMINI 2.0 (CÓ INTERNET)
+  // ----------------------------------------------------------------
+  try {
+    console.log(`[AI Chat] Đang hỏi Gemini 2.0 Flash...`);
+    
+    // Đổi lịch sử về chuẩn của Gemini
+    const geminiHistory = history.map(msg => ({
+      role: msg.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: msg.content }]
+    }));
+
+    const chat = geminiModel.startChat({
+      history: geminiHistory,
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      generationConfig: { maxOutputTokens: 2000, temperature: 0.3 },
+    });
+
+    const result = await chat.sendMessage(sanitizedUserText);
+    responseText = result.response.text();
+    console.log(`✅ [AI Chat] Gemini trả lời xuất sắc!`);
+    
+  } catch (geminiErr) {
+    console.warn(`⚠️ [AI Chat] Gemini quá tải/lỗi (${geminiErr.message}). Chuyển sang Tầng 2 (Groq)...`);
+    
+    // Chuẩn bị mảng tin nhắn cho Groq / Pollinations
+    const apiMessages = [
+      { role: 'system', content: systemPrompt },
+      ...history,
+      { role: 'user', content: sanitizedUserText }
+    ];
+
+    // ----------------------------------------------------------------
+    // TẦNG 2: THỬ DÀN MODEL CỦA GROQ (LLAMA 3.3, DEEPSEEK)
+    // ----------------------------------------------------------------
+    const fetch = (await import('node-fetch')).default;
+    
+    for (const modelName of GROQ_MODELS) {
+      if (responseText) break; // Lấy được câu trả lời thì dừng
       
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: modelName,
-          messages: apiMessages,
-          temperature: 0.3, // Giảm nhiệt độ xuống 0.3 để câu trả lời nghiêm túc và ít bịa đặt hơn
-          max_tokens: 4000
-        })
-      });
+      try {
+        console.log(`[AI Chat] Đang gọi Groq (${modelName})...`);
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: modelName,
+            messages: apiMessages,
+            temperature: 0.3,
+            max_tokens: 2000
+          })
+        });
 
-      if (!res.ok) {
-        const errBody = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errBody}`);
+        if (res.ok) {
+          const data = await res.json();
+          responseText = data.choices[0].message.content;
+          console.log(`✅ [AI Chat] Groq (${modelName}) gánh tạ thành công!`);
+        }
+      } catch (groqErr) {
+        console.warn(`⚠️ [AI Chat] Groq ${modelName} sập.`);
       }
+    }
 
-      const data = await res.json();
-      if (data.choices && data.choices.length > 0) {
-        responseText = data.choices[0].message.content;
-        console.log(`✅ [AI Chat] Model ${modelName} trả lời thành công!`);
-        break; // Lấy được câu trả lời từ con thông minh nhất thì thoát vòng lặp ngay
+    // ----------------------------------------------------------------
+    // TẦNG 3: NẾU GROQ CŨNG SẬP NỐT -> GỌI POLLINATIONS BẤT TỬ
+    // ----------------------------------------------------------------
+    if (!responseText) {
+      console.warn(`⚠️ [AI Chat] Groq cũng sập. Kích hoạt Pollinations...`);
+      try {
+        const res = await fetch('https://text.pollinations.ai/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: apiMessages, model: 'openai' })
+        });
+        if (res.ok) {
+          responseText = await res.text();
+          console.log(`✅ [AI Chat] Pollinations đội lốt thành công!`);
+        }
+      } catch (pollErr) {
+        console.error('❌ [AI Chat] Cạn lời, các hệ thống AI đều sập.');
       }
-
-    } catch (err) {
-      console.warn(`⚠️ [AI Chat] Model ${modelName} lỗi: ${err.message}. Chuyển sang model dự phòng...`);
-      lastErrorMsg = err.message;
     }
   }
 
+  // Chốt hạ: Nếu sau 3 tầng vẫn thất bại
   if (!responseText) {
-    console.error('[AI Chat] Toàn bộ Groq model đều thất bại. Lỗi cuối:', lastErrorMsg);
-    return '❌ Hệ thống đang tạm bảo trì hoặc quá tải. Bạn đợi mình xíu rồi hỏi lại nhé!';
+    return '❌ Hệ thống AI hiện đang nghỉ ngơi, bạn đợi chút rồi hỏi lại mình nhé!';
   }
 
   responseText = String(responseText || '').trim();
 
-  // Lưu lịch sử
+  // Lưu lịch sử chung (Chuẩn OpenAI)
   history.push({ role: 'user', content: sanitizedUserText });
   history.push({ role: 'assistant', content: responseText });
-  if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
-
   histories.set(userId, history);
 
   return responseText;
@@ -2235,7 +2265,7 @@ async function handleGeminiResponse(message, allowSwear) {
       if (message.attachments.size > 3) text += `\n(+${message.attachments.size - 3} more)`;
     }
 
-    const responseText = await groqChatReply(userId, text, allowSwear);
+    const responseText = await ultimateChatReply(userId, text, allowSwear);
 
     // Cắt tin nhắn tránh limit 2000 ký tự của Discord
     const chunks = splitMessage(responseText, 1900);
