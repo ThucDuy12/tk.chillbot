@@ -3119,30 +3119,36 @@ client.once('ready', async () => {
   } catch (error) {
     console.error('❌ Lỗi kéo dữ liệu Simbrief Users:', error);
   }
-  // ---------------------------------------------------
-  // ================= TÍNH NĂNG: HẸN GIỜ CHẴN LEADERBOARD =================
+  // ================= TÍNH NĂNG: HẸN GIỜ CHẴN LEADERBOARD (FIX TRÒN GIỜ) =================
   function startHourlyLeaderboard() {
+    // 1. CHẠY NGAY LẬP TỨC 1 LẦN KHI BẬT BOT ĐỂ UPDATE DATA MỚI NHẤT
+    updateControllerLeaderboardEmbed();
+    updatePilotLeaderboardEmbed();
+    console.log(`[Leaderboard] Đã cập nhật phát súng đầu tiên khi khởi động bot.`);
+
+    // 2. TỰ ĐỘNG TÍNH TOÁN ĐỂ CANH ĐÚNG GIỜ CHẴN TIẾP THEO
     const now = new Date();
-    // Tính chính xác từng mili-giây cho đến phút 00, giây 00 của giờ tiếp theo
     const msUntilNextHour = (60 - now.getMinutes()) * 60000 - now.getSeconds() * 1000 - now.getMilliseconds();
 
-    console.log(`[Leaderboard] Đã lên lịch cập nhật giờ chẵn. Bản tin tiếp theo sẽ lên sóng sau: ${Math.round(msUntilNextHour/60000)} phút nữa.`);
+    console.log(`[Leaderboard] Bộ hẹn giờ thông minh đã bật! Sẽ tự động canh và cập nhật vào ĐÚNG GIỜ CHẴN tiếp theo sau: ${Math.round(msUntilNextHour/60000)} phút nữa.`);
 
+    // 3. ĐỢI ĐẾN ĐÚNG GIỜ CHẴN TIẾP THEO (VD: ĐÚNG 8h00 TỐI) THÌ KHÓA VÒNG LẶP
     setTimeout(() => {
-      // 1. Chạy phát súng đầu tiên vào ĐÚNG GIỜ CHẴN (VD: 13:00, 14:00)
       updateControllerLeaderboardEmbed();
       updatePilotLeaderboardEmbed();
+      console.log(`[Leaderboard] Đã chạm mốc giờ chẵn! Bắt đầu khóa vòng lặp chuẩn 1 tiếng/lần.`);
 
-      // 2. Thiết lập vòng lặp cứ đúng 1 tiếng (3.600.000 ms) lặp lại một lần
+      // Từ giây phút này trở đi, cứ đúng 60 phút (9h00, 10h00, 11h00...) là nó tự nã lệnh
       setInterval(() => {
         updateControllerLeaderboardEmbed();
         updatePilotLeaderboardEmbed();
+        console.log(`[Leaderboard] Cập nhật định kỳ giờ chẵn thành công.`);
       }, 60 * 60 * 1000);
       
     }, msUntilNextHour);
   }
   
-  // Kích hoạt bộ đếm
+  // Kích hoạt bộ đếm giờ chẵn
   startHourlyLeaderboard();
   // =========================================================================
   // restore bans timeouts
