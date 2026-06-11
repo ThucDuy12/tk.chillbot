@@ -1999,19 +1999,13 @@ function getProfilesString() {
   return profileStr;
 }
 
-// ===================== GROQ CHAT (SIÊU NHANH & ỔN ĐỊNH) =====================
+// ===================== GROQ CHAT (BẢN THÔNG MINH - KHÔNG TRỘN RANDOM) =====================
+// Xếp theo thứ tự ƯU TIÊN: Con nào khôn nhất để trên cùng!
 const GROQ_MODELS = [
-  // Lõi 1: Trùm cuối Llama 3.3 (70 tỷ tham số) - Thông minh toàn diện, văn hay chữ tốt
-  'llama-3.3-70b-versatile', 
-  
-  // Lõi 2: DeepSeek R1 (70 tỷ tham số) - Siêu hot hiện nay, tư duy logic cực đỉnh
-  'deepseek-r1-distill-llama-70b', 
-  
-  // Lõi 3: Hàng tuyển của Google (9 tỷ tham số) - Nhỏ nhưng có võ, tiếng Việt rất mượt
-  'gemma2-9b-it',
-  
-  // Lõi 4: Lốp dự phòng cuối cùng (Nhanh nhưng hơi ngáo, chỉ xài khi 3 con kia sập)
-  'llama-3.1-8b-instant' 
+  'llama-3.3-70b-versatile',        // Ưu tiên 1: Cực kỳ thông minh, kiến thức rộng
+  'deepseek-r1-distill-llama-70b',  // Ưu tiên 2: Vua suy luận logic hiện tại
+  'gemma2-9b-it',                   // Ưu tiên 3: Của Google, xài dự phòng
+  'llama-3.1-8b-instant'            // Cuối cùng: Nhanh nhưng hơi ngáo, chỉ xài khi 3 con kia sập
 ];
 
 async function groqChatReply(userId, userText, allowSwear) {
@@ -2021,20 +2015,27 @@ async function groqChatReply(userId, userText, allowSwear) {
 
   if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
 
-  const fixedPrompt = `You were created by the owner with ID ${OWNER_ID}.`;
-  const birthday = 'Bạn sinh ngày 25 tháng 10 năm 2025.';
   const profilesPrompt = getProfilesString();
   const timePrompt = getCurrentTimeForGemini();
 
-  // ---> THÊM ĐOẠN NÀY VÀO ĐỂ BOT NHẬN DIỆN CHỦ <---
-  const currentUserPrompt = `THÔNG TIN QUAN TRỌNG NHẤT: Người đang nói chuyện với bạn ngay lúc này có Discord ID là: ${userId}. Hãy nhìn vào danh sách "Profiles of users" ở trên để biết họ là ai. Nếu ID này trùng với ID của người tạo ra bạn (${OWNER_ID}), hãy xưng hô thật ngoan ngoãn và nhận chủ nhé!`;
+  // ĐÃ SỬA LẠI LỜI NHẮC HỆ THỐNG: Phân định rạch ròi kiến thức thực tế và profile Discord
+  const systemPrompt = `Bạn là tk.chill, một trợ lý AI thông minh trên server Discord.
+Người tạo ra bạn là Lý Thúc Duy (Discord ID: ${OWNER_ID}).
 
-  const modePrompt = allowSwear
-    ? 'Bạn là một bot thân thiện, hoà đồng, giúp mọi người thư giãn. Nếu người khác chửi thề thì bạn có thể chửi thề nhẹ lại cho vui (đừng quá đà).'
-    : 'You are a helpful bot. You can use natural Vietnamese.';
+[KIẾN THỨC THỰC TẾ - GENERAL KNOWLEDGE]
+- Khi trả lời các câu hỏi về luật pháp, lịch sử, khoa học, hàng không thực tế... hãy BẮT BUỘC sử dụng tệp dữ liệu huấn luyện của bạn để trả lời thật chính xác. (Ví dụ: Tại Việt Nam xe 50cc KHÔNG yêu cầu giấy phép lái xe; Director của VCLvACC thực tế là Vũ Việt Phương).
+- Tuyệt đối không dùng thông tin Profile Discord để suy diễn cho các tổ chức ngoài đời thật.
 
-  // Đừng quên nhét currentUserPrompt vào systemPrompt tổng
-  const systemPrompt = `${fixedPrompt}\n${profilesPrompt}\n${timePrompt}\n${modePrompt}\n${currentUserPrompt}\n\nIMPORTANT: Keep your responses under 1000 words when possible. Be concise and to the point.\n${birthday}`;
+[THÔNG TIN THÀNH VIÊN DISCORD - LOCAL PROFILES]
+- Dưới đây là danh sách những người dùng trong server này. CHỈ sử dụng thông tin này khi người dùng hỏi về ai đó trong server Discord:
+${profilesPrompt}
+
+[THÔNG TIN HIỆN TẠI]
+- Người đang chat trực tiếp với bạn ngay lúc này có Discord ID là: ${userId}. Hãy xưng hô cho phù hợp dựa vào danh sách Profile ở trên.
+- ${timePrompt}
+- ${allowSwear ? 'Bạn là một bot thân thiện, hoà đồng. Được phép chửi thề nhẹ nhàng cho vui nếu người dùng chửi thề trước.' : 'Hãy trả lời bằng tiếng Việt tự nhiên, lịch sự và giúp ích.'}
+
+IMPORTANT: Keep your responses concise, accurate, and under 1000 words.`;
 
   const sanitizedUserText = String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS);
 
@@ -2049,24 +2050,21 @@ async function groqChatReply(userId, userText, allowSwear) {
   
   const fetch = (await import('node-fetch')).default;
 
-  // Trộn danh sách model để giảm tải
-  const shuffledModels = [...GROQ_MODELS].sort(() => 0.5 - Math.random());
-
-  for (const modelName of shuffledModels) {
+  // XÓA BỎ LỆNH RANDOM MODEL. BÂY GIỜ CHẠY THEO THỨ TỰ TỪ TRÊN XUỐNG!
+  for (const modelName of GROQ_MODELS) {
     try {
       console.log(`[AI Chat] Đang gọi Groq (Model: ${modelName})...`);
       
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: {
-          // Lưu ý: Nhớ thêm GROQ_API_KEY vào biến môi trường
           'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           model: modelName,
           messages: apiMessages,
-          temperature: 0.7,
+          temperature: 0.3, // Giảm nhiệt độ xuống 0.3 để câu trả lời nghiêm túc và ít bịa đặt hơn
           max_tokens: 4000
         })
       });
@@ -2079,19 +2077,19 @@ async function groqChatReply(userId, userText, allowSwear) {
       const data = await res.json();
       if (data.choices && data.choices.length > 0) {
         responseText = data.choices[0].message.content;
-        console.log(`✅ [AI Chat] Groq trả lời thành công!`);
-        break;
+        console.log(`✅ [AI Chat] Model ${modelName} trả lời thành công!`);
+        break; // Lấy được câu trả lời từ con thông minh nhất thì thoát vòng lặp ngay
       }
 
     } catch (err) {
-      console.warn(`⚠️ [AI Chat] Groq model ${modelName} lỗi: ${err.message}. Đang đổi...`);
+      console.warn(`⚠️ [AI Chat] Model ${modelName} lỗi: ${err.message}. Chuyển sang model dự phòng...`);
       lastErrorMsg = err.message;
     }
   }
 
   if (!responseText) {
     console.error('[AI Chat] Toàn bộ Groq model đều thất bại. Lỗi cuối:', lastErrorMsg);
-    return '❌ Hệ thống AI đang tạm bảo trì. Bạn đợi mình xíu rồi hỏi lại nhé!';
+    return '❌ Hệ thống đang tạm bảo trì hoặc quá tải. Bạn đợi mình xíu rồi hỏi lại nhé!';
   }
 
   responseText = String(responseText || '').trim();
