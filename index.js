@@ -2905,13 +2905,10 @@ async function scanAndAssignPendingRole() {
 
 // =========================================================================
 
-// ===================== READY =====================
 client.once('ready', async () => {
-  console.log(`Bot logged in as ${client.user.tag}`);
-  // Kiểm tra award mỗi 6 giờ (và khi bot khởi động)
-  setInterval(checkAndSendMonthlyAwards, 6 * 60 * 60 * 1000);
-
- // 1. Kết nối Database
+  console.log(`Bot ${client.user.tag} đã online!`);
+  
+  // 1. Kết nối Database
   await db.connectDB();
 
   // 2. Load profile từ MongoDB vào RAM
