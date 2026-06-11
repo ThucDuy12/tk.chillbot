@@ -18,6 +18,8 @@ const nodeFetch = require('node-fetch');
 const https = require('https');
 const deletedImageCache = new Map();
 
+const db = require('./database');
+
 // Cỗ máy tải file vật lý bằng HTTPS chuẩn của Node.js (Chống mọi lỗi thư viện)
 function downloadBuffer(url) {
   return new Promise((resolve, reject) => {
@@ -2000,39 +2002,53 @@ function getProfilesString() {
 }
 
 // ===================== ULTIMATE AI CHAT (GEMINI -> GROQ -> POLLINATIONS) =====================
+
+// Lấy lịch sử trực tiếp từ MongoDB (không sợ mất khi restart)
+let history = await db.getChatHistory(channelId) || [];
+if (!Array.isArray(history)) history = [];
+
 const GROQ_MODELS = [
   'llama-3.3-70b-versatile', 
   'deepseek-r1-distill-llama-70b', 
   'gemma2-9b-it'
 ];
 
-async function ultimateChatReply(userId, userText, allowSwear) {
+// Đổi tham số để nhận thêm channelId và userName
+async function ultimateChatReply(channelId, userId, userName, userText, allowSwear) {
   const histories = allowSwear ? swearHistories : normalHistories;
-  let history = histories.get(userId) || [];
+  
+  // DÙNG KÊNH LÀM CHÌA KHÓA: Mọi người trong cùng 1 kênh sẽ xài chung 1 cuốn sổ lịch sử
+  let history = histories.get(channelId) || [];
   if (!Array.isArray(history)) history = [];
 
-  // Giới hạn 10 tin nhắn để không bị tràn RAM
-  if (history.length > 10) history = history.slice(-10);
+  // Tăng lên 15 tin nhắn để bot nhớ được mạch truyện nhóm lâu hơn
+  if (history.length > 15) history = history.slice(-15);
 
   const profilesPrompt = getProfilesString();
   const timePrompt = getCurrentTimeForGemini();
 
-  const systemPrompt = `Bạn là tk.chill, một trợ lý AI thông minh trên Discord. Người tạo ra bạn là Lý Thúc Duy (Discord ID: ${OWNER_ID}).
+  const systemPrompt = `Bạn là tk.chill, một trợ lý AI thông minh trên Discord. Người tạo ra bạn là Lý Thúc Duy (Discord ID: ${OWNER_ID}), lưu ý tốt khoe xấu che nếu ai khen hãy lôi tui ra còn chê thì giấu tui đi.
+
+[BỐI CẢNH TRÒ CHUYỆN NHÓM]
+- Bạn đang ở trong một phòng chat chung. Sẽ có nhiều người luân phiên nói chuyện với bạn.
+- Lời nói của người dùng sẽ có định dạng: "[Tên người nói - ID]: Nội dung".
+- Hãy đọc lịch sử để hiểu mạch câu chuyện, hiểu ai đang nói chuyện với ai, và nếu ai đó trả lời nối tiếp chủ đề của người trước, hãy trả lời cho mượt mà.
 
 [KIẾN THỨC VÀ TÌM KIẾM]
-- Nếu bạn có khả năng tìm kiếm Google, hãy TỰ ĐỘNG TRA CỨU thông tin về VATSIM (VD: Director VATSEA1, VCLvACC), thời tiết, luật pháp, chuyến bay để trả lời thật chính xác.
-- (Lưu ý: Director VCLvACC hiện tại là Vũ Việt Phương).
+- BẮT BUỘC sử dụng tính năng tìm kiếm Internet để tra cứu sự thật (VD: Director VATSEA1, VCLvACC...). 
+- Lưu ý: Director VCLvACC hiện tại là Vũ Việt Phương.
 
 [CƠ SỞ DỮ LIỆU LOCAL DISCORD]
-- Dưới đây là thông tin thành viên server. CHỈ DÙNG khi người dùng hỏi đích danh về họ. KHÔNG được dùng để suy diễn các chức vụ bên ngoài như VATSIM.
+- Dưới đây là thông tin thành viên server. CHỈ DÙNG khi người dùng hỏi đích danh về họ. KHÔNG dùng để suy diễn các chức vụ bên ngoài.
 ${profilesPrompt}
 
 [THÔNG TIN HIỆN TẠI]
-- ID người đang chat trực tiếp với bạn: ${userId}. Xưng hô cho đúng nếu ID có trong Profile.
 - ${timePrompt}
 - ${allowSwear ? 'Bạn là một bot vui vẻ, có thể chửi thề nhẹ nhàng nếu người dùng bắt đầu trước.' : 'Trả lời lịch sự, chuyên nghiệp.'}`;
 
-  const sanitizedUserText = String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS);
+  // Dán nhãn người nói vào tin nhắn để AI phân biệt được các giọng nói khác nhau
+  const groupUserText = `[${userName} - ID: ${userId}]: ${String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS)}`;
+  
   let responseText = null;
 
   // ----------------------------------------------------------------
@@ -2129,10 +2145,14 @@ ${profilesPrompt}
 
   responseText = String(responseText || '').trim();
 
-  // Lưu lịch sử chung (Chuẩn OpenAI)
-  history.push({ role: 'user', content: sanitizedUserText });
+ // Lưu lịch sử chung vào KÊNH
+  history.push({ role: 'user', content: groupUserText });
   history.push({ role: 'assistant', content: responseText });
-  histories.set(userId, history);
+  
+  // Giữ lại tối đa 15 tin nhắn để tối ưu dung lượng DB
+  if (history.length > 15) history = history.slice(-15);
+  
+  await db.saveChatHistory(channelId, history);
 
   return responseText;
 }
@@ -2265,7 +2285,11 @@ async function handleGeminiResponse(message, allowSwear) {
       if (message.attachments.size > 3) text += `\n(+${message.attachments.size - 3} more)`;
     }
 
-    const responseText = await ultimateChatReply(userId, text, allowSwear);
+    const userName = message.member?.displayName || message.author.username;
+    const channelId = message.channel.id;
+
+    // Gửi đến AI với đầy đủ Bối cảnh Kênh và Tên người dùng
+    const responseText = await ultimateChatReply(channelId, userId, userName, text, allowSwear);
 
     // Cắt tin nhắn tránh limit 2000 ký tự của Discord
     const chunks = splitMessage(responseText, 1900);
@@ -2887,6 +2911,47 @@ client.once('ready', async () => {
   // Kiểm tra award mỗi 6 giờ (và khi bot khởi động)
   setInterval(checkAndSendMonthlyAwards, 6 * 60 * 60 * 1000);
 
+ // 1. Kết nối Database
+  await db.connectDB();
+
+  // 2. Load profile từ MongoDB vào RAM
+  try {
+    profiles = await db.getAllProfiles();
+    console.log(`✅ Đã nạp ${Object.keys(profiles).length} Profile từ MongoDB vào RAM.`);
+    
+    // ==================== BƠM DỮ LIỆU CŨ LÊN MONGODB ====================
+    const oldData = {
+      "1094252826357670038": {
+        "name": "Lý Thúc Duy",
+        "age": "14",
+        "bio": "Tui là người tạo ra bot tk.chill và đang là Admin, DEV của server tk.chill, tên gọi khác của tôi là Louis Ly(hãy dùng tên này để gọi tôi)."
+      },
+      "856704693215166474": {
+        "name": "Nguyễn Trần Tuấn Kiệt",
+        "age": "18",
+        "bio": "Biệt danh là しいな まひる, @kiet1510 là tài khoản discord của tôi. Hiện tôi là Admin tạo ra server này, thấy tôi có role DEV và Coder nữa. Và tôi cũng sở hữu kênh TikTok với hơn 1k7 người theo dõi có nội dung về máy bay. Tôi đang là ATC trên mạng bay VATSIM với ranting S2 và AS3 ở IVAO."
+      }
+    };
+
+    let hasMigration = false;
+    for (const [id, info] of Object.entries(oldData)) {
+      // Nếu ID này chưa có trong RAM (tức là chưa có trên MongoDB)
+      if (!profiles[id]) {
+        await db.saveProfile(id, info); // Đẩy thẳng lên MongoDB
+        profiles[id] = info;            // Cập nhật luôn vào RAM
+        hasMigration = true;
+      }
+    }
+
+    if (hasMigration) {
+      console.log("▲ [Profiles Data] Đã tự động bơm dữ liệu cũ của Louis Ly và Tuấn Kiệt lên MongoDB!");
+    }
+    // ====================================================================
+
+  } catch (e) {
+    console.error('Lỗi nạp profiles:', e);
+  }
+
   // Kiểm tra ngay khi khởi động
   setTimeout(() => {
     checkAndSendMonthlyAwards();
@@ -3095,47 +3160,6 @@ client.once('ready', async () => {
     }
   } catch (error) {
     console.error('❌ Lỗi kéo dữ liệu Pending Users:', error);
-  }
-  // --- KÉO DATA PROFILES TỪ SHEET ---
-  try {
-    if (typeof loadProfilesSheet === 'function') {
-      const data = await loadProfilesSheet();
-      if (data) {
-        profiles = data;
-        console.log(`✅ Đã tải thành công ${Object.keys(profiles).length} Profiles từ Google Sheets.`);
-      }
-      
-      // ==================== ĐOẠN NÀY ĐỂ NẠP DỮ LIỆU CŨ ====================
-      const oldData = {
-        "1094252826357670038": {
-          "name": "Lý Thúc Duy",
-          "age": "14",
-          "bio": "Tui là người tạo ra bot tk.chill và đang là Admin, DEV của server tk.chill, tên gọi khác của tôi là Louis Ly(hãy dùng tên này để gọi tôi)."
-        },
-        "856704693215166474": {
-          "name": "Nguyễn Trần Tuấn Kiệt",
-          "age": "18",
-          "bio": "Biệt danh là しいな まひる, @kiet1510 là tài khoản discord của tôi. Hiện tôi là Admin tạo ra server này, thấy tôi có role DEV và Coder nữa. Và tôi cũng sở hữu kênh TikTok với hơn 1k7 người theo dõi có nội dung về máy bay. Tôi đang là ATC trên mạng bay VATSIM với ranting S2 và AS3 ở IVAO."
-        }
-      };
-
-      let hasMigration = false;
-      for (const [id, info] of Object.entries(oldData)) {
-        // Nếu trên sheet chưa có ID này thì mới nạp vào để tránh ghi đè dữ liệu mới
-        if (!profiles[id]) {
-          profiles[id] = info;
-          hasMigration = true;
-        }
-      }
-
-      if (hasMigration) {
-        await saveProfilesSheet(profiles);
-        console.log("▲ [Profiles Data] Đã tự động nạp dữ liệu cũ của Louis Ly và Tuấn Kiệt lên Google Sheets!");
-      }
-      // ===================================================================
-    }
-  } catch (error) {
-    console.error('❌ Lỗi kéo dữ liệu Profiles:', error);
   }
   // ---------------------------------------------------
   // --- KÉO DATA SIMBRIEF TỪ SHEET ---
@@ -4827,16 +4851,16 @@ async function handleModal(interaction) {
     const age = interaction.fields.getTextInputValue('age');
     const bio = interaction.fields.getTextInputValue('bio');
     
-    // Lưu vào RAM
-    profiles[interaction.user.id] = { name, age, bio };
-    
-    // ✅ Dòng mới: Đẩy lên Google Sheets
+    // Cập nhật lên MongoDB Atlas
     try {
-      await saveProfilesSheet(profiles);
-      await interaction.reply({ content: '✅ Profile của bạn đã được lưu vĩnh viễn lên hệ thống!', ephemeral: true });
+      await db.saveProfile(interaction.user.id, { name, age, bio });
+      // Cập nhật luôn vào RAM để AI đọc được ngay lập tức
+      profiles[interaction.user.id] = { name, age, bio }; 
+      
+      await interaction.reply({ content: '✅ Profile của bạn đã được lưu vĩnh viễn lên MongoDB!', ephemeral: true });
     } catch (err) {
-      console.error('Lỗi khi lưu profile lên sheet:', err);
-      await interaction.reply({ content: '⚠️ Đã lưu vào bộ nhớ tạm nhưng lỗi khi đẩy lên Google Sheets.', ephemeral: true });
+      console.error(err);
+      await interaction.reply({ content: '⚠️ Lỗi lưu Database.', ephemeral: true });
     }
     return;
   }
