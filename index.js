@@ -2146,7 +2146,9 @@ async function openRouterChatReply(userId, userText, allowSwear) {
   try {
     console.log(`[AI Chat] Đang gửi yêu cầu tới Pollinations...`);
     
-    // Dùng fetch gốc của Node.js, KHÔNG CẦN import node-fetch nữa
+    // Gọi lại thư viện node-fetch để fix lỗi "fetch is not a function"
+    const fetch = (await import('node-fetch')).default;
+
     const res = await fetch('https://text.pollinations.ai/', {
       method: 'POST',
       headers: {
@@ -2154,17 +2156,15 @@ async function openRouterChatReply(userId, userText, allowSwear) {
       },
       body: JSON.stringify({ 
         messages: apiMessages,
-        model: 'openai' // Tự động mượn model tốt nhất
+        model: 'openai' 
       })
     });
 
     if (!res.ok) {
-        // Đọc thêm nội dung web trả về để biết vì sao nó từ chối
         const errText = await res.text();
         throw new Error(`HTTP ${res.status}: ${errText}`);
     }
 
-    // Dịch vụ này trả thẳng về text chữ
     responseText = await res.text();
     console.log(`✅ [AI Chat] Nhận phản hồi thành công!`);
 
