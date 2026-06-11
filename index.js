@@ -2026,11 +2026,15 @@ async function groqChatReply(userId, userText, allowSwear) {
   const profilesPrompt = getProfilesString();
   const timePrompt = getCurrentTimeForGemini();
 
+  // ---> THÊM ĐOẠN NÀY VÀO ĐỂ BOT NHẬN DIỆN CHỦ <---
+  const currentUserPrompt = `THÔNG TIN QUAN TRỌNG NHẤT: Người đang nói chuyện với bạn ngay lúc này có Discord ID là: ${userId}. Hãy nhìn vào danh sách "Profiles of users" ở trên để biết họ là ai. Nếu ID này trùng với ID của người tạo ra bạn (${OWNER_ID}), hãy xưng hô thật ngoan ngoãn và nhận chủ nhé!`;
+
   const modePrompt = allowSwear
     ? 'Bạn là một bot thân thiện, hoà đồng, giúp mọi người thư giãn. Nếu người khác chửi thề thì bạn có thể chửi thề nhẹ lại cho vui (đừng quá đà).'
     : 'You are a helpful bot. You can use natural Vietnamese.';
 
-  const systemPrompt = `${fixedPrompt}\n${profilesPrompt}\n${timePrompt}\n${modePrompt}\n\nIMPORTANT: Keep your responses under 1000 words when possible. Be concise and to the point.\n${birthday}`;
+  // Đừng quên nhét currentUserPrompt vào systemPrompt tổng
+  const systemPrompt = `${fixedPrompt}\n${profilesPrompt}\n${timePrompt}\n${modePrompt}\n${currentUserPrompt}\n\nIMPORTANT: Keep your responses under 1000 words when possible. Be concise and to the point.\n${birthday}`;
 
   const sanitizedUserText = String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS);
 
