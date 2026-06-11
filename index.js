@@ -2848,28 +2848,6 @@ async function scanAndAssignPendingRole() {
   }
 }
 
-// ================= TÍNH NĂNG 2: HẸN GIỜ CHẴN LEADERBOARD =================
-function scheduleHourlyLeaderboard() {
-  const now = new Date();
-  // Tính chính xác số mili-giây còn lại cho đến giờ chẵn tiếp theo
-  const msUntilNextHour = (60 - now.getMinutes()) * 60000 - now.getSeconds() * 1000 - now.getMilliseconds();
-
-  console.log(`[Leaderboard] Đã lên lịch cập nhật. Chạy lần tới sau: ${Math.round(msUntilNextHour/60000)} phút nữa.`);
-
-  setTimeout(() => {
-    // Chạy lần đầu tiên vào đúng giờ chẵn
-    updateControllerLeaderboardEmbed();
-    updatePilotLeaderboardEmbed();
-
-    // Thiết lập vòng lặp mỗi 1 tiếng kể từ giờ chẵn đó
-    setInterval(() => {
-      updateControllerLeaderboardEmbed();
-      updatePilotLeaderboardEmbed();
-    }, 60 * 60 * 1000);
-  }, msUntilNextHour);
-}
-
-scheduleHourlyLeaderboard();
 // =========================================================================
 
 // ===================== READY =====================
@@ -3142,7 +3120,31 @@ client.once('ready', async () => {
     console.error('❌ Lỗi kéo dữ liệu Simbrief Users:', error);
   }
   // ---------------------------------------------------
+  // ================= TÍNH NĂNG: HẸN GIỜ CHẴN LEADERBOARD =================
+  function startHourlyLeaderboard() {
+    const now = new Date();
+    // Tính chính xác từng mili-giây cho đến phút 00, giây 00 của giờ tiếp theo
+    const msUntilNextHour = (60 - now.getMinutes()) * 60000 - now.getSeconds() * 1000 - now.getMilliseconds();
 
+    console.log(`[Leaderboard] Đã lên lịch cập nhật giờ chẵn. Bản tin tiếp theo sẽ lên sóng sau: ${Math.round(msUntilNextHour/60000)} phút nữa.`);
+
+    setTimeout(() => {
+      // 1. Chạy phát súng đầu tiên vào ĐÚNG GIỜ CHẴN (VD: 13:00, 14:00)
+      updateControllerLeaderboardEmbed();
+      updatePilotLeaderboardEmbed();
+
+      // 2. Thiết lập vòng lặp cứ đúng 1 tiếng (3.600.000 ms) lặp lại một lần
+      setInterval(() => {
+        updateControllerLeaderboardEmbed();
+        updatePilotLeaderboardEmbed();
+      }, 60 * 60 * 1000);
+      
+    }, msUntilNextHour);
+  }
+  
+  // Kích hoạt bộ đếm
+  startHourlyLeaderboard();
+  // =========================================================================
   // restore bans timeouts
   for (const [userId, ban] of Object.entries(bans.users)) {
     const timeLeft = ban.endTime - Date.now();
@@ -3313,11 +3315,6 @@ client.once('ready', async () => {
     vatsimWorker.postMessage('update');
   }, 60 * 1000); // Mỗi phút
   
-  // Cập nhật embed ngay lần đầu
-  setTimeout(() => {
-    updateControllerLeaderboardEmbed();
-    updatePilotLeaderboardEmbed();
-  }, 10000);
   
   console.log('Leaderboard updater scheduled: data every minute, embed every hour');
   
