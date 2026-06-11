@@ -82,6 +82,14 @@ const SUMMARY_MAX_TRANSCRIPT_CHARS = parseInt(process.env.SUMMARY_MAX_TRANSCRIPT
 const GEMINI_MAX_HISTORY_ITEMS = parseInt(process.env.GEMINI_MAX_HISTORY_ITEMS || '20', 10);
 const GEMINI_MAX_USER_TEXT_CHARS = parseInt(process.env.GEMINI_MAX_USER_TEXT_CHARS || '1800', 10);
 
+// ✅ THÊM dòng này vào
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+
+if (!OPENROUTER_API_KEY) {
+  console.error('Missing OPENROUTER_API_KEY in environment.');
+  process.exit(1);
+}
+
 // Thay ID channel này bằng ID channel Dashboard ACDM của bạn
 const ACDM_CHANNEL_ID = process.env.ACDM_CHANNEL_ID || '1503763584105058434'; 
 
@@ -2095,6 +2103,111 @@ async function geminiChatReply(userId, userText, allowSwear) {
   return responseText;
 }
 
+// ===================== OPENROUTER CHAT (AUTO FALLBACK) =====================
+// Danh sách các model xịn và miễn phí (bạn có thể thêm model trả phí vào đây nếu có nạp tiền)
+const OPENROUTER_MODELS = [
+  'google/gemini-2.5-flash-api', 
+  'meta-llama/llama-3-8b-instruct:free',
+  'mistralai/mistral-7b-instruct:free',
+  'microsoft/phi-3-mini-128k-instruct:free',
+  'openchat/openchat-7b:free'
+];
+
+async function openRouterChatReply(userId, userText, allowSwear) {
+  const histories = allowSwear ? swearHistories : normalHistories;
+  let history = histories.get(userId) || [];
+  if (!Array.isArray(history)) history = [];
+
+  if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
+
+  const fixedPrompt = `You were created by the owner with ID ${OWNER_ID}.`;
+  const birthday = 'Bạn sinh ngày 25 tháng 10 năm 2025.';
+  const profilesPrompt = getProfilesString();
+  const timePrompt = getCurrentTimeForGemini();
+
+  const modePrompt = allowSwear
+    ? 'Bạn là một bot thân thiện, hoà đồng, giúp mọi người thư giãn. Nếu người khác chửi thề thì bạn có thể chửi thề nhẹ lại cho vui (đừng quá đà).'
+    : 'You are a helpful bot. You can use natural Vietnamese.';
+
+  const systemPrompt = `${fixedPrompt}\n${profilesPrompt}\n${timePrompt}\n${modePrompt}\n\nIMPORTANT: Keep your responses under 1000 words when possible. Be concise and to the point.\n${birthday}`;
+
+  const sanitizedUserText = String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS);
+
+  // Cấu trúc lại mảng lịch sử chuẩn OpenRouter/OpenAI
+  const apiMessages = [
+    { role: 'system', content: systemPrompt },
+    ...history,
+    { role: 'user', content: sanitizedUserText }
+  ];
+
+  // Trộn ngẫu nhiên danh sách model để giảm tải cho 1 model duy nhất
+  const shuffledModels = [...OPENROUTER_MODELS].sort(() => 0.5 - Math.random());
+  
+  let responseText = null;
+  let lastErrorMsg = '';
+
+  const fetch = (await import('node-fetch')).default;
+
+  // Vòng lặp sinh tử: Thử từng model, cái nào sập thì bắt lỗi chạy cái tiếp theo
+  for (const modelName of shuffledModels) {
+    try {
+      console.log(`[AI Chat] Đang thử gọi model: ${modelName}...`);
+      
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://discord.com', // Bắt buộc theo policy của OpenRouter
+          'X-Title': 'VCL_Discord_Bot'
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: apiMessages,
+          temperature: 0.7,
+          max_tokens: 4000
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP Error ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (data.choices && data.choices.length > 0) {
+        responseText = data.choices[0].message.content;
+        console.log(`✅ [AI Chat] Model ${modelName} đã trả lời thành công!`);
+        break; // Lấy được câu trả lời thì thoát vòng lặp ngay
+      } else {
+        throw new Error('No choices in response');
+      }
+
+    } catch (err) {
+      console.warn(`⚠️ [AI Chat] Model ${modelName} sập/quá tải: ${err.message}. Đang đổi model...`);
+      lastErrorMsg = err.message;
+      // Nghỉ 1 giây trước khi thử model tiếp theo để tránh bị OpenRouter ban IP
+      await new Promise(r => setTimeout(r, 1000)); 
+    }
+  }
+
+  // Nếu tất cả model trong mảng đều sập (cực kỳ hiếm)
+  if (!responseText) {
+    console.error('[AI Chat] Toàn bộ model đều thất bại. Lỗi cuối:', lastErrorMsg);
+    return '❌ Hiện tại tất cả các lõi AI đều đang quá tải. Bạn đợi vài phút rồi hỏi lại mình nhé!';
+  }
+
+  responseText = String(responseText || '').trim();
+
+  // Lưu lịch sử lại để giữ ngữ cảnh cho câu sau
+  history.push({ role: 'user', content: sanitizedUserText });
+  history.push({ role: 'assistant', content: responseText });
+  if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
+
+  histories.set(userId, history);
+
+  return responseText;
+}
+
 async function handleGeminiResponse(message, allowSwear) {
   const userId = message.author?.id;
   if (!userId) return;
@@ -2127,8 +2240,8 @@ async function handleGeminiResponse(message, allowSwear) {
       if (message.attachments.size > 3) text += `\n(+${message.attachments.size - 3} more)`;
     }
 
-    // Gửi đến Gemini
-    const responseText = await geminiChatReply(userId, text, allowSwear);
+    // Gửi đến OpenRouter (Đã tích hợp auto-fallback)
+    const responseText = await openRouterChatReply(userId, text, allowSwear);
 
     // Cắt tin nhắn tránh limit 2000 ký tự của Discord
     const chunks = splitMessage(responseText, 1900);
