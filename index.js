@@ -2001,9 +2001,17 @@ function getProfilesString() {
 
 // ===================== GROQ CHAT (SIÊU NHANH & ỔN ĐỊNH) =====================
 const GROQ_MODELS = [
-  'llama-3.3-70b-versatile', // Con này cực kỳ thông minh
-  'llama-3.1-8b-instant',    // Con này siêu nhanh
-  'mixtral-8x7b-32768'       // Con này văn phong rất mượt
+  // Lõi 1: Trùm cuối Llama 3.3 (70 tỷ tham số) - Thông minh toàn diện, văn hay chữ tốt
+  'llama-3.3-70b-versatile', 
+  
+  // Lõi 2: DeepSeek R1 (70 tỷ tham số) - Siêu hot hiện nay, tư duy logic cực đỉnh
+  'deepseek-r1-distill-llama-70b', 
+  
+  // Lõi 3: Hàng tuyển của Google (9 tỷ tham số) - Nhỏ nhưng có võ, tiếng Việt rất mượt
+  'gemma2-9b-it',
+  
+  // Lõi 4: Lốp dự phòng cuối cùng (Nhanh nhưng hơi ngáo, chỉ xài khi 3 con kia sập)
+  'llama-3.1-8b-instant' 
 ];
 
 async function groqChatReply(userId, userText, allowSwear) {
