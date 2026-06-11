@@ -2144,10 +2144,9 @@ async function openRouterChatReply(userId, userText, allowSwear) {
   let responseText = null;
 
   try {
-    console.log(`[AI Chat] Đang nhờ trạm trung chuyển (Pollinations) đội lốt...`);
-    const fetch = (await import('node-fetch')).default;
+    console.log(`[AI Chat] Đang gửi yêu cầu tới Pollinations...`);
     
-    // Gọi thẳng vào API đội lốt, không cần vòng lặp, không cần API Key
+    // Dùng fetch gốc của Node.js, KHÔNG CẦN import node-fetch nữa
     const res = await fetch('https://text.pollinations.ai/', {
       method: 'POST',
       headers: {
@@ -2155,18 +2154,23 @@ async function openRouterChatReply(userId, userText, allowSwear) {
       },
       body: JSON.stringify({ 
         messages: apiMessages,
-        model: 'openai' // Trạm sẽ tự động mượn model xịn nhất cho bạn
+        model: 'openai' // Tự động mượn model tốt nhất
       })
     });
 
-    if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+    if (!res.ok) {
+        // Đọc thêm nội dung web trả về để biết vì sao nó từ chối
+        const errText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errText}`);
+    }
 
     // Dịch vụ này trả thẳng về text chữ
     responseText = await res.text();
-    console.log(`✅ [AI Chat] Đội lốt thành công!`);
+    console.log(`✅ [AI Chat] Nhận phản hồi thành công!`);
 
   } catch (err) {
-    console.error(`⚠️ [AI Chat] Trạm trung chuyển sập: ${err.message}`);
+    // In toàn bộ chi tiết lỗi ra Terminal của Render/VPS
+    console.error(`⚠️ [AI Chat LỖI CHI TIẾT]:`, err);
     return '❌ AI đang ngủ trưa rồi ba, hệ thống trung chuyển bị quá tải. Lát gõ lại nhé!';
   }
 
@@ -2181,7 +2185,6 @@ async function openRouterChatReply(userId, userText, allowSwear) {
 
   return responseText;
 }
-
 async function handleGeminiResponse(message, allowSwear) {
   const userId = message.author?.id;
   if (!userId) return;
