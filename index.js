@@ -2981,18 +2981,28 @@ client.once('ready', async () => {
     console.error('Lỗi nạp profiles:', e);
   }
 
-  // Nạp Cookie cho YouTube (ĐÃ NÂNG CẤP BỘ LỌC RÁC)
+  // Nạp Cookie cho YouTube (ĐÃ NÂNG CẤP BỘ CHUYỂN ĐỔI JSON)
   try {
       if (process.env.YOUTUBE_COOKIE) {
-          // Loại bỏ hoàn toàn dấu xuống dòng, khoảng trắng ở hai đầu
-          const rawCookie = process.env.YOUTUBE_COOKIE.replace(/\r?\n|\r/g, '').trim();
-          
+          let finalCookie = '';
+          try {
+              // 1. Thử phân tích xem ông có đang dán cục JSON vào không
+              const parsedJSON = JSON.parse(process.env.YOUTUBE_COOKIE);
+              // Lấy phần data bên trong chữ "cookie"
+              const cookieObj = parsedJSON.cookie || parsedJSON; 
+              // Biến nó thành chuỗi chuẩn: key=value; key2=value2;
+              finalCookie = Object.entries(cookieObj).map(([k, v]) => `${k}=${v}`).join('; ');
+          } catch (err) {
+              // 2. Nếu nó báo lỗi (nghĩa là ông dán chuỗi thường chứ không phải JSON), thì gọt rác như cũ
+              finalCookie = process.env.YOUTUBE_COOKIE.replace(/\r?\n|\r/g, '').trim();
+          }
+
           play.setToken({
               youtube : {
-                  cookie : rawCookie
+                  cookie : finalCookie
               }
           });
-          console.log('✅ Đã nạp Cookie YouTube thành công (Đã dọn dẹp rác)!');
+          console.log('✅ Đã nạp Cookie YouTube thành công (Đã convert chuẩn xác)!');
       } else {
           console.warn('⚠️ CẢNH BÁO: Chưa cấu hình YOUTUBE_COOKIE. Bot nhạc có thể bị lỗi 429.');
       }
