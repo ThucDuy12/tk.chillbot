@@ -2011,7 +2011,7 @@ const GROQ_MODELS = [
 // Đổi tham số để nhận thêm channelId và userName
 async function ultimateChatReply(channelId, userId, userName, userText, allowSwear) {
   
-  // Lấy lịch sử trực tiếp từ MongoDB phải nằm BÊN TRONG hàm async này
+  // ✅ Lấy lịch sử trực tiếp từ MongoDB
   let history = await db.getChatHistory(channelId) || [];
   if (!Array.isArray(history)) history = [];
 
@@ -2052,10 +2052,11 @@ ${profilesPrompt}
     console.log(`[AI Chat] Đang hỏi Gemini 2.0 Flash...`);
     
     // Đổi lịch sử về chuẩn của Gemini
-    const geminiHistory = history.map(msg => ({
-      role: msg.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: msg.content }]
-    }));
+    const geminiHistory = history.map(msg => {
+      const textContent = msg.content || (msg.parts && msg.parts[0] ? msg.parts[0].text : '');
+      const role = (msg.role === 'assistant' || msg.role === 'model') ? 'model' : 'user';
+      return { role, parts: [{ text: textContent }] };
+    });
 
     const chat = geminiModel.startChat({
       history: geminiHistory,
@@ -2063,7 +2064,6 @@ ${profilesPrompt}
       generationConfig: { maxOutputTokens: 2000, temperature: 0.3 },
     });
 
-    // ✅ ĐÃ SỬA LỖI: Dùng groupUserText
     const result = await chat.sendMessage(groupUserText);
     responseText = result.response.text();
     console.log(`✅ [AI Chat] Gemini trả lời xuất sắc!`);
@@ -2071,21 +2071,29 @@ ${profilesPrompt}
   } catch (geminiErr) {
     console.warn(`⚠️ [AI Chat] Gemini quá tải/lỗi (${geminiErr.message}). Chuyển sang Tầng 2 (Groq)...`);
     
-    // Chuẩn bị mảng tin nhắn cho Groq / Pollinations
-    // ✅ ĐÃ SỬA LỖI NỮA: Dùng groupUserText
+    // ----------------------------------------------------------------
+    // CHUẨN BỊ LỊCH SỬ CHO GROQ / POLLINATIONS (GIẶT SẠCH DATA)
+    // ----------------------------------------------------------------
+    const cleanHistory = history.map(msg => {
+        // Ép định dạng an toàn 100% cho Groq
+        const textContent = msg.content || (msg.parts && msg.parts[0] ? msg.parts[0].text : '');
+        const safeRole = (msg.role === 'model' || msg.role === 'assistant') ? 'assistant' : 'user';
+        return { role: safeRole, content: String(textContent).slice(0, 2000) };
+    });
+
     const apiMessages = [
       { role: 'system', content: systemPrompt },
-      ...history,
+      ...cleanHistory,
       { role: 'user', content: groupUserText }
     ];
 
     // ----------------------------------------------------------------
-    // TẦNG 2: THỬ DÀN MODEL CỦA GROQ (LLAMA 3.3, DEEPSEEK)
+    // TẦNG 2: THỬ DÀN MODEL CỦA GROQ
     // ----------------------------------------------------------------
     const fetch = (await import('node-fetch')).default;
     
     for (const modelName of GROQ_MODELS) {
-      if (responseText) break; // Lấy được câu trả lời thì dừng
+      if (responseText) break; 
       
       try {
         console.log(`[AI Chat] Đang gọi Groq (${modelName})...`);
@@ -2107,9 +2115,13 @@ ${profilesPrompt}
           const data = await res.json();
           responseText = data.choices[0].message.content;
           console.log(`✅ [AI Chat] Groq (${modelName}) gánh tạ thành công!`);
+        } else {
+          // Bắt lỗi rành rọt xem Groq bị gì
+          const errData = await res.text();
+          console.warn(`⚠️ [AI Chat] Groq (${modelName}) từ chối - Status: ${res.status} | Lỗi: ${errData}`);
         }
       } catch (groqErr) {
-        console.warn(`⚠️ [AI Chat] Groq ${modelName} sập.`);
+        console.warn(`⚠️ [AI Chat] Không thể kết nối tới Groq ${modelName}: ${groqErr.message}`);
       }
     }
 
@@ -2117,7 +2129,7 @@ ${profilesPrompt}
     // TẦNG 3: NẾU GROQ CŨNG SẬP NỐT -> GỌI POLLINATIONS BẤT TỬ
     // ----------------------------------------------------------------
     if (!responseText) {
-      console.warn(`⚠️ [AI Chat] Groq cũng sập. Kích hoạt Pollinations...`);
+      console.warn(`⚠️ [AI Chat] Toàn bộ Groq sập hoặc khóa mõm. Kích hoạt Pollinations...`);
       try {
         const res = await fetch('https://text.pollinations.ai/', {
           method: 'POST',
@@ -2127,6 +2139,8 @@ ${profilesPrompt}
         if (res.ok) {
           responseText = await res.text();
           console.log(`✅ [AI Chat] Pollinations đội lốt thành công!`);
+        } else {
+            console.warn(`⚠️ [AI Chat] Pollinations cũng từ chối: ${res.status}`);
         }
       } catch (pollErr) {
         console.error('❌ [AI Chat] Cạn lời, các hệ thống AI đều sập.');
@@ -2136,12 +2150,12 @@ ${profilesPrompt}
 
   // Chốt hạ: Nếu sau 3 tầng vẫn thất bại
   if (!responseText) {
-    return '❌ Hệ thống AI hiện đang nghỉ ngơi, bạn đợi chút rồi hỏi lại mình nhé!';
+    return '❌ Hệ thống AI hiện đang nghỉ ngơi (Quá tải), bạn đợi khoảng 1-2 phút rồi hỏi lại mình nhé!';
   }
 
   responseText = String(responseText || '').trim();
 
-  // Lưu lịch sử chung vào KÊNH
+  // Lưu lịch sử chung vào KÊNH (Dùng format chuẩn OpenAI để dễ tương thích mọi AI sau này)
   history.push({ role: 'user', content: groupUserText });
   history.push({ role: 'assistant', content: responseText });
   
