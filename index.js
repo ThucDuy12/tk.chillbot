@@ -2980,6 +2980,22 @@ client.once('ready', async () => {
   } catch (e) {
     console.error('Lỗi nạp profiles:', e);
   }
+
+  // Nạp Cookie cho YouTube để không bị lỗi 429
+    try {
+        if (process.env.YOUTUBE_COOKIE) {
+            play.setToken({
+                youtube : {
+                    cookie : process.env.YOUTUBE_COOKIE
+                }
+            });
+            console.log('✅ Đã nạp Cookie YouTube thành công!');
+        } else {
+            console.warn('⚠️ CẢNH BÁO: Chưa cấu hình YOUTUBE_COOKIE. Bot nhạc có thể bị lỗi 429.');
+        }
+    } catch (e) {
+        console.error('❌ Lỗi khi nạp Cookie YouTube:', e);
+    }
   // Load lịch hẹn thông báo
   try {
     scheduledAnnouncements = await db.getAnnouncements();
