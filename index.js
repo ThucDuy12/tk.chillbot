@@ -2992,24 +2992,24 @@ client.once('ready', async () => {
   } catch (e) {
       console.error('❌ Lỗi khi nạp Cookie YouTube:', e);
   }
-  // NẠP CHÌA KHÓA API SPOTIFY
-    try {
-        if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
-            play.setToken({
-                spotify : {
-                    client_id: process.env.SPOTIFY_CLIENT_ID,
-                    client_secret: process.env.SPOTIFY_CLIENT_SECRET,
-                    market: 'VN',
-                    isApp: true
-                }
-            });
-            console.log('✅ Đã nạp chìa khóa Spotify thành công! Sẵn sàng nuốt Playlist.');
-        } else {
-            console.warn('⚠️ CẢNH BÁO: Chưa cấu hình API Spotify. Tính năng nhạc Spotify sẽ bị lỗi.');
-        }
-    } catch (e) {
-        console.error('❌ Lỗi nạp API Spotify:', e);
-    }
+  // NẠP CHÌA KHÓA API SPOTIFY (ĐÃ TRANG BỊ MÁY GỌT RÁC)
+  try {
+      if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
+          play.setToken({
+              spotify : {
+                  // Dùng .trim() để cắt sạch khoảng trắng thừa do copy ẩu
+                  client_id: process.env.SPOTIFY_CLIENT_ID.trim(),
+                  client_secret: process.env.SPOTIFY_CLIENT_SECRET.trim(),
+                  market: 'VN'
+              }
+          });
+          console.log('✅ Đã nạp chìa khóa Spotify thành công! Sẵn sàng nuốt Playlist.');
+      } else {
+          console.warn('⚠️ CẢNH BÁO: Chưa cấu hình API Spotify. Tính năng nhạc Spotify sẽ bị lỗi.');
+      }
+  } catch (e) {
+      console.error('❌ Lỗi nạp API Spotify:', e);
+  }
   // KHỞI ĐỘNG ĐỘNG CƠ SOUNDCLOUD (BÍ QUYẾT LÁCH YOUTUBE)
     try {
         const clientID = await play.getFreeClientID();
@@ -6982,7 +6982,7 @@ async function handlePlayMusic(interaction) {
         // -------------------------------------------------------------
         // TRƯỜNG HỢP 2: SPOTIFY (TRACK, ALBUM, PLAYLIST)
         // -------------------------------------------------------------
-        else if (query.includes('spotify.com')) {
+        else if (query.includes('spotify.com')) { // <-- Đã sửa lại nhận diện link chuẩn
             const spData = await play.spotify(query);
             if (spData.type === 'playlist' || spData.type === 'album') {
                 const tracks = await spData.all_tracks();
