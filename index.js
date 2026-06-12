@@ -7040,14 +7040,13 @@ async function handlePlayMusic(interaction) {
             }
         }
         // -------------------------------------------------------------
-        // TRƯỜNG HỢP 3: APPLE MUSIC (SỬ DỤNG CHEERIO CÀO WEB)
+        // TRƯỜNG HỢP 3: APPLE MUSIC (HỖ TRỢ FULL PLAYLIST & BÀI ĐƠN)
         // -------------------------------------------------------------
         else if (query.includes('music.apple.com')) {
             try {
                 const fetch = (await import('node-fetch')).default;
                 const cheerio = require('cheerio');
                 
-                // Gửi request đóng giả làm trình duyệt để lấy HTML của trang Apple Music
                 const response = await fetch(query, {
                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
                 });
@@ -7056,28 +7055,60 @@ async function handlePlayMusic(interaction) {
                 const html = await response.text();
                 const $ = cheerio.load(html);
                 
-                // Cào tên bài hát/Album từ thẻ meta (Thường có dạng "Tên Bài - Tên Ca Sĩ")
-                let title = $('meta[property="og:title"]').attr('content') || $('title').text();
+                let trackNames = [];
                 const thumbnail = $('meta[property="og:image"]').attr('content') || null;
-                
-                // Gọt rác trong tiêu đề (ví dụ: " - Single by ...", " on Apple Music")
-                title = title.replace(/ - Single by.*/i, '')
-                             .replace(/ - EP by.*/i, '')
-                             .replace(/ on Apple Music/i, '')
-                             .trim();
-                
-                songsToAdd.push({
-                    title: title,
-                    resolveQuery: title, // Lấy tên này ném cho máy cào SoundCloud/YouTube
-                    thumbnail: thumbnail,
-                    durationRaw: '0:00',
-                    requester: interaction.user.id,
-                    url: null // Đẩy vào Lazy Load
+
+                // TÌM CÁC BÀI HÁT TRONG PLAYLIST / ALBUM (Thông qua dữ liệu SEO ẩn)
+                $('script[type="application/ld+json"]').each((i, el) => {
+                    try {
+                        const data = JSON.parse($(el).html());
+                        const items = Array.isArray(data) ? data : [data];
+                        for (const item of items) {
+                            if ((item['@type'] === 'MusicPlaylist' || item['@type'] === 'MusicAlbum') && item.track) {
+                                item.track.forEach(t => {
+                                    // Lấy tên bài hát + tên ca sĩ (nếu có) để tìm kiếm cho chuẩn
+                                    let artist = (t.byArtist && t.byArtist[0]) ? t.byArtist[0].name : '';
+                                    if (t.name) trackNames.push(`${t.name} ${artist}`.trim());
+                                });
+                            }
+                        }
+                    } catch(e) {}
                 });
+
+                // NẾU TÌM THẤY DANH SÁCH BÀI HÁT (PLAYLIST)
+                if (trackNames.length > 0) {
+                    for (const tName of trackNames) {
+                        songsToAdd.push({
+                            title: tName.length > 50 ? tName.substring(0, 47) + '...' : tName,
+                            resolveQuery: tName,
+                            thumbnail: thumbnail,
+                            durationRaw: '0:00',
+                            requester: interaction.user.id,
+                            url: null // Đẩy vào Lazy Load
+                        });
+                    }
+                } 
+                // NẾU LÀ BÀI ĐƠN (Không có danh sách)
+                else {
+                    let title = $('meta[property="og:title"]').attr('content') || $('title').text();
+                    title = title.replace(/ - Single by.*/i, '')
+                                 .replace(/ - EP by.*/i, '')
+                                 .replace(/ on Apple Music/i, '')
+                                 .trim();
+                    
+                    songsToAdd.push({
+                        title: title,
+                        resolveQuery: title,
+                        thumbnail: thumbnail,
+                        durationRaw: '0:00',
+                        requester: interaction.user.id,
+                        url: null
+                    });
+                }
                 
             } catch (apErr) {
                 console.error('Lỗi xử lý Apple Music:', apErr);
-                return interaction.editReply('❌ Bot không thể đọc được link Apple Music này (Có thể do lỗi mạng hoặc link riêng tư).');
+                return interaction.editReply('❌ Bot không thể đọc được link Apple Music này (Có thể do mạng hoặc link riêng tư).');
             }
         }
         // -------------------------------------------------------------
