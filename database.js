@@ -89,30 +89,36 @@ async function saveAnnouncements(arr) {
   );
 }
 
+// ================= XỬ LÝ LƯU CONFIG CHUNG (VATSIM, ACDM...) =================
+// Tạo Bản thiết kế (Schema) cho Config
+const configSchema = new mongoose.Schema({
+  _id: { type: String, required: true },
+  data: mongoose.Schema.Types.Mixed // Mixed cho phép lưu bất kỳ định dạng nào (Object, Array...)
+});
+const BotConfig = mongoose.model('BotConfig', configSchema);
+
+// Hàm lưu Config
 async function saveBotConfig(key, data) {
-    try {
-        // Dùng thẳng biến db đã được khởi tạo từ hàm connectDB() của ông
-        const collection = db.collection('configs');
-        await collection.updateOne(
-            { _id: key },
-            { $set: { data: data } },
-            { upsert: true }
-        );
-    } catch (err) {
-        console.error(`Lỗi lưu config ${key}:`, err);
-    }
+  try {
+    await BotConfig.findOneAndUpdate(
+      { _id: key },
+      { $set: { data: data } },
+      { upsert: true } // Có thì sửa, chưa có thì tạo mới
+    );
+  } catch (err) {
+    console.error(`Lỗi lưu config ${key}:`, err);
+  }
 }
 
+// Hàm đọc Config
 async function getBotConfig(key) {
-    try {
-        // Dùng thẳng biến db
-        const collection = db.collection('configs');
-        const result = await collection.findOne({ _id: key });
-        return result ? result.data : null;
-    } catch (err) {
-        console.error(`Lỗi đọc config ${key}:`, err);
-        return null;
-    }
+  try {
+    const result = await BotConfig.findOne({ _id: key });
+    return result ? result.data : null;
+  } catch (err) {
+    console.error(`Lỗi đọc config ${key}:`, err);
+    return null;
+  }
 }
 
 module.exports = {
