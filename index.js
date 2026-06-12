@@ -2563,11 +2563,11 @@ client.on('voiceStateUpdate', (oldState, newState) => {
             // Đếm số lượng người thực (không phải bot) trong phòng
             const humanCount = botVoiceChannel.members.filter(m => !m.user.bot).size;
             
-            // Nếu không còn bóng người nào
             if (humanCount === 0) {
                 const queue = musicQueues.get(oldState.guild.id);
                 if (queue) {
-                    if (queue.connection) queue.connection.destroy(); // Ngắt kết nối voice
+                    if (queue.progressInterval) clearInterval(queue.progressInterval); // TẮT CHẠY NGẦM
+                    if (queue.connection) queue.connection.destroy(); 
                     if (queue.dashboardMsg) {
                         queue.dashboardMsg.edit({ 
                             embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription('💤 Mọi người đã rời đi hết, Tk.Chill cũng dọn dẹp đi ngủ đây. Hẹn gặp lại!')], 
@@ -3199,6 +3199,9 @@ client.once('ready', async () => {
       .setName('play')
       .setDescription('🎧 Phát nhạc với tk.chill DJ')
       .addStringOption(option => option.setName('query').setDescription('Tên bài hát hoặc Link YouTube').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('queue')
+      .setDescription('📜 Xem danh sách nhạc đang chờ phát'),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3604,6 +3607,9 @@ client.on('interactionCreate', async (interaction) => {
         case 'play':
           await handlePlayMusic(interaction);
           break;
+        case 'queue':
+          await handleQueue(interaction); // Thêm dòng này để xử lý lệnh queue
+          break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
           const anh2 = interaction.options.getAttachment('anh2');
@@ -3659,10 +3665,11 @@ client.on('interactionCreate', async (interaction) => {
                     return interaction.deferUpdate().catch(()=>{}); 
                 } 
                 else if (customId === 'music_stop') {
-                    queue.songs = [];
-                    queue.player.stop(); // Cắt nguồn
-                    return interaction.update(createMusicDashboard(queue)).catch(()=>{});
-                } 
+                  if (queue.progressInterval) clearInterval(queue.progressInterval); // Tắt thanh trượt
+                  queue.songs = [];
+                  queue.player.stop(); 
+                  return interaction.update(createMusicDashboard(queue)).catch(()=>{});
+                }
                 else if (customId === 'music_volup') {
                     queue.volume = Math.min((queue.volume || 1.0) + 0.2, 2.0); 
                     if (queue.resource) queue.resource.volume.setVolume(queue.volume);
@@ -6748,9 +6755,40 @@ async function handleOnlineAtc(interaction) {
 
 // ===================== TK.CHILL MUSIC SYSTEM (EXCLUSIVE DASHBOARD) =====================
 
-// ===================== GIAO DIỆN PREMIUM (JOCKIE/LARA STYLE) =====================
+// ===================== HÀM TÍNH TOÁN THANH TRƯỢT =====================
+function parseDurationToSec(durStr) {
+    if (!durStr) return 0;
+    const parts = durStr.split(':').map(Number);
+    if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
+    if (parts.length === 2) return parts[0]*60 + parts[1];
+    return 0;
+}
+
+function formatSecToTime(sec) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function buildProgressBar(elapsedSec, totalSec) {
+    if (totalSec === 0) return `🔘▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬`;
+    const barLength = 20;
+    const progress = Math.min(elapsedSec / totalSec, 1);
+    let pos = Math.round(progress * barLength);
+    if (pos >= barLength) pos = barLength - 1; 
+
+    let bar = '';
+    for (let i = 0; i < barLength; i++) {
+        if (i === pos) bar += '🔘';
+        else bar += '▬';
+    }
+    return bar;
+}
+
+// ===================== GIAO DIỆN PREMIUM (NÚT NGANG + THANH TRƯỢT) =====================
 function createMusicDashboard(queue) {
-  // Nếu hết nhạc, hiển thị giao diện ngủ đông
   if (!queue || queue.songs.length === 0) {
       return {
           embeds: [
@@ -6759,45 +6797,55 @@ function createMusicDashboard(queue) {
               .setAuthor({ name: 'TK.CHILL PLAYER', iconURL: 'https://cdn-icons-png.flaticon.com/512/3844/3844724.png' })
               .setDescription('💤 **Hàng chờ trống!** Bot đang nằm chờ ở đây. Hãy dùng lệnh `/play` để thêm nhạc tiếp nhé...')
           ],
-          components: [] // Giấu hết nút bấm đi khi không có nhạc
+          components: [] 
       };
   }
 
   const currentSong = queue.songs[0];
   const volPercent = Math.round((queue.volume || 1.0) * 100);
 
+  // TÍNH TOÁN TIẾN TRÌNH NHẠC
+  let elapsedSec = 0;
+  if (queue.resource) {
+      elapsedSec = Math.floor(queue.resource.playbackDuration / 1000);
+  }
+  const totalSec = parseDurationToSec(currentSong.durationRaw);
+  const progressBar = buildProgressBar(elapsedSec, totalSec);
+  const elapsedStr = formatSecToTime(elapsedSec);
+
   const embed = new EmbedBuilder()
     .setAuthor({ name: 'NOW PLAYING', iconURL: 'https://cdn-icons-png.flaticon.com/512/659/659056.png' })
     .setTitle(currentSong.title)
     .setURL(currentSong.url)
-    .setDescription(`🔘▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ \`[0:00 / ${currentSong.durationRaw}]\`\n\n> 👤 **Yêu cầu bởi:** <@${currentSong.requester}>\n> 🔊 **Âm lượng:** \`${volPercent}%\``)
+    .setDescription(`${progressBar} \`[${elapsedStr} / ${currentSong.durationRaw}]\`\n\n> 👤 **Yêu cầu bởi:** <@${currentSong.requester}>\n> 🔊 **Âm lượng:** \`${volPercent}%\``)
     .setImage(currentSong.thumbnail)
     .setColor(0x2b2d31)
     .setFooter({ text: `Hàng chờ: ${queue.songs.length - 1} bài • Độc quyền Tk.Chill` });
 
-  // Nút bấm làm mờ (Secondary) cho giống Lara, sang trọng hơn
-  const row1 = new ActionRowBuilder().addComponents(
+  // GỘP CHÍNH XÁC 5 NÚT VÀO ĐÚNG 1 HÀNG NGANG
+  const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('music_pause').setEmoji(queue.playing ? '⏸️' : '▶️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('music_skip').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('music_stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger)
-  );
-
-  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('music_stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId('music_voldown').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('music_volup').setEmoji('🔊').setStyle(ButtonStyle.Secondary)
   );
 
-  return { embeds: [embed], components: [row1, row2] };
+  return { embeds: [embed], components: [row] };
 }
 
-// ===================== CỖ MÁY XỬ LÝ NHẠC (CHỐNG GIẬT + KHÔNG OUT) =====================
+// ===================== CỖ MÁY XỬ LÝ NHẠC =====================
 async function playNextSong(guildId) {
   const queue = musicQueues.get(guildId);
   if (!queue) return;
 
-  // SỬA Ở ĐÂY: Nếu hết nhạc, ĐỪNG OUT CONNECTION, chỉ báo cho UI biết là đang rảnh
+  // Dọn dẹp cái bộ đếm giờ cũ nếu có
+  if (queue.progressInterval) {
+      clearInterval(queue.progressInterval);
+  }
+
   if (queue.songs.length === 0) {
-      queue.playing = false; // Đánh dấu là máy đang nghỉ
+      queue.playing = false; 
       if (queue.dashboardMsg) {
           await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
       }
@@ -6808,11 +6856,10 @@ async function playNextSong(guildId) {
   try {
     const stream = await play.stream(song.url);
     
-    // Tối ưu hóa Buffer nén âm thanh để giảm giật lag trên Render
     const resource = createAudioResource(stream.stream, { 
         inputType: stream.type, 
         inlineVolume: true,
-        silencePaddingFrames: 5 // Đệm thêm xíu khung hình để mượt hơn
+        silencePaddingFrames: 5 
     });
     
     resource.volume.setVolume(queue.volume || 1.0);
@@ -6827,6 +6874,14 @@ async function playNextSong(guildId) {
     } else {
       queue.dashboardMsg = await queue.textChannel.send(dashboardData);
     }
+
+    // NÂNG CẤP: Cho thanh tiến trình chạy mỗi 15 giây 
+    queue.progressInterval = setInterval(async () => {
+        if (queue && queue.playing && queue.dashboardMsg && queue.songs.length > 0) {
+            await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+        }
+    }, 15000);
+
   } catch (error) {
     console.error(`❌ Lỗi phát bài:`, error.message);
     queue.songs.shift(); 
@@ -7009,6 +7064,51 @@ async function handlePlayMusic(interaction) {
     console.error('Lỗi khi tải nhạc:', error);
     await interaction.editReply('❌ Lỗi mất tiêu rồi! Hãy thử lại nha.');
   }
+}
+
+// ===================== XỬ LÝ LỆNH /QUEUE =====================
+async function handleQueue(interaction) {
+  // Lấy dữ liệu hàng chờ của server hiện tại
+  const queue = musicQueues.get(interaction.guild.id);
+
+  // Nếu không có nhạc hoặc chỉ có mỗi 1 bài đang hát (hàng chờ = 0)
+  if (!queue || queue.songs.length <= 1) {
+      return interaction.reply({ 
+          content: '📭 **Hàng chờ hiện tại đang trống!** Hãy dùng lệnh `/play` để thêm nhạc vào nhé.', 
+          ephemeral: true 
+      });
+  }
+
+  // Báo cho Discord biết bot đang xử lý để không bị lỗi đỏ
+  await interaction.deferReply();
+
+  const currentSong = queue.songs[0];
+  // Cắt lấy 10 bài tiếp theo thôi để tránh tin nhắn bị quá dài (Discord giới hạn)
+  const upcomingSongs = queue.songs.slice(1, 11); 
+
+  const embed = new EmbedBuilder()
+      .setAuthor({ name: '📜 DANH SÁCH HÀNG CHỜ', iconURL: 'https://cdn-icons-png.flaticon.com/512/3281/3281289.png' })
+      .setColor(0x2b2d31)
+      .setThumbnail(currentSong.thumbnail)
+      .setDescription(`**🎵 Đang phát:**\n[${currentSong.title}](${currentSong.url})\n👤 Yêu cầu bởi: <@${currentSong.requester}>\n\n**🔜 Sắp phát tiếp theo:**`);
+
+  // Duyệt qua 10 bài tiếp theo và in ra
+  upcomingSongs.forEach((song, index) => {
+      embed.addFields({
+          name: `\`${index + 1}.\` ${song.title}`,
+          value: `⏱️ \`${song.durationRaw}\` | 👤 <@${song.requester}>`,
+          inline: false
+      });
+  });
+
+  // Nếu hàng chờ dài hơn 10 bài, báo cho người dùng biết còn bài bị ẩn
+  if (queue.songs.length > 11) {
+      embed.setFooter({ text: `...và ${queue.songs.length - 11} bài hát khác đang chờ được phát.` });
+  } else {
+      embed.setFooter({ text: `Tổng cộng có ${queue.songs.length - 1} bài trong hàng chờ.` });
+  }
+
+  await interaction.editReply({ embeds: [embed] });
 }
 
 // ===================== LOGIN =====================
