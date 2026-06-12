@@ -2011,7 +2011,7 @@ const GROQ_MODELS = [
 // Đổi tham số để nhận thêm channelId và userName
 async function ultimateChatReply(channelId, userId, userName, userText, allowSwear) {
   
-  // ✅ ĐÚNG: Lấy lịch sử trực tiếp từ MongoDB phải nằm BÊN TRONG hàm async này
+  // Lấy lịch sử trực tiếp từ MongoDB phải nằm BÊN TRONG hàm async này
   let history = await db.getChatHistory(channelId) || [];
   if (!Array.isArray(history)) history = [];
 
@@ -2063,7 +2063,8 @@ ${profilesPrompt}
       generationConfig: { maxOutputTokens: 2000, temperature: 0.3 },
     });
 
-    const result = await chat.sendMessage(sanitizedUserText);
+    // ✅ ĐÃ SỬA LỖI: Dùng groupUserText
+    const result = await chat.sendMessage(groupUserText);
     responseText = result.response.text();
     console.log(`✅ [AI Chat] Gemini trả lời xuất sắc!`);
     
@@ -2071,10 +2072,11 @@ ${profilesPrompt}
     console.warn(`⚠️ [AI Chat] Gemini quá tải/lỗi (${geminiErr.message}). Chuyển sang Tầng 2 (Groq)...`);
     
     // Chuẩn bị mảng tin nhắn cho Groq / Pollinations
+    // ✅ ĐÃ SỬA LỖI NỮA: Dùng groupUserText
     const apiMessages = [
       { role: 'system', content: systemPrompt },
       ...history,
-      { role: 'user', content: sanitizedUserText }
+      { role: 'user', content: groupUserText }
     ];
 
     // ----------------------------------------------------------------
@@ -2139,7 +2141,7 @@ ${profilesPrompt}
 
   responseText = String(responseText || '').trim();
 
- // Lưu lịch sử chung vào KÊNH
+  // Lưu lịch sử chung vào KÊNH
   history.push({ role: 'user', content: groupUserText });
   history.push({ role: 'assistant', content: responseText });
   
@@ -6624,7 +6626,7 @@ async function handleOnlineAtc(interaction) {
   }
 }
 
-// ===================== LOGINS =====================
+// ===================== LOGIN =====================
 client.login(TOKEN);
 
 // === WEB SERVER & PING CHÉO ===
