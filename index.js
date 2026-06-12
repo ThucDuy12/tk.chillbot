@@ -20,6 +20,12 @@ const deletedImageCache = new Map();
 
 const db = require('./database');
 
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
+const play = require('play-dl');
+
+// Kho chứa danh sách phát nhạc của các server
+const musicQueues = new Map();
+
 // Cỗ máy tải file vật lý bằng HTTPS chuẩn của Node.js (Chống mọi lỗi thư viện)
 function downloadBuffer(url) {
   return new Promise((resolve, reject) => {
@@ -3165,6 +3171,10 @@ client.once('ready', async () => {
       .setName('online_atc')
       .setDescription('Tra cứu danh sách ATC đang online tại một sân bay')
       .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('play')
+      .setDescription('🎧 Phát nhạc với tk.chill DJ')
+      .addStringOption(option => option.setName('query').setDescription('Tên bài hát hoặc Link YouTube').setRequired(true)),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3567,6 +3577,9 @@ client.on('interactionCreate', async (interaction) => {
         case 'online_atc':
           await handleOnlineAtc(interaction);
           break;
+        case 'play':
+          await handlePlayMusic(interaction);
+          break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
           const anh2 = interaction.options.getAttachment('anh2');
@@ -3602,6 +3615,40 @@ client.on('interactionCreate', async (interaction) => {
           const parts = customId.split('_');
           const action = parts[1];
           
+          // XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC
+          if (customId.startsWith('music_')) {
+            const queue = musicQueues.get(interaction.guild.id);
+            if (!queue) return interaction.reply({ content: '❌ Không có nhạc nào đang phát cả.', ephemeral: true });
+
+            // Chặn không cho người ngoài voice phá
+            if (interaction.member.voice.channel?.id !== queue.voiceChannel.id) {
+                return interaction.reply({ content: '❌ Bạn phải ở trong cùng phòng Voice với bot mới điều khiển được!', ephemeral: true });
+            }
+
+            if (customId === 'music_pause') {
+                if (queue.playing) {
+                    queue.player.pause();
+                    queue.playing = false;
+                } else {
+                    queue.player.unpause();
+                    queue.playing = true;
+                }
+                await interaction.update(createMusicDashboard(queue));
+            }
+
+            if (customId === 'music_skip') {
+                queue.player.stop(); // Cố tình stop để kích hoạt sự kiện AudioPlayerStatus.Idle -> tự chuyển bài
+                await interaction.reply({ content: '⏭️ Đã qua bài!', ephemeral: true });
+            }
+
+            if (customId === 'music_stop') {
+                queue.songs = [];
+                queue.player.stop();
+                await interaction.update({ embeds: [new EmbedBuilder().setTitle('⏹️ Đã dừng phát nhạc.').setColor(0xe74c3c)], components: [] });
+            }
+            return;
+          }
+
           // Nút [Sửa bài], [DUYỆT], [TỪ CHỐI] -> Yêu cầu quyền Admin
           if (action === 'edit' || action === 'approve' || action === 'reject') {
             const hasAdmin = interaction.member.roles.cache.some(r => r.name === 'Admin') || interaction.member.roles.cache.has(roles.adminRoleId);
@@ -3730,7 +3777,6 @@ client.on('interactionCreate', async (interaction) => {
           await interaction.update({ embeds: [newEmbed] });
           return;
         }
-
         // Nộp form từ chối bài bán
         if (interaction.customId.startsWith('market_reject_modal_')) {
           const reason = interaction.fields.getTextInputValue('reason');
@@ -6653,6 +6699,164 @@ async function handleOnlineAtc(interaction) {
   } catch (error) {
     console.error('Lỗi khi tra cứu ATC online:', error);
     await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu từ VATSIM.' });
+  }
+}
+
+// ===================== TK.CHILL MUSIC SYSTEM (EXCLUSIVE DASHBOARD) =====================
+
+// Hàm tạo giao diện Bảng điều khiển tĩnh
+function createMusicDashboard(queue) {
+  if (!queue || !queue.songs[0]) return null;
+  const currentSong = queue.songs[0];
+
+  const embed = new EmbedBuilder()
+    .setAuthor({ name: '🎧 Đang phát (Tk.Chill Exclusive)', iconURL: 'https://cdn-icons-png.flaticon.com/512/3844/3844724.png' })
+    .setTitle(currentSong.title)
+    .setURL(currentSong.url)
+    .setDescription(`👤 **Yêu cầu bởi:** <@${currentSong.requester}>\n⏱️ **Thời lượng:** \`${currentSong.durationRaw}\``)
+    .setImage(currentSong.thumbnail) // Ảnh bìa bự đùng sang chảnh
+    .setColor(0x9b59b6)
+    .setFooter({ text: `Hàng chờ: ${queue.songs.length - 1} bài • Trạng thái: ${queue.playing ? '▶️ Đang phát' : '⏸️ Tạm dừng'}` });
+
+  // Nếu có bài tiếp theo thì hiển thị
+  if (queue.songs[1]) {
+    embed.addFields({ name: '⏭️ Bài tiếp theo:', value: `\`${queue.songs[1].title}\`` });
+  }
+
+  // Cụm nút bấm xịn sò
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('music_pause').setEmoji(queue.playing ? '⏸️' : '▶️').setStyle(queue.playing ? ButtonStyle.Secondary : ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('music_skip').setEmoji('⏭️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('music_stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger)
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
+// Cỗ máy xử lý phát nhạc
+async function playNextSong(guildId) {
+  const queue = musicQueues.get(guildId);
+  if (!queue || queue.songs.length === 0) {
+    if (queue && queue.dashboardMsg) {
+        // Hết nhạc thì sửa bảng thành "Đã hết" thay vì xóa
+        await queue.dashboardMsg.edit({ 
+            embeds: [new EmbedBuilder().setTitle('🏁 Đã phát hết danh sách nhạc!').setColor(0x3498db).setDescription('Hẹn gặp lại bạn nhé. Tk.Chill rời kênh đây~')], 
+            components: [] 
+        }).catch(()=>{});
+        queue.connection.destroy();
+    }
+    musicQueues.delete(guildId);
+    return;
+  }
+
+  const song = queue.songs[0];
+  try {
+    // Ép play-dl tìm nguồn tốt nhất để đỡ lag
+    const stream = await play.stream(song.url, { discordPlayerCompatibility: true });
+    const resource = createAudioResource(stream.stream, { inputType: stream.type });
+
+    queue.player.play(resource);
+    queue.playing = true;
+
+    // Cập nhật lại cái Dashboard (Bảng điều khiển)
+    const dashboardData = createMusicDashboard(queue);
+    if (queue.dashboardMsg) {
+      await queue.dashboardMsg.edit(dashboardData).catch(()=>{});
+    } else {
+      queue.dashboardMsg = await queue.textChannel.send(dashboardData);
+    }
+  } catch (error) {
+    console.error('Lỗi phát nhạc:', error);
+    queue.songs.shift(); // Lỗi thì bỏ qua bài này, phát bài kế
+    playNextSong(guildId);
+  }
+}
+
+// ===================== XỬ LÝ LỆNH /PLAY =====================
+async function handlePlayMusic(interaction) {
+  const query = interaction.options.getString('query');
+  const voiceChannel = interaction.member.voice.channel;
+
+  if (!voiceChannel) {
+    return interaction.reply({ content: '❌ Bạn phải vào một kênh thoại (Voice Channel) trước mới nghe nhạc được chứ!', ephemeral: true });
+  }
+
+  await interaction.deferReply();
+
+  try {
+    // Tìm kiếm bài hát trên YouTube
+    let songInfo;
+    const isLink = query.startsWith('http');
+    
+    if (isLink) {
+        const video = await play.video_info(query);
+        songInfo = video.video_details;
+    } else {
+        const searchResults = await play.search(query, { limit: 1 });
+        if (!searchResults || searchResults.length === 0) return interaction.editReply('❌ Không tìm thấy bài hát này trên YouTube!');
+        songInfo = searchResults[0];
+    }
+
+    const song = {
+      title: songInfo.title,
+      url: songInfo.url,
+      thumbnail: songInfo.thumbnails[songInfo.thumbnails.length - 1].url,
+      durationRaw: songInfo.durationRaw,
+      requester: interaction.user.id
+    };
+
+    let queue = musicQueues.get(interaction.guild.id);
+
+    // Nếu chưa có hàng chờ, tạo mới
+    if (!queue) {
+      queue = {
+        textChannel: interaction.channel,
+        voiceChannel: voiceChannel,
+        connection: null,
+        player: createAudioPlayer(),
+        songs: [],
+        playing: true,
+        dashboardMsg: null
+      };
+      
+      musicQueues.set(interaction.guild.id, queue);
+      queue.songs.push(song);
+
+      // Kết nối vào Voice Channel
+      queue.connection = joinVoiceChannel({
+        channelId: voiceChannel.id,
+        guildId: interaction.guild.id,
+        adapterCreator: interaction.guild.voiceAdapterCreator,
+      });
+
+      queue.connection.subscribe(queue.player);
+
+      // Lắng nghe sự kiện chuyển bài
+      queue.player.on(AudioPlayerStatus.Idle, () => {
+        queue.songs.shift(); // Xóa bài vừa hát xong
+        playNextSong(interaction.guild.id);
+      });
+
+      // Bắt đầu quẩy
+      await playNextSong(interaction.guild.id);
+      await interaction.editReply(`✅ Đã kết nối và chuẩn bị phát: **${song.title}**`);
+      
+      // Xóa cái tin nhắn thông báo này sau 5s để dọn dẹp chat cho sạch
+      setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
+
+    } else {
+      // Nếu đang hát dở bài khác thì nhét bài này vào cuối hàng chờ
+      queue.songs.push(song);
+      await interaction.editReply(`✅ Đã thêm vào hàng chờ: **${song.title}**`);
+      setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
+      
+      // Cập nhật lại Dashboard để hiển thị số lượng bài trong hàng chờ
+      if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+    }
+
+  } catch (error) {
+    console.error('Lỗi khi tải nhạc:', error);
+    await interaction.editReply('❌ Đã có lỗi xảy ra. Bot không tải được bài này, có thể do bị giới hạn tuổi hoặc YouTube chặn.');
   }
 }
 
