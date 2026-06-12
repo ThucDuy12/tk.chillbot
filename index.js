@@ -629,9 +629,9 @@ vatsimWorker.on('message', async (data) => {
         } catch(e) {}
       }
 
-      // Lưu lại danh sách IDs vào file
+      // Bốc thẳng lên MongoDB để không bao giờ bị Render xóa
       vatsimMessageStore = { messageIds: newStoredIds, channelId: channel.id };
-      fs.writeFileSync(VATSIM_MSG_FILE, JSON.stringify(vatsimMessageStore, null, 2));
+      await db.saveBotConfig('vatsim_messages', vatsimMessageStore);
 
     } catch (err) {
       console.warn('Lỗi khi update/send multi VATSIM messages:', err.message || err);
@@ -2954,7 +2954,16 @@ client.once('ready', async () => {
   } catch (e) {
     console.error('Lỗi nạp profiles:', e);
   }
-
+  // Nạp ID tin nhắn VATSIM từ MongoDB
+  try {
+      const savedVatsim = await db.getBotConfig('vatsim_messages');
+      if (savedVatsim) {
+          vatsimMessageStore = savedVatsim;
+          console.log(`✅ Đã nạp lại ${savedVatsim.messageIds?.length || 0} tin nhắn VATSIM từ MongoDB.`);
+      }
+  } catch (e) {
+      console.error('Lỗi nạp config VATSIM:', e);
+  }
   // Nạp Cookie cho YouTube (ĐÃ NÂNG CẤP BỘ CHUYỂN ĐỔI JSON)
   try {
       if (process.env.YOUTUBE_COOKIE) {
@@ -5235,34 +5244,37 @@ async function handleSetupAtcNoti(interaction) {
 }
 
 async function ensureVatsimMessageExists() {
-  try {
-    const channel = await client.channels.fetch(VATSIM_CHANNEL_ID);
-    // Quét 50 tin nhắn gần nhất trong kênh xem có tin nhắn cũ không
-    const messages = await channel.messages.fetch({ limit: 50 });
-    
-    // Tự tìm tin nhắn do chính con Bot này gửi và có tiêu đề VATSIM
-    const oldBotMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('VATSIM Online Update'));
-    
-    if (oldBotMsg) {
-      // Nếu tìm thấy, lập tức lấy ID của nó để dùng, không cần đọc file JSON nữa
-      vatsimMessageStore = { messageIds: [oldBotMsg.id], channelId: channel.id };
-      console.log(`✅ [VATSIM] Đã tìm lại được tin nhắn cũ (ID: ${oldBotMsg.id}) bằng cách quét kênh!`);
-      return;
-    }
-  } catch (err) {
-    console.warn('⚠️ Lỗi khi quét tìm tin nhắn VATSIM cũ:', err.message);
+  // 1. Kiểm tra xem trong file JSON đã có danh sách ID chưa
+  if (vatsimMessageStore && vatsimMessageStore.messageIds && vatsimMessageStore.messageIds.length > 0) {
+    console.log(`✅ [VATSIM] Đã load ${vatsimMessageStore.messageIds.length} tin nhắn từ JSON, bỏ qua quét radar.`);
+    return; // Đã có data xịn từ file, không cần quét làm hỏng data
   }
 
-  // Nếu KHÔNG tìm thấy tin nhắn cũ nào trong kênh thì mới tạo tin nhắn mới
+  // 2. Nếu file JSON bị mất, tiến hành dọn dẹp và tạo mới hoàn toàn
   try {
     const channel = await client.channels.fetch(VATSIM_CHANNEL_ID);
-    const embed = new EmbedBuilder().setTitle('🌐 VATSIM Online Update').setDescription('Đang tải dữ liệu...').setTimestamp();
+    const messages = await channel.messages.fetch({ limit: 50 });
+    
+    // Tìm TẤT CẢ các tin nhắn rác do bot gửi (Bao gồm cả các tin nhắn mở rộng không có tiêu đề)
+    const oldBotMsgs = messages.filter(m => m.author.id === client.user.id && m.embeds.length > 0);
+
+    // Xóa hết đám rác cũ đi để làm lại từ đầu cho sạch
+    for (const msg of oldBotMsgs.values()) {
+        await msg.delete().catch(() => {});
+    }
+
+    // Tạo 1 tin nhắn mồi mới tinh
+    const embed = new EmbedBuilder().setTitle('🌐 VATSIM Online Update').setDescription('Đang thiết lập kết nối API...').setTimestamp();
     const sent = await channel.send({ embeds: [embed] });
     
     vatsimMessageStore = { messageIds: [sent.id], channelId: channel.id };
-    console.log('🆕 [VATSIM] Không thấy tin nhắn cũ, đã khởi tạo tin nhắn mới.');
+    
+    const fs = require('fs'); // Đảm bảo gọi fs để lưu file
+    fs.writeFileSync(VATSIM_MSG_FILE, JSON.stringify(vatsimMessageStore, null, 2));
+    
+    console.log('🆕 [VATSIM] Đã dọn rác và khởi tạo tin nhắn gốc mới.');
   } catch (err) {
-    console.error('❌ Không thể tạo tin nhắn VATSIM gốc:', err);
+    console.error('❌ Không thể dọn dẹp và tạo tin nhắn VATSIM gốc:', err);
   }
 }
 // ===================== LOGGING: MEMBER JOIN/LEAVE =====================
