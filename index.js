@@ -6982,7 +6982,7 @@ async function handlePlayMusic(interaction) {
         // -------------------------------------------------------------
         // TRƯỜNG HỢP 2: SPOTIFY (TRACK, ALBUM, PLAYLIST)
         // -------------------------------------------------------------
-        // SỬA CHỮ NHẬN DIỆN LINK THÀNH 'spotify.com' MỚI CHUẨN:
+        // ĐÃ XÓA CÁI LINK PHAKE, DÙNG ĐÚNG CHỮ 'spotify.com' THÔI NHÉ:
         else if (query.includes('spotify.com')) { 
             const spData = await play.spotify(query);
             if (spData.type === 'playlist' || spData.type === 'album') {
