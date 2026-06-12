@@ -2552,59 +2552,33 @@ function createEventEmbed(event, startTime) {
   return embed;
 }
 
-// ===================== VOICE CHANNEL HANDLER =====================
-client.on('voiceStateUpdate', async (oldState, newState) => {
-  try {
-    const member = newState.member || oldState.member;
-    if (!member) return;
-
-    // --- Existing voice channel creation logic (giữ nguyên) ---
-    if (newState.channelId === TRIGGER_VOICE_CHANNEL_ID) {
-      // ... code tạo voice channel hiện tại ...
-    }
-
-    const oldChannel = oldState.channel;
-    if (oldChannel && createdVoiceChannels.has(oldChannel.id)) {
-      if (oldChannel.members.size === 0) {
-        try {
-          await oldChannel.delete();
-          createdVoiceChannels.delete(oldChannel.id);
-          console.log(`Deleted empty voice channel ${oldChannel.name}`);
-        } catch (deleteErr) {
-          console.error(`Error deleting voice channel ${oldChannel.name}:`, deleteErr);
-        }
-      }
-    }
-    // --- End existing logic ---
-
-    // --- Logging voice state changes ---
-    const oldChannelId = oldState.channelId;
-    const newChannelId = newState.channelId;
-    
-    if (oldChannelId === newChannelId) return;
-    
-    let action = '';
-    let color = 0x9b59b6;
-    
-    if (!oldChannelId && newChannelId) {
-      action = `🔊 Joined Voice Channel: ${newState.channel?.name || 'Unknown'}`;
-    } else if (oldChannelId && !newChannelId) {
-      action = `🔇 Left Voice Channel: ${oldState.channel?.name || 'Unknown'}`;
-    } else if (oldChannelId && newChannelId) {
-      action = `🔄 Moved Voice Channels: ${oldState.channel?.name || 'Unknown'} → ${newState.channel?.name || 'Unknown'}`;
-    }
-    
-    if (action) {
-      const embed = createLogEmbed(
-        '🎙️ Voice State Update',
-        `**User:** ${getUserIdentifier(member.user)}\n**Action:** ${action}`,
-        color
-      );
-      await sendLog(embed);
-    }
-  } catch (err) {
-    console.error('Error in voiceStateUpdate:', err);
-  }
+// ===================== THEO DÕI VOICE CHANNEL (AUTO-LEAVE) =====================
+client.on('voiceStateUpdate', (oldState, newState) => {
+    // Chỉ kích hoạt khi có ai đó rời đi (oldState có kênh, newState khác oldState)
+    if (oldState.channelId && oldState.channelId !== newState.channelId) {
+        const botVoiceChannel = oldState.guild.members.me.voice.channel;
+        
+        // Nếu cái phòng có người vừa rời đi chính là phòng của bot đang ở
+        if (botVoiceChannel && oldState.channelId === botVoiceChannel.id) {
+            // Đếm số lượng người thực (không phải bot) trong phòng
+            const humanCount = botVoiceChannel.members.filter(m => !m.user.bot).size;
+            
+            // Nếu không còn bóng người nào
+            if (humanCount === 0) {
+                const queue = musicQueues.get(oldState.guild.id);
+                if (queue) {
+                    if (queue.connection) queue.connection.destroy(); // Ngắt kết nối voice
+                    if (queue.dashboardMsg) {
+                        queue.dashboardMsg.edit({ 
+                            embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription('💤 Mọi người đã rời đi hết, Tk.Chill cũng dọn dẹp đi ngủ đây. Hẹn gặp lại!')], 
+                            components: [] 
+                        }).catch(()=>{});
+                    }
+                    musicQueues.delete(oldState.guild.id); // Xóa sạch dữ liệu hàng chờ
+                }
+            }
+        }
+    }
 });
 
 // ===================== BAN: UNBAN =====================
@@ -3659,47 +3633,48 @@ client.on('interactionCreate', async (interaction) => {
           // XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC
           if (customId.startsWith('music_')) {
             const queue = musicQueues.get(interaction.guild.id);
-            if (!queue) return interaction.reply({ content: '❌ Không có nhạc nào đang phát cả.', ephemeral: true });
+            if (!queue) return interaction.reply({ content: '❌ Không có nhạc nào đang phát.', ephemeral: true });
 
-            // Chặn không cho người ngoài voice phá
             if (interaction.member.voice.channel?.id !== queue.voiceChannel.id) {
-                return interaction.reply({ content: '❌ Bạn phải ở trong cùng phòng Voice với bot mới điều khiển được!', ephemeral: true });
+                return interaction.reply({ content: '❌ Bạn phải ở trong phòng Voice với bot mới bấm được!', ephemeral: true });
             }
 
-            if (customId === 'music_pause') {
-                if (queue.playing) {
-                    queue.player.pause();
-                    queue.playing = false;
-                } else {
-                    queue.player.unpause();
-                    queue.playing = true;
+            // BÍ QUYẾT DIỆT LỖI: Nhận tín hiệu ngay lập tức để Discord không báo đỏ
+            await interaction.deferUpdate().catch(()=>{});
+
+            try {
+                if (customId === 'music_pause') {
+                    if (queue.playing) {
+                        queue.player.pause(); queue.playing = false;
+                    } else {
+                        queue.player.unpause(); queue.playing = true;
+                    }
                 }
-                await interaction.update(createMusicDashboard(queue));
-            }
+                if (customId === 'music_skip') {
+                    queue.player.stop(); 
+                    // Không cần edit dashboard ở đây vì hàm playNextSong sẽ tự động làm
+                    return;
+                }
+                if (customId === 'music_stop') {
+                    queue.songs = [];
+                    queue.player.stop();
+                    // Bấm Stop thì chuyển về giao diện ngủ đông ngay lập tức
+                }
+                if (customId === 'music_volup') {
+                    queue.volume = Math.min((queue.volume || 1.0) + 0.2, 2.0); 
+                    if (queue.resource) queue.resource.volume.setVolume(queue.volume);
+                }
+                if (customId === 'music_voldown') {
+                    queue.volume = Math.max((queue.volume || 1.0) - 0.2, 0.1); 
+                    if (queue.resource) queue.resource.volume.setVolume(queue.volume);
+                }
 
-            if (customId === 'music_skip') {
-                queue.player.stop(); // Cố tình stop để kích hoạt sự kiện AudioPlayerStatus.Idle -> tự chuyển bài
-                await interaction.reply({ content: '⏭️ Đã qua bài!', ephemeral: true });
+                // Cập nhật lại UI sau khi tính toán xong
+                if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+                
+            } catch(e) {
+                console.error("Lỗi nút bấm:", e);
             }
-
-            if (customId === 'music_stop') {
-                queue.songs = [];
-                queue.player.stop();
-                await interaction.update({ embeds: [new EmbedBuilder().setTitle('⏹️ Đã dừng phát nhạc.').setColor(0xe74c3c)], components: [] });
-            }
-            if (customId === 'music_volup') {
-            // Tăng 20% mỗi lần bấm, tối đa 200% (2.0)
-            queue.volume = Math.min((queue.volume || 1.0) + 0.2, 2.0); 
-            if (queue.resource) queue.resource.volume.setVolume(queue.volume);
-            await interaction.update(createMusicDashboard(queue));
-        }
-
-          if (customId === 'music_voldown') {
-              // Giảm 20% mỗi lần bấm, tối thiểu 10% (0.1)
-              queue.volume = Math.max((queue.volume || 1.0) - 0.2, 0.1); 
-              if (queue.resource) queue.resource.volume.setVolume(queue.volume);
-              await interaction.update(createMusicDashboard(queue));
-          }
             return;
           }
 
@@ -6758,34 +6733,40 @@ async function handleOnlineAtc(interaction) {
 
 // ===================== TK.CHILL MUSIC SYSTEM (EXCLUSIVE DASHBOARD) =====================
 
-// Giao diện Premium Jockie/Lara Style
+// ===================== GIAO DIỆN PREMIUM (JOCKIE/LARA STYLE) =====================
 function createMusicDashboard(queue) {
-  if (!queue || !queue.songs[0]) return null;
+  // Nếu hết nhạc, hiển thị giao diện ngủ đông
+  if (!queue || queue.songs.length === 0) {
+      return {
+          embeds: [
+              new EmbedBuilder()
+              .setColor(0x2b2d31)
+              .setAuthor({ name: 'TK.CHILL PLAYER', iconURL: 'https://cdn-icons-png.flaticon.com/512/3844/3844724.png' })
+              .setDescription('💤 **Hàng chờ trống!** Bot đang nằm chờ ở đây. Hãy dùng lệnh `/play` để thêm nhạc tiếp nhé...')
+          ],
+          components: [] // Giấu hết nút bấm đi khi không có nhạc
+      };
+  }
+
   const currentSong = queue.songs[0];
-  
-  // Tính % âm lượng hiển thị
   const volPercent = Math.round((queue.volume || 1.0) * 100);
 
-  // Thanh Tiến Trình Ảo (Tạo cảm giác xịn sò)
-  const progressBar = `🔘▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ [0:00 / ${currentSong.durationRaw}]`;
-
   const embed = new EmbedBuilder()
-    .setAuthor({ name: '🎧 TK.CHILL PREMIUM PLAYER', iconURL: 'https://cdn-icons-png.flaticon.com/512/3844/3844724.png' })
-    .setTitle(`🎶 ${currentSong.title}`)
+    .setAuthor({ name: 'NOW PLAYING', iconURL: 'https://cdn-icons-png.flaticon.com/512/659/659056.png' })
+    .setTitle(currentSong.title)
     .setURL(currentSong.url)
-    .setDescription(`${progressBar}\n\n👤 **Yêu cầu bởi:** <@${currentSong.requester}>\n🔊 **Âm lượng:** \`${volPercent}%\``)
+    .setDescription(`🔘▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ \`[0:00 / ${currentSong.durationRaw}]\`\n\n> 👤 **Yêu cầu bởi:** <@${currentSong.requester}>\n> 🔊 **Âm lượng:** \`${volPercent}%\``)
     .setImage(currentSong.thumbnail)
-    .setColor(0x2b2d31) // Màu xám đen chuẩn Dark Mode của Discord
-    .setFooter({ text: `Hàng chờ: ${queue.songs.length - 1} bài • Độc quyền bởi Tk.Chill` });
+    .setColor(0x2b2d31)
+    .setFooter({ text: `Hàng chờ: ${queue.songs.length - 1} bài • Độc quyền Tk.Chill` });
 
-  // HÀNG 1: Nút điều khiển chính
+  // Nút bấm làm mờ (Secondary) cho giống Lara, sang trọng hơn
   const row1 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('music_pause').setEmoji(queue.playing ? '⏸️' : '▶️').setStyle(queue.playing ? ButtonStyle.Secondary : ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('music_skip').setEmoji('⏭️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('music_pause').setEmoji(queue.playing ? '⏸️' : '▶️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('music_skip').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('music_stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger)
   );
 
-  // HÀNG 2: Nút Âm lượng
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('music_voldown').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('music_volup').setEmoji('🔊').setStyle(ButtonStyle.Secondary)
@@ -6794,35 +6775,37 @@ function createMusicDashboard(queue) {
   return { embeds: [embed], components: [row1, row2] };
 }
 
-// Cỗ máy xử lý phát nhạc (ĐÃ VÁ LỖI INVALID URL)
+// ===================== CỖ MÁY XỬ LÝ NHẠC (CHỐNG GIẬT + KHÔNG OUT) =====================
 async function playNextSong(guildId) {
   const queue = musicQueues.get(guildId);
-  if (!queue || queue.songs.length === 0) {
-    if (queue && queue.dashboardMsg) {
-        // Hết nhạc thì sửa bảng thành "Đã hết" thay vì xóa
-        await queue.dashboardMsg.edit({ 
-            embeds: [new EmbedBuilder().setTitle('🏁 Đã phát hết danh sách nhạc!').setColor(0x3498db).setDescription('Hẹn gặp lại bạn nhé. Tk.Chill rời kênh đây~')], 
-            components: [] 
-        }).catch(()=>{});
-        if (queue.connection) queue.connection.destroy();
-    }
-    musicQueues.delete(guildId);
-    return;
+  if (!queue) return;
+
+  // SỬA Ở ĐÂY: Nếu hết nhạc, ĐỪNG OUT CONNECTION, chỉ báo cho UI biết là đang rảnh
+  if (queue.songs.length === 0) {
+      queue.playing = false; // Đánh dấu là máy đang nghỉ
+      if (queue.dashboardMsg) {
+          await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+      }
+      return;
   }
 
   const song = queue.songs[0];
   try {
     const stream = await play.stream(song.url);
     
-    // NÂNG CẤP LÕI RESOURCE CÓ HỖ TRỢ ÂM LƯỢNG
-    const resource = createAudioResource(stream.stream, { inputType: stream.type, inlineVolume: true });
+    // Tối ưu hóa Buffer nén âm thanh để giảm giật lag trên Render
+    const resource = createAudioResource(stream.stream, { 
+        inputType: stream.type, 
+        inlineVolume: true,
+        silencePaddingFrames: 5 // Đệm thêm xíu khung hình để mượt hơn
+    });
+    
     resource.volume.setVolume(queue.volume || 1.0);
-    queue.resource = resource; // Lưu lại để tý bấm nút còn biết đường chỉnh
+    queue.resource = resource;
 
     queue.player.play(resource);
     queue.playing = true;
 
-    // Cập nhật lại cái Dashboard (Bảng điều khiển)
     const dashboardData = createMusicDashboard(queue);
     if (queue.dashboardMsg) {
       await queue.dashboardMsg.edit(dashboardData).catch(()=>{});
@@ -6830,15 +6813,9 @@ async function playNextSong(guildId) {
       queue.dashboardMsg = await queue.textChannel.send(dashboardData);
     }
   } catch (error) {
-    console.error(`❌ Lỗi phát bài ${song.title}:`, error.message);
-    queue.songs.shift(); // Lỗi thì bỏ qua bài này, phát bài kế
-    
-    // Báo nhẹ cho người dùng biết bài này bị Youtube chặn
-    if (queue.textChannel) {
-        queue.textChannel.send(`⚠️ Bỏ qua bài **${song.title}** vì Youtube chặn bản quyền âm thanh!`).then(m => setTimeout(() => m.delete().catch(()=>{}), 5000));
-    }
-    
-    playNextSong(guildId); // Tự động hát bài tiếp theo
+    console.error(`❌ Lỗi phát bài:`, error.message);
+    queue.songs.shift(); 
+    playNextSong(guildId); 
   }
 }
 
@@ -6999,11 +6976,18 @@ async function handlePlayMusic(interaction) {
       setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
 
     } else {
+      // Hàng chờ đã có sẵn (hoặc bot đang trong phòng ngủ đông)
       queue.songs.push(song);
       await interaction.editReply(`✅ Đã thêm vào hàng chờ: **${song.title}**`);
       setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
       
-      if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+      // Nếu bot đang rảnh (không có bài nào đang hát), thì gọi hàm playNextSong để kích máy nổ lại
+      if (queue.songs.length === 1 && !queue.playing) {
+          playNextSong(interaction.guild.id);
+      } else {
+          // Cập nhật giao diện số bài hát lên
+          if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+      }
     }
 
   } catch (error) {
