@@ -2002,10 +2002,12 @@ function getProfilesString() {
 
 // ===================== ULTIMATE AI CHAT (GEMINI -> GROQ -> POLLINATIONS) =====================
 
+// Đảo chiến thuật: Ưu tiên mấy con model nhẹ, limit bự lên đầu để né lỗi TPM
 const GROQ_MODELS = [
-  'llama-3.3-70b-versatile', 
-  'deepseek-r1-distill-llama-70b', 
-  'gemma2-9b-it'
+  'llama-3.1-8b-instant',      // Vua tốc độ, cho phép nhồi lịch sử chat cực dài
+  'gemma2-9b-it',              // Model con ruột của Google (Gemini thu nhỏ)
+  'mixtral-8x7b-32768',        // Model chuyên xử lý văn bản dài
+  'llama-3.3-70b-versatile'    // Thằng to xác này để chót lỡ mấy con kia sập
 ];
 
 // Đổi tham số để nhận thêm channelId và userName
