@@ -5173,6 +5173,7 @@ async function handleAnnouncement(interaction) {
   try {
     const prompt = `Bạn là một trợ lý quản lý cộng đồng. Hãy viết lại đoạn thông báo sau bằng tiếng Việt sao cho thật chuyên nghiệp, lịch sự, rõ ràng và hấp dẫn để đăng lên kênh Discord. 
     Yêu cầu: Giữ nguyên các thông tin chính, link, thẻ ICAO, ngày giờ (nếu có). Trình bày ngắt dòng, gạch đầu dòng hợp lý.
+    Lưu ý: không giải thích gì hết dài dòng lèm bèm chào hỏi gì hết trình bày thẳng luôn.
     
     Nội dung gốc cần viết lại:
     ${rawMessage}`;
