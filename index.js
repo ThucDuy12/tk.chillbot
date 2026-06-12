@@ -7040,7 +7040,7 @@ async function handlePlayMusic(interaction) {
             }
         }
         // -------------------------------------------------------------
-        // TRƯỜNG HỢP 3: APPLE MUSIC (HỖ TRỢ FULL PLAYLIST & BÀI ĐƠN)
+        // TRƯỜNG HỢP 3: APPLE MUSIC (MỔ BỤNG JSON TỪ SERIALIZED-SERVER-DATA)
         // -------------------------------------------------------------
         else if (query.includes('music.apple.com')) {
             try {
@@ -7055,40 +7055,56 @@ async function handlePlayMusic(interaction) {
                 const html = await response.text();
                 const $ = cheerio.load(html);
                 
-                let trackNames = [];
+                let trackList = [];
                 const thumbnail = $('meta[property="og:image"]').attr('content') || null;
 
-                // TÌM CÁC BÀI HÁT TRONG PLAYLIST / ALBUM (Thông qua dữ liệu SEO ẩn)
-                $('script[type="application/ld+json"]').each((i, el) => {
-                    try {
-                        const data = JSON.parse($(el).html());
-                        const items = Array.isArray(data) ? data : [data];
-                        for (const item of items) {
-                            if ((item['@type'] === 'MusicPlaylist' || item['@type'] === 'MusicAlbum') && item.track) {
-                                item.track.forEach(t => {
-                                    // Lấy tên bài hát + tên ca sĩ (nếu có) để tìm kiếm cho chuẩn
-                                    let artist = (t.byArtist && t.byArtist[0]) ? t.byArtist[0].name : '';
-                                    if (t.name) trackNames.push(`${t.name} ${artist}`.trim());
-                                });
+                // TRUY TÌM KHO BÁU TRONG THẺ SCRIPT JSON CỦA APPLE
+                const serializedData = $('#serialized-server-data').text();
+                
+                if (serializedData) {
+                    const parsedJSON = JSON.parse(serializedData);
+                    const sections = parsedJSON[0]?.sections || [];
+                    
+                    for (const section of sections) {
+                        // Tìm đúng phần "track-list" chứa danh sách bài hát
+                        if (section.itemKind === 'trackLockup' || (section.id && section.id.includes('track-list'))) {
+                            const items = section.items || [];
+                            for (const item of items) {
+                                if (item.title) {
+                                    // 1. Lấy tên ca sĩ
+                                    let artist = item.artistName || '';
+                                    if (!artist && item.subtitleLinks) {
+                                        artist = item.subtitleLinks.map(link => link.title).join(', ');
+                                    }
+                                    
+                                    // 2. Chuyển đổi thời lượng từ mili-giây sang phút:giây
+                                    let durationStr = '0:00';
+                                    if (item.duration) {
+                                        const mins = Math.floor(item.duration / 60000);
+                                        const secs = Math.floor((item.duration % 60000) / 1000);
+                                        durationStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+                                    }
+
+                                    // 3. Đóng gói vào danh sách
+                                    trackList.push({
+                                        title: `${item.title} - ${artist}`.trim(),
+                                        resolveQuery: `${item.title} ${artist}`.trim(),
+                                        thumbnail: thumbnail,
+                                        durationRaw: durationStr,
+                                        requester: interaction.user.id,
+                                        url: null // Bàn giao cho Lazy Load đi lùng audio
+                                    });
+                                }
                             }
                         }
-                    } catch(e) {}
-                });
-
-                // NẾU TÌM THẤY DANH SÁCH BÀI HÁT (PLAYLIST)
-                if (trackNames.length > 0) {
-                    for (const tName of trackNames) {
-                        songsToAdd.push({
-                            title: tName.length > 50 ? tName.substring(0, 47) + '...' : tName,
-                            resolveQuery: tName,
-                            thumbnail: thumbnail,
-                            durationRaw: '0:00',
-                            requester: interaction.user.id,
-                            url: null // Đẩy vào Lazy Load
-                        });
                     }
+                }
+
+                // NẾU TÌM THẤY DANH SÁCH (PLAYLIST)
+                if (trackList.length > 0) {
+                    songsToAdd.push(...trackList);
                 } 
-                // NẾU LÀ BÀI ĐƠN (Không có danh sách)
+                // CỨU CÁNH: NẾU LÀ BÀI ĐƠN HOẶC JSON LỖI
                 else {
                     let title = $('meta[property="og:title"]').attr('content') || $('title').text();
                     title = title.replace(/ - Single by.*/i, '')
@@ -7105,10 +7121,9 @@ async function handlePlayMusic(interaction) {
                         url: null
                     });
                 }
-                
             } catch (apErr) {
                 console.error('Lỗi xử lý Apple Music:', apErr);
-                return interaction.editReply('❌ Bot không thể đọc được link Apple Music này (Có thể do mạng hoặc link riêng tư).');
+                return interaction.editReply('❌ Bot không thể đọc được link Apple Music này (Có thể do mạng hoặc link bị ẩn).');
             }
         }
         // -------------------------------------------------------------
