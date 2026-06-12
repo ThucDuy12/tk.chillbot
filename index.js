@@ -3671,11 +3671,13 @@ client.on('interactionCreate', async (interaction) => {
                   return interaction.update(createMusicDashboard(queue)).catch(()=>{});
                 }
                 else if (customId === 'music_volup') {
-                    queue.volume = Math.min((queue.volume || 1.0) + 0.2, 2.0); 
+                    // Lấy gốc 0.6 thay vì 1.0
+                    queue.volume = Math.min((queue.volume ?? 0.6) + 0.2, 2.0); 
                     if (queue.resource) queue.resource.volume.setVolume(queue.volume);
                 } 
                 else if (customId === 'music_voldown') {
-                    queue.volume = Math.max((queue.volume || 1.0) - 0.2, 0.1); 
+                    // Lấy gốc 0.6 thay vì 1.0
+                    queue.volume = Math.max((queue.volume ?? 0.6) - 0.2, 0.1); 
                     if (queue.resource) queue.resource.volume.setVolume(queue.volume);
                 }
 
@@ -6834,26 +6836,47 @@ function createMusicDashboard(queue) {
   return { embeds: [embed], components: [row] };
 }
 
-// ===================== CỖ MÁY XỬ LÝ NHẠC =====================
+// ===================== CỖ MÁY XỬ LÝ NHẠC (LAZY LOAD) =====================
 async function playNextSong(guildId) {
   const queue = musicQueues.get(guildId);
   if (!queue) return;
 
-  // Dọn dẹp cái bộ đếm giờ cũ nếu có
-  if (queue.progressInterval) {
-      clearInterval(queue.progressInterval);
-  }
+  if (queue.progressInterval) clearInterval(queue.progressInterval);
 
   if (queue.songs.length === 0) {
       queue.playing = false; 
-      if (queue.dashboardMsg) {
-          await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
-      }
+      if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
       return;
   }
 
   const song = queue.songs[0];
   try {
+    // ================= KHU VỰC LAZY LOAD (GIẢI MÃ ÂM THANH) =================
+    if (!song.url && song.resolveQuery) {
+        if (queue.dashboardMsg) await queue.dashboardMsg.edit({ 
+            embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription(`🔍 Đang tải luồng âm thanh: **${song.title.replace('🔎 Đang tìm: ', '')}**...`)], 
+            components: [] 
+        }).catch(()=>{});
+
+        // Ném tên bài hát qua kho SoundCloud để lấy link ẩn
+        const searchResults = await play.search(song.resolveQuery, { limit: 1, source: { soundcloud: 'tracks' } });
+        if (!searchResults || searchResults.length === 0) {
+            if (queue.textChannel) queue.textChannel.send(`⚠️ Bỏ qua bài **${song.title.replace('🔎 Đang tìm: ', '')}** vì không tìm thấy âm thanh thay thế.`).then(m => setTimeout(()=>m.delete().catch(()=>{}), 5000));
+            queue.songs.shift();
+            return playNextSong(guildId);
+        }
+        
+        const track = searchResults[0];
+        song.title = track.name; // Cập nhật lại tên chuẩn
+        song.url = track.url;
+        song.thumbnail = song.thumbnail || track.thumbnail;
+        
+        const mins = Math.floor(track.durationInSec / 60);
+        const secs = track.durationInSec % 60;
+        song.durationRaw = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    // =========================================================================
+
     const stream = await play.stream(song.url);
     
     const resource = createAudioResource(stream.stream, { 
@@ -6862,7 +6885,8 @@ async function playNextSong(guildId) {
         silencePaddingFrames: 5 
     });
     
-    resource.volume.setVolume(queue.volume || 1.0);
+    // Nạp âm lượng mặc định 60%
+    resource.volume.setVolume(queue.volume ?? 0.6);
     queue.resource = resource;
 
     queue.player.play(resource);
@@ -6875,7 +6899,6 @@ async function playNextSong(guildId) {
       queue.dashboardMsg = await queue.textChannel.send(dashboardData);
     }
 
-    // NÂNG CẤP: Cho thanh tiến trình chạy mỗi 15 giây 
     queue.progressInterval = setInterval(async () => {
         if (queue && queue.playing && queue.dashboardMsg && queue.songs.length > 0) {
             await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
@@ -6889,7 +6912,7 @@ async function playNextSong(guildId) {
   }
 }
 
-// ===================== XỬ LÝ LỆNH /PLAY (TUYỆT CHIÊU BYPASS YOUTUBE/SPOTIFY) =====================
+// ===================== XỬ LÝ LỆNH /PLAY (HỖ TRỢ FULL PLAYLIST + LAZY LOAD) =====================
 async function handlePlayMusic(interaction) {
   const query = interaction.options.getString('query');
   const voiceChannel = interaction.member.voice.channel;
@@ -6899,120 +6922,153 @@ async function handlePlayMusic(interaction) {
   }
 
   await interaction.deferReply();
+  let songsToAdd = []; // Mảng chứa các bài hát sẽ thêm vào
 
   try {
-    let songTitle, songUrl, songThumb, songDuration;
     const isLink = query.startsWith('http');
     const fetch = (await import('node-fetch')).default;
     
     if (isLink) {
         // -------------------------------------------------------------
-        // TRƯỜNG HỢP 1: DÁN LINK YOUTUBE -> TREO ĐẦU DÊ BÁN THỊT CHÓ
+        // TRƯỜNG HỢP 1: YOUTUBE (TRACK & PLAYLIST)
         // -------------------------------------------------------------
         if (query.includes('youtube.com') || query.includes('youtu.be')) {
-            try {
-                // Dùng API oEmbed để đọc lén thông tin video mà không bị chặn IP
+            if (query.includes('list=')) { // Nếu là Playlist
+                const ytData = await play.playlist_info(query, { incomplete: true });
+                const tracks = await ytData.all_videos();
+                for (const t of tracks) {
+                    songsToAdd.push({
+                        title: t.title,
+                        resolveQuery: `${t.title} ${t.channel?.name || ''}`.trim(),
+                        thumbnail: t.thumbnails?.[0]?.url,
+                        durationRaw: t.durationRaw || '0:00',
+                        requester: interaction.user.id,
+                        url: null // Đánh dấu là chưa lấy âm thanh (Lazy Load)
+                    });
+                }
+            } else { // Nếu là Bài đơn
                 const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(query)}&format=json`;
                 const oembedRes = await fetch(oembedUrl);
-                
-                if (!oembedRes.ok) return interaction.editReply('❌ Không thể đọc được link YouTube này (Video riêng tư hoặc bị xóa).');
-                
+                if (!oembedRes.ok) return interaction.editReply('❌ Không thể đọc được link YouTube này.');
                 const oembedData = await oembedRes.json();
-                const fakeQuery = `${oembedData.title} ${oembedData.author_name || ''}`.trim();
-                
-                // Đem tên bài hát sang SoundCloud để tìm file âm thanh
-                const searchResults = await play.search(fakeQuery, { limit: 1, source: { soundcloud: 'tracks' } });
-                if (!searchResults || searchResults.length === 0) {
-                    return interaction.editReply(`❌ Đã nhận diện được bài **${oembedData.title}**, nhưng kho nhạc dự phòng không có âm thanh bài này!`);
-                }
-                
-                const track = searchResults[0];
-                songTitle = oembedData.title; // Lấy tên gốc Youtube cho ngầu
-                songUrl = track.url;          // Ruột là link SoundCloud
-                songThumb = oembedData.thumbnail_url || track.thumbnail; // Ảnh bìa gốc Youtube
-                
-                const mins = Math.floor(track.durationInSec / 60);
-                const secs = track.durationInSec % 60;
-                songDuration = `${mins}:${secs.toString().padStart(2, '0')}`;
-                
-            } catch (err) {
-                console.error('Lỗi khi convert YouTube link:', err);
-                return interaction.editReply('❌ Lỗi khi trích xuất link YouTube. Hãy thử lại bằng cách gõ tên bài hát nhé!');
+                songsToAdd.push({
+                    title: oembedData.title,
+                    resolveQuery: `${oembedData.title} ${oembedData.author_name || ''}`.trim(),
+                    thumbnail: oembedData.thumbnail_url,
+                    durationRaw: '0:00',
+                    requester: interaction.user.id,
+                    url: null
+                });
             }
         } 
         // -------------------------------------------------------------
-        // TRƯỜNG HỢP 2: DÁN LINK SPOTIFY -> LÀM TƯƠNG TỰ YOUTUBE
+        // TRƯỜNG HỢP 2: SPOTIFY (TRACK, ALBUM, PLAYLIST)
         // -------------------------------------------------------------
         else if (query.includes('spotify.com')) {
-            try {
-                const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(query)}`;
-                const oembedRes = await fetch(oembedUrl);
-                
-                if (!oembedRes.ok) return interaction.editReply('❌ Không thể đọc được link Spotify này.');
-                
-                const oembedData = await oembedRes.json();
-                const fakeQuery = `${oembedData.title}`.trim();
-                
-                const searchResults = await play.search(fakeQuery, { limit: 1, source: { soundcloud: 'tracks' } });
-                if (!searchResults || searchResults.length === 0) {
-                    return interaction.editReply(`❌ Đã nhận diện được bài **${oembedData.title}**, nhưng kho nhạc dự phòng không có âm thanh bài này!`);
+            const spData = await play.spotify(query);
+            if (spData.type === 'playlist' || spData.type === 'album') {
+                const tracks = await spData.all_tracks();
+                for (const t of tracks) {
+                    songsToAdd.push({
+                        title: `${t.name} - ${t.artists.map(a=>a.name).join(', ')}`,
+                        resolveQuery: `${t.name} ${t.artists[0]?.name || ''}`.trim(),
+                        thumbnail: t.thumbnail || spData.thumbnail,
+                        durationRaw: '0:00',
+                        requester: interaction.user.id,
+                        url: null
+                    });
                 }
-                
-                const track = searchResults[0];
-                songTitle = oembedData.title;
-                songUrl = track.url;
-                songThumb = oembedData.thumbnail_url || track.thumbnail;
-                
-                const mins = Math.floor(track.durationInSec / 60);
-                const secs = track.durationInSec % 60;
-                songDuration = `${mins}:${secs.toString().padStart(2, '0')}`;
-                
-            } catch (err) {
-                return interaction.editReply('❌ Lỗi khi trích xuất link Spotify. Hãy gõ thẳng tên bài hát nhé!');
+            } else {
+                songsToAdd.push({
+                    title: `${spData.name} - ${spData.artists.map(a=>a.name).join(', ')}`,
+                    resolveQuery: `${spData.name} ${spData.artists[0]?.name || ''}`.trim(),
+                    thumbnail: spData.thumbnail,
+                    durationRaw: '0:00',
+                    requester: interaction.user.id,
+                    url: null
+                });
             }
         }
         // -------------------------------------------------------------
-        // TRƯỜNG HỢP 3: LINK SOUNDCLOUD CHUẨN
+        // TRƯỜNG HỢP 3: APPLE MUSIC (TRACK, ALBUM, PLAYLIST)
+        // -------------------------------------------------------------
+        else if (query.includes('music.apple.com')) {
+            const apData = await play.apple(query);
+            if (apData.type === 'playlist' || apData.type === 'album') {
+                const tracks = await apData.all_tracks();
+                for (const t of tracks) {
+                    songsToAdd.push({
+                        title: `${t.title} - ${t.artist}`,
+                        resolveQuery: `${t.title} ${t.artist}`.trim(),
+                        thumbnail: apData.thumbnail,
+                        durationRaw: '0:00',
+                        requester: interaction.user.id,
+                        url: null
+                    });
+                }
+            } else {
+                songsToAdd.push({
+                    title: `${apData.title} - ${apData.artist}`,
+                    resolveQuery: `${apData.title} ${apData.artist}`.trim(),
+                    thumbnail: apData.thumbnail,
+                    durationRaw: '0:00',
+                    requester: interaction.user.id,
+                    url: null
+                });
+            }
+        }
+        // -------------------------------------------------------------
+        // TRƯỜNG HỢP 4: SOUNDCLOUD CHUẨN
         // -------------------------------------------------------------
         else if (query.includes('soundcloud.com')) {
-            const scInfo = await play.soundcloud(query);
-            songTitle = scInfo.name;
-            songUrl = scInfo.url;
-            songThumb = scInfo.thumbnail;
-            const mins = Math.floor(scInfo.durationInSec / 60);
-            const secs = scInfo.durationInSec % 60;
-            songDuration = `${mins}:${secs.toString().padStart(2, '0')}`;
+            const sc_type = await play.so_validate(query);
+            if (sc_type === 'playlist') {
+                const scData = await play.soundcloud(query);
+                const tracks = await scData.all_tracks();
+                for (const t of tracks) {
+                    const mins = Math.floor(t.durationInSec / 60);
+                    const secs = t.durationInSec % 60;
+                    songsToAdd.push({
+                        title: t.name,
+                        url: t.url,
+                        thumbnail: t.thumbnail,
+                        durationRaw: `${mins}:${secs.toString().padStart(2, '0')}`,
+                        requester: interaction.user.id
+                    });
+                }
+            } else {
+                const scInfo = await play.soundcloud(query);
+                const mins = Math.floor(scInfo.durationInSec / 60);
+                const secs = scInfo.durationInSec % 60;
+                songsToAdd.push({
+                    title: scInfo.name,
+                    url: scInfo.url,
+                    thumbnail: scInfo.thumbnail,
+                    durationRaw: `${mins}:${secs.toString().padStart(2, '0')}`,
+                    requester: interaction.user.id
+                });
+            }
         } else {
-            return interaction.editReply('❌ **Đường link không hợp lệ!**');
+            return interaction.editReply('❌ **Đường link không hợp lệ!** Bot chỉ hỗ trợ YouTube, Spotify, Apple Music và SoundCloud.');
         }
     } else {
-        // TÌM KIẾM BẰNG TEXT
-        const searchResults = await play.search(query, { limit: 1, source: { soundcloud: 'tracks' } });
-        if (!searchResults || searchResults.length === 0) {
-            return interaction.editReply('❌ Không tìm thấy bài hát này trên kho nhạc!');
-        }
-        
-        const track = searchResults[0];
-        songTitle = track.name;
-        songUrl = track.url;
-        songThumb = track.thumbnail;
-        
-        const mins = Math.floor(track.durationInSec / 60);
-        const secs = track.durationInSec % 60;
-        songDuration = `${mins}:${secs.toString().padStart(2, '0')}`;
+        // TÌM KIẾM BẰNG TEXT -> Đẩy qua Lazy Load cho nhanh
+        songsToAdd.push({
+            title: `🔎 Đang tìm: ${query}...`,
+            resolveQuery: query,
+            thumbnail: null,
+            durationRaw: '0:00',
+            requester: interaction.user.id,
+            url: null
+        });
     }
 
-    const song = {
-      title: songTitle,
-      url: songUrl,
-      thumbnail: songThumb,
-      durationRaw: songDuration,
-      requester: interaction.user.id
-    };
+    if (songsToAdd.length === 0) return interaction.editReply('❌ Không tìm thấy bài hát nào từ yêu cầu của bạn.');
 
     let queue = musicQueues.get(interaction.guild.id);
+    const isNewQueue = !queue;
 
-    // Nếu chưa có hàng chờ, tạo mới
+    // TẠO HÀNG CHỜ VỚI ÂM LƯỢNG MẶC ĐỊNH 60% (0.6)
     if (!queue) {
       queue = {
         textChannel: interaction.channel,
@@ -7021,19 +7077,21 @@ async function handlePlayMusic(interaction) {
         player: createAudioPlayer(),
         songs: [],
         playing: true,
-        volume: 1.0, 
+        volume: 0.6, // <--- THAY ĐỔI MẶC ĐỊNH Ở ĐÂY
         dashboardMsg: null
       };
-      
       musicQueues.set(interaction.guild.id, queue);
-      queue.songs.push(song);
+    }
 
+    // Đẩy tất cả nhạc vào kho
+    queue.songs.push(...songsToAdd);
+
+    if (isNewQueue) {
       queue.connection = joinVoiceChannel({
         channelId: voiceChannel.id,
         guildId: interaction.guild.id,
         adapterCreator: interaction.guild.voiceAdapterCreator,
       });
-
       queue.connection.subscribe(queue.player);
 
       queue.player.on(AudioPlayerStatus.Idle, () => {
@@ -7042,27 +7100,33 @@ async function handlePlayMusic(interaction) {
       });
 
       await playNextSong(interaction.guild.id);
-      await interaction.editReply(`✅ Đã xử lý thành công và chuẩn bị phát: **${song.title}**`);
+      
+      // Thông báo thông minh
+      if (songsToAdd.length > 1) {
+          await interaction.editReply(`✅ Đã thêm **Playlist gồm ${songsToAdd.length} bài** vào hàng chờ!`);
+      } else {
+          await interaction.editReply(`✅ Đã thêm vào hàng chờ và chuẩn bị phát!`);
+      }
       setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
 
     } else {
-      // Hàng chờ đã có sẵn (hoặc bot đang trong phòng ngủ đông)
-      queue.songs.push(song);
-      await interaction.editReply(`✅ Đã thêm vào hàng chờ: **${song.title}**`);
+      if (songsToAdd.length > 1) {
+          await interaction.editReply(`✅ Đã thêm **Playlist gồm ${songsToAdd.length} bài** vào hàng chờ!`);
+      } else {
+          await interaction.editReply(`✅ Đã thêm vào hàng chờ: **${songsToAdd[0].title.replace('🔎 Đang tìm: ', '')}**`);
+      }
       setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
       
-      // Nếu bot đang rảnh (không có bài nào đang hát), thì gọi hàm playNextSong để kích máy nổ lại
-      if (queue.songs.length === 1 && !queue.playing) {
+      if (queue.songs.length === songsToAdd.length && !queue.playing) {
           playNextSong(interaction.guild.id);
       } else {
-          // Cập nhật giao diện số bài hát lên
           if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
       }
     }
 
   } catch (error) {
     console.error('Lỗi khi tải nhạc:', error);
-    await interaction.editReply('❌ Lỗi mất tiêu rồi! Hãy thử lại nha.');
+    await interaction.editReply('❌ Có vẻ Playlist này để chế độ riêng tư hoặc API đang quá tải. Thử lại sau nhé!');
   }
 }
 
