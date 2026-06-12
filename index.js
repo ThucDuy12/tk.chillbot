@@ -2029,7 +2029,11 @@ async function ultimateChatReply(channelId, userId, userName, userText, allowSwe
 - Bạn đang ở trong một phòng chat chung. Sẽ có nhiều người luân phiên nói chuyện với bạn.
 - Lời nói của người dùng sẽ có định dạng: "[Tên người nói - ID]: Nội dung".
 - Hãy đọc lịch sử để hiểu mạch câu chuyện, hiểu ai đang nói chuyện với ai, và nếu ai đó trả lời nối tiếp chủ đề của người trước, hãy trả lời cho mượt mà.
-- Bạn phải trả lời bắt buộc theo ngôn ngữ mà người dùng nhắn (VD: Nếu người dúng tiếng anh thì bạn phải trả lời tiếng anh, người dùng tiếng việt thì trả lời tiếng việt, nếu người dùng nhắn tiếng nhật thì bạn phải trả lời tiếng nhật,...). Đừng tự nhiên đổi sang ngôn ngữ khác làm gì nhé.
+
+[QUY TẮC NGÔN NGỮ (QUAN TRỌNG)]
+- BẮT BUỘC: Bạn phải nhận diện ngôn ngữ trong tin nhắn mới nhất của người dùng và TRẢ LỜI BẰNG CHÍNH NGÔN NGỮ ĐÓ. 
+- Ví dụ: Họ nhắn Tiếng Việt -> Trả lời Tiếng Việt, English -> English, 日本語 -> 日本語, 한국어 -> 한국어...
+- Tuyệt đối không tự ý dịch sang tiếng Việt nếu người dùng đang dùng ngôn ngữ khác (trừ khi họ yêu cầu dịch).
 
 [KIẾN THỨC VÀ TÌM KIẾM]
 - BẮT BUỘC sử dụng tính năng tìm kiếm Internet để tra cứu sự thật (VD: Director VATSEA1, VCLvACC...). 
