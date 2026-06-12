@@ -2013,40 +2013,49 @@ const GROQ_MODELS = [
 // Đổi tham số để nhận thêm channelId và userName
 async function ultimateChatReply(channelId, userId, userName, userText, allowSwear) {
   
-  // ✅ Lấy lịch sử trực tiếp từ MongoDB
   let history = await db.getChatHistory(channelId) || [];
   if (!Array.isArray(history)) history = [];
 
-  // Tăng lên 15 tin nhắn để bot nhớ được mạch truyện nhóm lâu hơn
-  if (history.length > 15) history = history.slice(-15);
+  // VÁ LỖI CHO GEMINI: Luôn cắt chẵn 14 tin nhắn để đảm bảo bắt đầu là User, kết thúc là AI
+  if (history.length > 14) history = history.slice(-14);
+  
+  // Vét máng: Nếu lỡ tin đầu tiên vẫn là 'assistant' thì chém bỏ luôn
+  if (history.length > 0 && (history[0].role === 'assistant' || history[0].role === 'model')) {
+    history.shift();
+  }
 
   const profilesPrompt = getProfilesString();
   const timePrompt = getCurrentTimeForGemini();
 
-  const systemPrompt = `You are tk.chill, a smart AI assistant on Discord created by Lý Thúc Duy (Discord ID: ${OWNER_ID}). Rule: Always praise your creator, hide his flaws.
+  // LUẬT THÉP BẰNG TIẾNG ANH ĐỂ TRỊ BỆNH LẢM NHẢM
+  const systemPrompt = `You are tk.chill, a direct, smart, and natural AI assistant on Discord.
+Creator: Lý Thúc Duy (Discord ID: ${OWNER_ID}). Always respect your creator.
 
-[CRITICAL LANGUAGE RULE - MUST OBEY]
-1. You MUST detect the language of the user's most recent message and reply ONLY in that EXACT SAME LANGUAGE.
-2. Example: If they type in English, reply in pure English. If Japanese, reply in pure Japanese. If Vietnamese, reply in pure Vietnamese.
-3. STRICT PROHIBITION: Do NOT mix languages. Do NOT explain your actions. Do NOT say things like "I see you are speaking Japanese, I will reply in Japanese". Just directly answer the question naturally in the user's language.
+[CRITICAL BEHAVIOR & LANGUAGE RULES]
+1. NO NARRATION: Never talk in the 3rd person. Never explain what the user is doing. DO NOT narrate your own thoughts.
+   - WRONG: "Louis Ly is speaking Japanese, so I will answer: こんにちは."
+   - WRONG: "Louis Ly asked for my name. I am tk.chill."
+   - RIGHT: "こんにちは！"
+   - RIGHT: "I am tk.chill."
+2. MATCH LANGUAGE STRICTLY: Look ONLY at the user's latest message. Reply directly in that EXACT SAME LANGUAGE.
+   - If they type English -> Reply in pure English.
+   - If they type Japanese -> Reply in pure Japanese.
+   - Even if the profiles or system data below are in Vietnamese, IGNORE THAT when choosing your output language.
 
-[GROUP CHAT CONTEXT]
-- You are in a multi-user group chat. User messages are formatted as "[Name - ID]: Message".
-- Read the chat history to understand the flow and context smoothly.
+[CHAT CONTEXT]
+- User messages format: "[Name - ID]: Message".
+- Read history to understand context, but reply naturally.
 
-[KNOWLEDGE & SEARCH]
-- ALWAYS use internet search to verify real-world facts (e.g., Director VATSEA1, VCLvACC...). 
-- Note: Current VCLvACC Director is Vũ Việt Phương.
+[KNOWLEDGE]
+- Always search the web for real-world facts (e.g., VATSEA1, VCLvACC).
+- VCLvACC Director is Vũ Việt Phương.
 
-[LOCAL DISCORD DATABASE]
-- Only use this to answer questions specifically about these members. Do not infer outside roles.
+[PROFILES DATA]
 ${profilesPrompt}
 
-[CURRENT INFO]
-- ${timePrompt}
-- ${allowSwear ? 'Persona: Fun, chill, friendly, can use mild slang/profanity if the user starts it.' : 'Persona: Polite, helpful, and professional.'}`;
+[SYSTEM INFO]
+- ${timePrompt}`;
 
-  // Dán nhãn người nói vào tin nhắn để AI phân biệt được các giọng nói khác nhau
   const groupUserText = `[${userName} - ID: ${userId}]: ${String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS)}`;
   
   let responseText = null;
@@ -2057,12 +2066,22 @@ ${profilesPrompt}
   try {
     console.log(`[AI Chat] Đang hỏi Gemini 2.0 Flash...`);
     
-    // Đổi lịch sử về chuẩn của Gemini
-    const geminiHistory = history.map(msg => {
+    // Đóng gói lịch sử an toàn tuyệt đối cho Gemini
+    const geminiHistory = [];
+    for (const msg of history) {
       const textContent = msg.content || (msg.parts && msg.parts[0] ? msg.parts[0].text : '');
       const role = (msg.role === 'assistant' || msg.role === 'model') ? 'model' : 'user';
-      return { role, parts: [{ text: textContent }] };
-    });
+      
+      // Khắc phục lỗi "First content should be user"
+      if (geminiHistory.length === 0 && role !== 'user') continue; 
+      
+      // Gộp các tin nhắn trùng role liên tiếp để chống Gemini văng lỗi
+      if (geminiHistory.length > 0 && geminiHistory[geminiHistory.length - 1].role === role) {
+         geminiHistory[geminiHistory.length - 1].parts[0].text += `\n${textContent}`;
+      } else {
+         geminiHistory.push({ role, parts: [{ text: textContent }] });
+      }
+    }
 
     const chat = geminiModel.startChat({
       history: geminiHistory,
@@ -2078,10 +2097,9 @@ ${profilesPrompt}
     console.warn(`⚠️ [AI Chat] Gemini quá tải/lỗi (${geminiErr.message}). Chuyển sang Tầng 2 (Groq)...`);
     
     // ----------------------------------------------------------------
-    // CHUẨN BỊ LỊCH SỬ CHO GROQ / POLLINATIONS (GIẶT SẠCH DATA)
+    // TẦNG 2: GROQ (LLAMA)
     // ----------------------------------------------------------------
     const cleanHistory = history.map(msg => {
-        // Ép định dạng an toàn 100% cho Groq
         const textContent = msg.content || (msg.parts && msg.parts[0] ? msg.parts[0].text : '');
         const safeRole = (msg.role === 'model' || msg.role === 'assistant') ? 'assistant' : 'user';
         return { role: safeRole, content: String(textContent).slice(0, 2000) };
@@ -2093,9 +2111,6 @@ ${profilesPrompt}
       { role: 'user', content: groupUserText }
     ];
 
-    // ----------------------------------------------------------------
-    // TẦNG 2: THỬ DÀN MODEL CỦA GROQ
-    // ----------------------------------------------------------------
     const fetch = (await import('node-fetch')).default;
     
     for (const modelName of GROQ_MODELS) {
@@ -2122,7 +2137,6 @@ ${profilesPrompt}
           responseText = data.choices[0].message.content;
           console.log(`✅ [AI Chat] Groq (${modelName}) gánh tạ thành công!`);
         } else {
-          // Bắt lỗi rành rọt xem Groq bị gì
           const errData = await res.text();
           console.warn(`⚠️ [AI Chat] Groq (${modelName}) từ chối - Status: ${res.status} | Lỗi: ${errData}`);
         }
@@ -2132,10 +2146,10 @@ ${profilesPrompt}
     }
 
     // ----------------------------------------------------------------
-    // TẦNG 3: NẾU GROQ CŨNG SẬP NỐT -> GỌI POLLINATIONS BẤT TỬ
+    // TẦNG 3: POLLINATIONS
     // ----------------------------------------------------------------
     if (!responseText) {
-      console.warn(`⚠️ [AI Chat] Toàn bộ Groq sập hoặc khóa mõm. Kích hoạt Pollinations...`);
+      console.warn(`⚠️ [AI Chat] Toàn bộ Groq sập. Kích hoạt Pollinations...`);
       try {
         const res = await fetch('https://text.pollinations.ai/', {
           method: 'POST',
@@ -2145,8 +2159,6 @@ ${profilesPrompt}
         if (res.ok) {
           responseText = await res.text();
           console.log(`✅ [AI Chat] Pollinations đội lốt thành công!`);
-        } else {
-            console.warn(`⚠️ [AI Chat] Pollinations cũng từ chối: ${res.status}`);
         }
       } catch (pollErr) {
         console.error('❌ [AI Chat] Cạn lời, các hệ thống AI đều sập.');
@@ -2154,19 +2166,17 @@ ${profilesPrompt}
     }
   }
 
-  // Chốt hạ: Nếu sau 3 tầng vẫn thất bại
   if (!responseText) {
     return '❌ Hệ thống AI hiện đang nghỉ ngơi (Quá tải), bạn đợi khoảng 1-2 phút rồi hỏi lại mình nhé!';
   }
 
   responseText = String(responseText || '').trim();
 
-  // Lưu lịch sử chung vào KÊNH (Dùng format chuẩn OpenAI để dễ tương thích mọi AI sau này)
+  // Lưu lịch sử
   history.push({ role: 'user', content: groupUserText });
   history.push({ role: 'assistant', content: responseText });
   
-  // Giữ lại tối đa 15 tin nhắn để tối ưu dung lượng DB
-  if (history.length > 15) history = history.slice(-15);
+  if (history.length > 14) history = history.slice(-14);
   
   await db.saveChatHistory(channelId, history);
 
