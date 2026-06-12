@@ -6980,30 +6980,32 @@ async function handlePlayMusic(interaction) {
             }
         } 
         // -------------------------------------------------------------
-        // TRƯỜNG HỢP 2: SPOTIFY (TRACK, ALBUM, PLAYLIST)
-        else if (query.includes('open.spotify.com')) { 
-            const spData = await play.spotify(query);
-            if (spData.type === 'playlist' || spData.type === 'album') {
-                const tracks = await spData.all_tracks();
+        // TRƯỜNG HỢP 2: SPOTIFY (TRACK, ALBUM, PLAYLIST) - LÕI MỚI CHỐNG LỖI 400
+        // -------------------------------------------------------------
+        else if (query.includes('spotify.com')) { 
+            try {
+                // Nhúng lõi spotify-url-info (Cào trực tiếp web, bypass API Key)
+                const { getTracks } = require('spotify-url-info')(fetch);
+                const tracks = await getTracks(query);
+                
                 for (const t of tracks) {
+                    // Chuyển đổi mili-giây sang định dạng phút:giây chuẩn
+                    const durationMs = t.duration_ms || 0;
+                    const mins = Math.floor(durationMs / 60000);
+                    const secs = Math.floor((durationMs % 60000) / 1000);
+                    
                     songsToAdd.push({
-                        title: `${t.name} - ${t.artists.map(a=>a.name).join(', ')}`,
-                        resolveQuery: `${t.name} ${t.artists[0]?.name || ''}`.trim(),
-                        thumbnail: t.thumbnail || spData.thumbnail,
-                        durationRaw: '0:00',
+                        title: `${t.name} - ${t.artists ? t.artists.map(a => a.name).join(', ') : ''}`,
+                        resolveQuery: `${t.name} ${t.artists ? t.artists[0]?.name : ''}`.trim(),
+                        thumbnail: t.coverArt?.sources?.[0]?.url || null,
+                        durationRaw: durationMs > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : '0:00',
                         requester: interaction.user.id,
-                        url: null
+                        url: null // Bàn giao lại cho hệ thống Lazy Load (SoundCloud) tự đi tìm audio
                     });
                 }
-            } else {
-                songsToAdd.push({
-                    title: `${spData.name} - ${spData.artists.map(a=>a.name).join(', ')}`,
-                    resolveQuery: `${spData.name} ${spData.artists[0]?.name || ''}`.trim(),
-                    thumbnail: spData.thumbnail,
-                    durationRaw: '0:00',
-                    requester: interaction.user.id,
-                    url: null
-                });
+            } catch (spErr) {
+                console.error('Lỗi lõi Spotify mới:', spErr);
+                return interaction.editReply('❌ Bot không thể đọc được link Spotify này (Có thể playlist đang ở chế độ Riêng tư hoặc sai link).');
             }
         }
         // -------------------------------------------------------------
