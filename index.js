@@ -3624,14 +3624,9 @@ client.on('interactionCreate', async (interaction) => {
       }
     } else if (interaction.isButton()) {
         const customId = interaction.customId;
-        const isMarketplaceAction = customId.startsWith('market_');
 
-        if (isMarketplaceAction) {
-          const parts = customId.split('_');
-          const action = parts[1];
-          
-          // ===================== XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC =====================
-          if (customId.startsWith('music_')) {
+        // ===================== XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC (ĐỂ NGOÀI CÙNG) =====================
+        if (customId.startsWith('music_')) {
             const queue = musicQueues.get(interaction.guild.id);
             if (!queue) {
                 return interaction.reply({ content: '❌ Nhạc đang tắt, bạn không thể bấm nút này.', ephemeral: true }).catch(()=>{});
@@ -3652,12 +3647,11 @@ client.on('interactionCreate', async (interaction) => {
                 } 
                 else if (customId === 'music_skip') {
                     queue.player.stop(); // Cắt nguồn bài hiện tại -> tự động kích hoạt event chuyển bài
-                    return interaction.deferUpdate().catch(()=>{}); // Báo cho Discord biết "Đã nhận lệnh" rồi thoát, để máy phát nhạc tự lo UI.
+                    return interaction.deferUpdate().catch(()=>{}); 
                 } 
                 else if (customId === 'music_stop') {
                     queue.songs = [];
                     queue.player.stop(); // Cắt nguồn
-                    // Trả ngay UI về trạng thái ngủ đông
                     return interaction.update(createMusicDashboard(queue)).catch(()=>{});
                 } 
                 else if (customId === 'music_volup') {
@@ -3674,95 +3668,99 @@ client.on('interactionCreate', async (interaction) => {
                 
             } catch(e) {
                 console.error("Lỗi nút bấm:", e);
-                // Có lỗi cũng báo cáo để Discord khỏi đỏ chót
                 if (!interaction.replied && !interaction.deferred) {
                     await interaction.deferUpdate().catch(()=>{});
                 }
             }
-            return;
-          }
-
-          // Nút [Sửa bài], [DUYỆT], [TỪ CHỐI] -> Yêu cầu quyền Admin
-          if (action === 'edit' || action === 'approve' || action === 'reject') {
-            const hasAdmin = interaction.member.roles.cache.some(r => r.name === 'Admin') || interaction.member.roles.cache.has(roles.adminRoleId);
-            if (!hasAdmin && interaction.user.id !== OWNER_ID) {
-              return interaction.reply({ content: '❌ Chỉ Admin mới được thực hiện thao tác này!', ephemeral: true });
-            }
-          }
-
-          const oldEmbed = interaction.message.embeds[0];
-          const parsedData = parseMarketplaceDataFromEmbed(oldEmbed);
-          
-          if (action === 'edit') {
-            const saleId = parts[2];
-            const editModal = new ModalBuilder().setCustomId(`market_edit_modal_${saleId}`).setTitle('Chỉnh sửa thông tin sản phẩm');
-            editModal.addComponents(
-              new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Tên sản phẩm').setDefaultValue(parsedData.name).setStyle(TextInputStyle.Short).setRequired(true)),
-              new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel('Số lượng & Tình trạng').setDefaultValue(parsedData.info).setStyle(TextInputStyle.Short).setRequired(true)),
-              new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel('Giá bán').setDefaultValue(parsedData.price).setStyle(TextInputStyle.Short).setRequired(true)),
-              new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel('Mô tả sản phẩm').setDefaultValue(parsedData.description).setStyle(TextInputStyle.Paragraph).setRequired(true)),
-              new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Liên hệ').setDefaultValue(parsedData.contact).setStyle(TextInputStyle.Paragraph).setRequired(true))
-            );
-            await interaction.showModal(editModal);
-            return;
-          }
-
-          if (action === 'reject') {
-            const saleId = parts[2];
-            const rejectModal = new ModalBuilder().setCustomId(`market_reject_modal_${saleId}`).setTitle('Lý do từ chối sản phẩm');
-            rejectModal.addComponents(
-              new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Lý do từ chối').setPlaceholder('Ví dụ: Thiếu ảnh chi tiết, giá quá cao...').setStyle(TextInputStyle.Paragraph).setRequired(true))
-            );
-            await interaction.showModal(rejectModal);
-            return;
-          }
-
-          if (action === 'approve') {
-            const marketChannel = interaction.guild.channels.cache.get(MARKETPLACE_CHANNEL_ID);
-            if (!marketChannel) return interaction.reply({ content: '❌ Không tìm thấy kênh Marketplace!', ephemeral: true });
-
-            // Embed công khai
-            const publicEmbed = EmbedBuilder.from(oldEmbed)
-              .setFooter({ text: `Ngày đăng: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}` });
-
-            const row = new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setLabel('Liên hệ người bán').setStyle(ButtonStyle.Link).setURL(`https://discord.com/users/${parsedData.sellerId}`).setEmoji('💬'),
-              new ButtonBuilder().setCustomId(`market_soldout_${parsedData.sellerId}`).setLabel('Hết hàng / Đã bán').setStyle(ButtonStyle.Danger).setEmoji('✖️')
-            );
-
-            // Gửi bài chính
-            await marketChannel.send({ content: '📢 **CÓ SẢN PHẨM MỚI!**', embeds: [publicEmbed], components: [row] });
-            
-            await interaction.message.edit({ content: `✅ **Đã duyệt** bởi ${interaction.user.mention}`, components: [], embeds: [] });
-            await interaction.reply({ content: '✅ Đã đăng bài thành công ra kênh Marketplace!', ephemeral: true });
-            return;
-          }
-
-          // Nút [Hết hàng / Đã bán] (Khu vực Public)
-          if (action === 'soldout') {
-            const sellerId = parts[2];
-            const hasAdmin = interaction.member.roles.cache.some(r => r.name === 'Admin') || interaction.member.roles.cache.has(roles.adminRoleId);
-            const isSeller = interaction.user.id === sellerId;
-
-            if (!isSeller && !hasAdmin && interaction.user.id !== OWNER_ID) {
-              return interaction.reply({ content: '❌ Chỉ người bán hoặc Admin mới được đóng bài!', ephemeral: true });
-            }
-
-            const soldEmbed = EmbedBuilder.from(oldEmbed)
-              .setTitle(`${oldEmbed.title} [HẾT HÀNG]`)
-              .setColor(0x95a5a6); // Dark Grey
-
-            const row = new ActionRowBuilder().addComponents(
-              new ButtonBuilder().setCustomId('disabled_sold').setLabel('Đã Hết Hàng').setStyle(ButtonStyle.Secondary).setDisabled(true)
-            );
-
-            await interaction.message.edit({ embeds: [soldEmbed], components: [row] });
-            await interaction.reply({ content: '✅ Đã đóng bài đăng bán thành công.', ephemeral: true });
-            return;
-          }
+            return; // Xử lý xong nút nhạc thì thoát luôn, không chạy xuống dưới nữa
         }
-      await handleButton(interaction);
-    } else if (interaction.isModalSubmit()) {
+
+        // ===================== XỬ LÝ NÚT BẤM MARKETPLACE =====================
+        const isMarketplaceAction = customId.startsWith('market_');
+        if (isMarketplaceAction) {
+            const parts = customId.split('_');
+            const action = parts[1];
+          
+            // Nút [Sửa bài], [DUYỆT], [TỪ CHỐI] -> Yêu cầu quyền Admin
+            if (action === 'edit' || action === 'approve' || action === 'reject') {
+                const hasAdmin = interaction.member.roles.cache.some(r => r.name === 'Admin') || interaction.member.roles.cache.has(roles.adminRoleId);
+                if (!hasAdmin && interaction.user.id !== OWNER_ID) {
+                    return interaction.reply({ content: '❌ Chỉ Admin mới được thực hiện thao tác này!', ephemeral: true });
+                }
+            }
+
+            const oldEmbed = interaction.message.embeds[0];
+            const parsedData = parseMarketplaceDataFromEmbed(oldEmbed);
+          
+            if (action === 'edit') {
+                const saleId = parts[2];
+                const editModal = new ModalBuilder().setCustomId(`market_edit_modal_${saleId}`).setTitle('Chỉnh sửa thông tin sản phẩm');
+                editModal.addComponents(
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Tên sản phẩm').setDefaultValue(parsedData.name).setStyle(TextInputStyle.Short).setRequired(true)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel('Số lượng & Tình trạng').setDefaultValue(parsedData.info).setStyle(TextInputStyle.Short).setRequired(true)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel('Giá bán').setDefaultValue(parsedData.price).setStyle(TextInputStyle.Short).setRequired(true)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel('Mô tả sản phẩm').setDefaultValue(parsedData.description).setStyle(TextInputStyle.Paragraph).setRequired(true)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Liên hệ').setDefaultValue(parsedData.contact).setStyle(TextInputStyle.Paragraph).setRequired(true))
+                );
+                await interaction.showModal(editModal);
+                return;
+            }
+
+            if (action === 'reject') {
+                const saleId = parts[2];
+                const rejectModal = new ModalBuilder().setCustomId(`market_reject_modal_${saleId}`).setTitle('Lý do từ chối sản phẩm');
+                rejectModal.addComponents(
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Lý do từ chối').setPlaceholder('Ví dụ: Thiếu ảnh chi tiết, giá quá cao...').setStyle(TextInputStyle.Paragraph).setRequired(true))
+                );
+                await interaction.showModal(rejectModal);
+                return;
+            }
+
+            if (action === 'approve') {
+                const marketChannel = interaction.guild.channels.cache.get(MARKETPLACE_CHANNEL_ID);
+                if (!marketChannel) return interaction.reply({ content: '❌ Không tìm thấy kênh Marketplace!', ephemeral: true });
+
+                const publicEmbed = EmbedBuilder.from(oldEmbed)
+                    .setFooter({ text: `Ngày đăng: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}` });
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setLabel('Liên hệ người bán').setStyle(ButtonStyle.Link).setURL(`https://discord.com/users/${parsedData.sellerId}`).setEmoji('💬'),
+                    new ButtonBuilder().setCustomId(`market_soldout_${parsedData.sellerId}`).setLabel('Hết hàng / Đã bán').setStyle(ButtonStyle.Danger).setEmoji('✖️')
+                );
+
+                await marketChannel.send({ content: '📢 **CÓ SẢN PHẨM MỚI!**', embeds: [publicEmbed], components: [row] });
+                await interaction.message.edit({ content: `✅ **Đã duyệt** bởi ${interaction.user.mention}`, components: [], embeds: [] });
+                await interaction.reply({ content: '✅ Đã đăng bài thành công ra kênh Marketplace!', ephemeral: true });
+                return;
+            }
+
+            if (action === 'soldout') {
+                const sellerId = parts[2];
+                const hasAdmin = interaction.member.roles.cache.some(r => r.name === 'Admin') || interaction.member.roles.cache.has(roles.adminRoleId);
+                const isSeller = interaction.user.id === sellerId;
+
+                if (!isSeller && !hasAdmin && interaction.user.id !== OWNER_ID) {
+                    return interaction.reply({ content: '❌ Chỉ người bán hoặc Admin mới được đóng bài!', ephemeral: true });
+                }
+
+                const soldEmbed = EmbedBuilder.from(oldEmbed)
+                    .setTitle(`${oldEmbed.title} [HẾT HÀNG]`)
+                    .setColor(0x95a5a6); 
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('disabled_sold').setLabel('Đã Hết Hàng').setStyle(ButtonStyle.Secondary).setDisabled(true)
+                );
+
+                await interaction.message.edit({ embeds: [soldEmbed], components: [row] });
+                await interaction.reply({ content: '✅ Đã đóng bài đăng bán thành công.', ephemeral: true });
+                return;
+            }
+        }
+
+        // Nếu không dính vào Nút Nhạc và Nút Market, thì chạy vô hàm xử lý chung
+        await handleButton(interaction);
+
+    } else if (interaction.isModalSubmit()) {
         // Nộp đơn bán hàng
         if (interaction.customId.startsWith('sell_modal_')) {
           const saleId = interaction.customId.split('_')[2];
