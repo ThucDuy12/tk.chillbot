@@ -3009,6 +3009,18 @@ client.once('ready', async () => {
   } catch (e) {
       console.error('❌ Lỗi khi nạp Cookie YouTube:', e);
   }
+  // KHỞI ĐỘNG ĐỘNG CƠ SOUNDCLOUD (BÍ QUYẾT LÁCH YOUTUBE)
+    try {
+        const clientID = await play.getFreeClientID();
+        play.setToken({
+            soundcloud : {
+                client_id : clientID
+            }
+        });
+        console.log('✅ Đã nạp Động cơ SoundCloud thành công (Bypass YouTube)!');
+    } catch (e) {
+        console.error('❌ Lỗi nạp SoundCloud:', e);
+    }
   // Load lịch hẹn thông báo
   try {
     scheduledAnnouncements = await db.getAnnouncements();
@@ -6807,7 +6819,7 @@ async function playNextSong(guildId) {
   }
 }
 
-// ===================== XỬ LÝ LỆNH /PLAY =====================
+// ===================== XỬ LÝ LỆNH /PLAY (LÕI SOUNDCLOUD) =====================
 async function handlePlayMusic(interaction) {
   const query = interaction.options.getString('query');
   const voiceChannel = interaction.member.voice.channel;
@@ -6819,24 +6831,53 @@ async function handlePlayMusic(interaction) {
   await interaction.deferReply();
 
   try {
-    // Tìm kiếm bài hát trên YouTube
-    let songInfo;
+    let songTitle, songUrl, songThumb, songDuration;
     const isLink = query.startsWith('http');
     
     if (isLink) {
-        const video = await play.video_info(query);
-        songInfo = video.video_details;
+        // Nếu cố tình dán link YouTube (Hên xui tùy bài bị chặn hay không)
+        if (query.includes('youtube.com') || query.includes('youtu.be')) {
+            const video = await play.video_info(query);
+            songTitle = video.video_details.title;
+            songUrl = video.video_details.url;
+            songThumb = video.video_details.thumbnails[video.video_details.thumbnails.length - 1].url;
+            songDuration = video.video_details.durationRaw;
+        } 
+        // Lấy link SoundCloud thẳng
+        else if (query.includes('soundcloud.com')) {
+            const scInfo = await play.soundcloud(query);
+            songTitle = scInfo.name;
+            songUrl = scInfo.url;
+            songThumb = scInfo.thumbnail;
+            const mins = Math.floor(scInfo.durationInSec / 60);
+            const secs = scInfo.durationInSec % 60;
+            songDuration = `${mins}:${secs.toString().padStart(2, '0')}`;
+        } else {
+            return interaction.editReply('❌ Hiện tại bot chỉ hỗ trợ link YouTube/SoundCloud hoặc gõ tên bài hát!');
+        }
     } else {
-        const searchResults = await play.search(query, { limit: 1 });
-        if (!searchResults || searchResults.length === 0) return interaction.editReply('❌ Không tìm thấy bài hát này trên YouTube!');
-        songInfo = searchResults[0];
+        // ĐIỂM ĂN TIỀN: Chuyển toàn bộ tìm kiếm Text sang SoundCloud để né Blacklist
+        const searchResults = await play.search(query, { limit: 1, source: { soundcloud: 'tracks' } });
+        if (!searchResults || searchResults.length === 0) {
+            return interaction.editReply('❌ Không tìm thấy bài hát này trên kho nhạc!');
+        }
+        
+        const track = searchResults[0];
+        songTitle = track.name;
+        songUrl = track.url;
+        songThumb = track.thumbnail;
+        
+        // Đổi giây sang phút:giây
+        const mins = Math.floor(track.durationInSec / 60);
+        const secs = track.durationInSec % 60;
+        songDuration = `${mins}:${secs.toString().padStart(2, '0')}`;
     }
 
     const song = {
-      title: songInfo.title,
-      url: songInfo.url,
-      thumbnail: songInfo.thumbnails[songInfo.thumbnails.length - 1].url,
-      durationRaw: songInfo.durationRaw,
+      title: songTitle,
+      url: songUrl,
+      thumbnail: songThumb,
+      durationRaw: songDuration,
       requester: interaction.user.id
     };
 
@@ -6857,7 +6898,7 @@ async function handlePlayMusic(interaction) {
       musicQueues.set(interaction.guild.id, queue);
       queue.songs.push(song);
 
-      // Kết nối vào Voice Channel
+      // Kết nối vào Voice
       queue.connection = joinVoiceChannel({
         channelId: voiceChannel.id,
         guildId: interaction.guild.id,
@@ -6866,32 +6907,26 @@ async function handlePlayMusic(interaction) {
 
       queue.connection.subscribe(queue.player);
 
-      // Lắng nghe sự kiện chuyển bài
       queue.player.on(AudioPlayerStatus.Idle, () => {
-        queue.songs.shift(); // Xóa bài vừa hát xong
+        queue.songs.shift(); 
         playNextSong(interaction.guild.id);
       });
 
-      // Bắt đầu quẩy
       await playNextSong(interaction.guild.id);
-      await interaction.editReply(`✅ Đã kết nối và chuẩn bị phát: **${song.title}**`);
-      
-      // Xóa cái tin nhắn thông báo này sau 5s để dọn dẹp chat cho sạch
+      await interaction.editReply(`✅ Đã tìm thấy trên kho nhạc và chuẩn bị phát: **${song.title}**`);
       setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
 
     } else {
-      // Nếu đang hát dở bài khác thì nhét bài này vào cuối hàng chờ
       queue.songs.push(song);
       await interaction.editReply(`✅ Đã thêm vào hàng chờ: **${song.title}**`);
       setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
       
-      // Cập nhật lại Dashboard để hiển thị số lượng bài trong hàng chờ
       if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
     }
 
   } catch (error) {
     console.error('Lỗi khi tải nhạc:', error);
-    await interaction.editReply('❌ Đã có lỗi xảy ra. Bot không tải được bài này, có thể do bị giới hạn tuổi hoặc YouTube chặn.');
+    await interaction.editReply('❌ Chịu thua! Có vẻ bài này bị đánh bản quyền rất gắt hoặc máy chủ đang kẹt. Đổi bài khác giúp tui nha!');
   }
 }
 
