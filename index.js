@@ -15,6 +15,9 @@ const { createCanvas, loadImage, GlobalFonts } = require('canvas');
 const fetch = require('node-fetch'); // Thêm nếu chưa có
 const nodeFetch = require('node-fetch');
 
+// Thêm vào khu vực khai báo biến ở đầu file
+const temporarySearchResults = new Map();
+
 const https = require('https');
 const deletedImageCache = new Map();
 
@@ -3525,6 +3528,34 @@ client.on('guildMemberAdd', async (member) => {
 
 // ===================== INTERACTIONS =====================
 client.on('interactionCreate', async (interaction) => {
+  // XỬ LÝ KHI NGƯỜI DÙNG CHỌN BÀI TỪ MENU
+  if (interaction.isStringSelectMenu() && interaction.customId === 'select_song') {
+      const [searchId, index] = interaction.values[0].split('_');
+      const songs = temporarySearchResults.get(searchId);
+      
+      if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn!', ephemeral: true });
+
+      const selectedSong = songs[index];
+      
+      // Thêm selectedSong vào queue của bạn ở đây...
+      // Sau đó:
+      interaction.update({ content: `✅ Đã thêm bài **${selectedSong.title}** vào hàng chờ!`, components: [] });
+      // Dọn bộ nhớ
+      setTimeout(() => temporarySearchResults.delete(searchId), 60000);
+  }
+
+  // XỬ LÝ KHI NGƯỜI DÙNG BẤM "PHÁT TẤT CẢ"
+  if (interaction.isButton() && interaction.customId.startsWith('play_all_')) {
+      const searchId = interaction.customId.split('_')[2];
+      const songs = temporarySearchResults.get(searchId);
+
+      if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn!', ephemeral: true });
+
+      // Thêm toàn bộ mảng songs vào queue của bạn...
+      interaction.update({ content: `✅ Đã thêm **${songs.length} bài hát** vào hàng chờ!`, components: [] });
+      // Dọn bộ nhớ
+      setTimeout(() => temporarySearchResults.delete(searchId), 60000);
+  }
   const isChatCmd = typeof interaction.isChatInputCommand === 'function'
     ? interaction.isChatInputCommand()
     : (typeof interaction.isCommand === 'function' ? interaction.isCommand() : false);
@@ -7121,8 +7152,36 @@ async function handlePlayMusic(interaction) {
       await playNextSong(interaction.guild.id);
       
       // Thông báo thông minh
+      // Thay thế đoạn logic thêm nhạc trong handlePlayMusic của bạn bằng đoạn này:
       if (songsToAdd.length > 1) {
-          await interaction.editReply(`✅ Đã thêm **Playlist gồm ${songsToAdd.length} bài** vào hàng chờ!`);
+        // Lưu tạm vào bộ nhớ
+        const searchId = Date.now().toString();
+        temporarySearchResults.set(searchId, songsToAdd);
+
+        // Tạo menu chọn (chỉ hiển thị tối đa 25 bài do giới hạn Discord)
+        const options = songsToAdd.slice(0, 25).map((song, index) => ({
+            label: song.title.length > 50 ? song.title.substring(0, 47) + '...' : song.title,
+            value: `${searchId}_${index}` // Lưu ID và chỉ số bài hát
+        }));
+
+        const menu = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('select_song')
+                .setPlaceholder('Chọn bài hát bạn muốn phát...')
+                .addOptions(options)
+        );
+
+        const btnAll = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`play_all_${searchId}`)
+                .setLabel('Phát tất cả vào hàng chờ')
+                .setStyle(ButtonStyle.Primary)
+        );
+
+        await interaction.editReply({
+            content: `🔍 Tìm thấy ${songsToAdd.length} bài hát! Chọn một bài để phát hoặc phát tất cả:`,
+            components: [menu, btnAll]
+        });
       } else {
           await interaction.editReply(`✅ Đã thêm vào hàng chờ và chuẩn bị phát!`);
       }
