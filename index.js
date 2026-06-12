@@ -6762,7 +6762,7 @@ function createMusicDashboard(queue) {
   return { embeds: [embed], components: [row] };
 }
 
-// Cỗ máy xử lý phát nhạc
+// Cỗ máy xử lý phát nhạc (ĐÃ VÁ LỖI INVALID URL)
 async function playNextSong(guildId) {
   const queue = musicQueues.get(guildId);
   if (!queue || queue.songs.length === 0) {
@@ -6772,7 +6772,7 @@ async function playNextSong(guildId) {
             embeds: [new EmbedBuilder().setTitle('🏁 Đã phát hết danh sách nhạc!').setColor(0x3498db).setDescription('Hẹn gặp lại bạn nhé. Tk.Chill rời kênh đây~')], 
             components: [] 
         }).catch(()=>{});
-        queue.connection.destroy();
+        if (queue.connection) queue.connection.destroy();
     }
     musicQueues.delete(guildId);
     return;
@@ -6780,8 +6780,8 @@ async function playNextSong(guildId) {
 
   const song = queue.songs[0];
   try {
-    // Ép play-dl tìm nguồn tốt nhất để đỡ lag
-    const stream = await play.stream(song.url, { discordPlayerCompatibility: true });
+    // SỬA LỖI Ở ĐÂY: Xóa bỏ 'discordPlayerCompatibility', để play-dl tự bắt link tốt nhất
+    const stream = await play.stream(song.url);
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
 
     queue.player.play(resource);
@@ -6795,9 +6795,15 @@ async function playNextSong(guildId) {
       queue.dashboardMsg = await queue.textChannel.send(dashboardData);
     }
   } catch (error) {
-    console.error('Lỗi phát nhạc:', error);
+    console.error(`❌ Lỗi phát bài ${song.title}:`, error.message);
     queue.songs.shift(); // Lỗi thì bỏ qua bài này, phát bài kế
-    playNextSong(guildId);
+    
+    // Báo nhẹ cho người dùng biết bài này bị Youtube chặn
+    if (queue.textChannel) {
+        queue.textChannel.send(`⚠️ Bỏ qua bài **${song.title}** vì Youtube chặn bản quyền âm thanh!`).then(m => setTimeout(() => m.delete().catch(()=>{}), 5000));
+    }
+    
+    playNextSong(guildId); // Tự động hát bài tiếp theo
   }
 }
 
