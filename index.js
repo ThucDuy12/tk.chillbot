@@ -2981,21 +2981,24 @@ client.once('ready', async () => {
     console.error('Lỗi nạp profiles:', e);
   }
 
-  // Nạp Cookie cho YouTube để không bị lỗi 429
-    try {
-        if (process.env.YOUTUBE_COOKIE) {
-            play.setToken({
-                youtube : {
-                    cookie : process.env.YOUTUBE_COOKIE
-                }
-            });
-            console.log('✅ Đã nạp Cookie YouTube thành công!');
-        } else {
-            console.warn('⚠️ CẢNH BÁO: Chưa cấu hình YOUTUBE_COOKIE. Bot nhạc có thể bị lỗi 429.');
-        }
-    } catch (e) {
-        console.error('❌ Lỗi khi nạp Cookie YouTube:', e);
-    }
+  // Nạp Cookie cho YouTube (ĐÃ NÂNG CẤP BỘ LỌC RÁC)
+  try {
+      if (process.env.YOUTUBE_COOKIE) {
+          // Loại bỏ hoàn toàn dấu xuống dòng, khoảng trắng ở hai đầu
+          const rawCookie = process.env.YOUTUBE_COOKIE.replace(/\r?\n|\r/g, '').trim();
+          
+          play.setToken({
+              youtube : {
+                  cookie : rawCookie
+              }
+          });
+          console.log('✅ Đã nạp Cookie YouTube thành công (Đã dọn dẹp rác)!');
+      } else {
+          console.warn('⚠️ CẢNH BÁO: Chưa cấu hình YOUTUBE_COOKIE. Bot nhạc có thể bị lỗi 429.');
+      }
+  } catch (e) {
+      console.error('❌ Lỗi khi nạp Cookie YouTube:', e);
+  }
   // Load lịch hẹn thông báo
   try {
     scheduledAnnouncements = await db.getAnnouncements();
