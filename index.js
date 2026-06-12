@@ -6981,9 +6981,7 @@ async function handlePlayMusic(interaction) {
         } 
         // -------------------------------------------------------------
         // TRƯỜNG HỢP 2: SPOTIFY (TRACK, ALBUM, PLAYLIST)
-        // -------------------------------------------------------------
-        // ĐÃ XÓA CÁI LINK PHAKE, DÙNG ĐÚNG CHỮ 'spotify.com' THÔI NHÉ:
-        else if (query.includes('spotify.com')) { 
+        else if (query.includes('open.spotify.com')) { 
             const spData = await play.spotify(query);
             if (spData.type === 'playlist' || spData.type === 'album') {
                 const tracks = await spData.all_tracks();
