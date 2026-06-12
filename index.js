@@ -3630,17 +3630,17 @@ client.on('interactionCreate', async (interaction) => {
           const parts = customId.split('_');
           const action = parts[1];
           
-          // XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC
+          // ===================== XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC =====================
           if (customId.startsWith('music_')) {
             const queue = musicQueues.get(interaction.guild.id);
-            if (!queue) return interaction.reply({ content: '❌ Không có nhạc nào đang phát.', ephemeral: true });
-
-            if (interaction.member.voice.channel?.id !== queue.voiceChannel.id) {
-                return interaction.reply({ content: '❌ Bạn phải ở trong phòng Voice với bot mới bấm được!', ephemeral: true });
+            if (!queue) {
+                return interaction.reply({ content: '❌ Nhạc đang tắt, bạn không thể bấm nút này.', ephemeral: true }).catch(()=>{});
             }
 
-            // BÍ QUYẾT DIỆT LỖI: Nhận tín hiệu ngay lập tức để Discord không báo đỏ
-            await interaction.deferUpdate().catch(()=>{});
+            // Chặn không cho người ngoài phòng voice phá đám
+            if (interaction.member.voice.channel?.id !== queue.voiceChannel.id) {
+                return interaction.reply({ content: '❌ Bạn phải vào chung phòng Voice với bot mới điều khiển được!', ephemeral: true }).catch(()=>{});
+            }
 
             try {
                 if (customId === 'music_pause') {
@@ -3649,31 +3649,35 @@ client.on('interactionCreate', async (interaction) => {
                     } else {
                         queue.player.unpause(); queue.playing = true;
                     }
-                }
-                if (customId === 'music_skip') {
-                    queue.player.stop(); 
-                    // Không cần edit dashboard ở đây vì hàm playNextSong sẽ tự động làm
-                    return;
-                }
-                if (customId === 'music_stop') {
+                } 
+                else if (customId === 'music_skip') {
+                    queue.player.stop(); // Cắt nguồn bài hiện tại -> tự động kích hoạt event chuyển bài
+                    return interaction.deferUpdate().catch(()=>{}); // Báo cho Discord biết "Đã nhận lệnh" rồi thoát, để máy phát nhạc tự lo UI.
+                } 
+                else if (customId === 'music_stop') {
                     queue.songs = [];
-                    queue.player.stop();
-                    // Bấm Stop thì chuyển về giao diện ngủ đông ngay lập tức
-                }
-                if (customId === 'music_volup') {
+                    queue.player.stop(); // Cắt nguồn
+                    // Trả ngay UI về trạng thái ngủ đông
+                    return interaction.update(createMusicDashboard(queue)).catch(()=>{});
+                } 
+                else if (customId === 'music_volup') {
                     queue.volume = Math.min((queue.volume || 1.0) + 0.2, 2.0); 
                     if (queue.resource) queue.resource.volume.setVolume(queue.volume);
-                }
-                if (customId === 'music_voldown') {
+                } 
+                else if (customId === 'music_voldown') {
                     queue.volume = Math.max((queue.volume || 1.0) - 0.2, 0.1); 
                     if (queue.resource) queue.resource.volume.setVolume(queue.volume);
                 }
 
-                // Cập nhật lại UI sau khi tính toán xong
-                if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+                // BÍ QUYẾT DIỆT LỖI: Trả lời trực tiếp ngay vào cái nút vừa bấm
+                await interaction.update(createMusicDashboard(queue)).catch(()=>{});
                 
             } catch(e) {
                 console.error("Lỗi nút bấm:", e);
+                // Có lỗi cũng báo cáo để Discord khỏi đỏ chót
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.deferUpdate().catch(()=>{});
+                }
             }
             return;
           }
