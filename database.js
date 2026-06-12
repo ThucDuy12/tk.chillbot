@@ -89,6 +89,33 @@ async function saveAnnouncements(arr) {
   );
 }
 
+async function saveBotConfig(key, data) {
+    try {
+        const db = client.db(dbName);
+        const collection = db.collection('configs');
+        // Lưu theo dạng { _id: 'vatsim_messages', data: [...] }
+        await collection.updateOne(
+            { _id: key },
+            { $set: { data: data } },
+            { upsert: true }
+        );
+    } catch (err) {
+        console.error(`Lỗi lưu config ${key}:`, err);
+    }
+}
+
+async function getBotConfig(key) {
+    try {
+        const db = client.db(dbName);
+        const collection = db.collection('configs');
+        const result = await collection.findOne({ _id: key });
+        return result ? result.data : null;
+    } catch (err) {
+        console.error(`Lỗi đọc config ${key}:`, err);
+        return null;
+    }
+}
+
 module.exports = {
   connectDB,
   getProfile,
@@ -97,5 +124,7 @@ module.exports = {
   getChatHistory,
   saveChatHistory,
   getAnnouncements, // <-- Thêm dòng này
-  saveAnnouncements // <-- Thêm dòng này
+  saveAnnouncements, // <-- Thêm dòng này
+  saveBotConfig,
+  getBotConfig
 };
