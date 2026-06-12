@@ -91,9 +91,8 @@ async function saveAnnouncements(arr) {
 
 async function saveBotConfig(key, data) {
     try {
-        const db = client.db(dbName);
+        // Dùng thẳng biến db đã được khởi tạo từ hàm connectDB() của ông
         const collection = db.collection('configs');
-        // Lưu theo dạng { _id: 'vatsim_messages', data: [...] }
         await collection.updateOne(
             { _id: key },
             { $set: { data: data } },
@@ -106,7 +105,7 @@ async function saveBotConfig(key, data) {
 
 async function getBotConfig(key) {
     try {
-        const db = client.db(dbName);
+        // Dùng thẳng biến db
         const collection = db.collection('configs');
         const result = await collection.findOne({ _id: key });
         return result ? result.data : null;
