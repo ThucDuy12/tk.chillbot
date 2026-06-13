@@ -6926,17 +6926,26 @@ async function playNextSong(guildId) {
     }
     // =========================================================================
 
-    const stream = await play.stream(song.url);
+    // ================= KHU VỰC CHỐNG LAG MÀ VẪN GIỮ NÚT VOLUME =================
     
-    const resource = createAudioResource(stream.stream, { 
-        inputType: stream.type, 
-        inlineVolume: true,
-        silencePaddingFrames: 5 
+    // 1. Ép hạ chất lượng tải về để cứu CPU
+    const stream = await play.stream(song.url, {
+        discordPlayerCompatibility: true, // Ép chuẩn định dạng Discord
+        quality: 1 // (0: Cao nhất, 1: Trung bình, 2: Thấp). Để 1 là nghe đã đủ hay rồi!
     });
     
-    // Nạp âm lượng mặc định 60%
+    // 2. Khởi tạo âm thanh và MỞ LẠI CÔNG TẮC VOLUME
+    const resource = createAudioResource(stream.stream, { 
+        inputType: stream.type, 
+        inlineVolume: true, // Đã bật lại nút tăng/giảm âm lượng!
+        silencePaddingFrames: 5 // Đệm thêm xíu khoảng lặng chống nhiễu
+    });
+    
+    // Nạp âm lượng lấy từ hàng chờ
     resource.volume.setVolume(queue.volume ?? 0.6);
     queue.resource = resource;
+    
+    // =========================================================================
 
     queue.player.play(resource);
     queue.playing = true;
