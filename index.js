@@ -2555,21 +2555,31 @@ function createEventEmbed(event, startTime) {
   return embed;
 }
 
-// ===================== THEO DÕI VOICE CHANNEL (AUTO-LEAVE) =====================
+// ===================== THEO DÕI VOICE CHANNEL (AUTO-LEAVE & ANTI-BUG KICK) =====================
 client.on('voiceStateUpdate', (oldState, newState) => {
-    // Chỉ kích hoạt khi có ai đó rời đi (oldState có kênh, newState khác oldState)
+    // 1. NẾU BOT BỊ KICK HOẶC NGẮT KẾT NỐI (Fix lỗi bot khùng không join lại)
+    if (oldState.member.user.id === client.user.id && oldState.channelId && !newState.channelId) {
+        const queue = musicQueues.get(oldState.guild.id);
+        if (queue) {
+            if (queue.progressInterval) clearInterval(queue.progressInterval);
+            if (queue.connection) queue.connection.destroy();
+            musicQueues.delete(oldState.guild.id);
+            console.log('Bot bị kick khỏi voice, đã tự động dọn dẹp RAM!');
+        }
+        return;
+    }
+
+    // 2. NẾU NGƯỜI DÙNG RỜI ĐI HẾT, CHỈ CÒN MÌNH BOT BƠ VƠ
     if (oldState.channelId && oldState.channelId !== newState.channelId) {
         const botVoiceChannel = oldState.guild.members.me.voice.channel;
         
-        // Nếu cái phòng có người vừa rời đi chính là phòng của bot đang ở
         if (botVoiceChannel && oldState.channelId === botVoiceChannel.id) {
-            // Đếm số lượng người thực (không phải bot) trong phòng
             const humanCount = botVoiceChannel.members.filter(m => !m.user.bot).size;
             
             if (humanCount === 0) {
                 const queue = musicQueues.get(oldState.guild.id);
                 if (queue) {
-                    if (queue.progressInterval) clearInterval(queue.progressInterval); // TẮT CHẠY NGẦM
+                    if (queue.progressInterval) clearInterval(queue.progressInterval);
                     if (queue.connection) queue.connection.destroy(); 
                     if (queue.dashboardMsg) {
                         queue.dashboardMsg.edit({ 
@@ -2577,7 +2587,7 @@ client.on('voiceStateUpdate', (oldState, newState) => {
                             components: [] 
                         }).catch(()=>{});
                     }
-                    musicQueues.delete(oldState.guild.id); // Xóa sạch dữ liệu hàng chờ
+                    musicQueues.delete(oldState.guild.id); 
                 }
             }
         }
@@ -3223,6 +3233,9 @@ client.once('ready', async () => {
     new SlashCommandBuilder()
       .setName('queue')
       .setDescription('📜 Xem danh sách nhạc đang chờ phát'),
+    new SlashCommandBuilder()
+      .setName('clear')
+      .setDescription('🧹 Xóa toàn bộ bài hát đang chờ (giữ lại bài đang phát)'),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3677,7 +3690,11 @@ client.on('interactionCreate', async (interaction) => {
           await handlePlayMusic(interaction);
           break;
         case 'queue':
-          await handleQueue(interaction); // Thêm dòng này để xử lý lệnh queue
+          await handleQueue(interaction);
+          break;
+        // THÊM ĐOẠN NÀY VÀO DƯỚI LỆNH QUEUE:
+        case 'clear':
+          await handleClearQueue(interaction);
           break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
@@ -7326,6 +7343,31 @@ async function handleQueue(interaction) {
   }
 
   await interaction.editReply({ embeds: [embed] });
+}
+
+// ===================== XỬ LÝ LỆNH /CLEAR =====================
+async function handleClearQueue(interaction) {
+    const queue = musicQueues.get(interaction.guild.id);
+
+    // Nếu không có hàng chờ hoặc chỉ có mỗi 1 bài đang hát thì không có gì để xóa
+    if (!queue || queue.songs.length <= 1) {
+        return interaction.reply({ 
+            content: '❌ Hàng chờ đang trống sẵn rồi, không có gì để dọn đâu!', 
+            ephemeral: true 
+        });
+    }
+
+    const removeCount = queue.songs.length - 1;
+    
+    // Giữ lại bài ở vị trí số 0 (đang phát), chém bay màu toàn bộ bài từ vị trí số 1 trở đi
+    queue.songs.splice(1);
+
+    await interaction.reply({ content: `🧹 Đã dọn dẹp sạch sẽ **${removeCount}** bài hát khỏi hàng chờ!` });
+    
+    // Cập nhật lại cái bảng điều khiển Dashboard ngay lập tức cho con số nó nhảy về 0
+    if (queue.dashboardMsg) {
+        await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+    }
 }
 
 // ===================== LOGIN =====================
