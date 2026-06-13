@@ -3528,32 +3528,52 @@ client.on('guildMemberAdd', async (member) => {
 
 // ===================== INTERACTIONS =====================
 client.on('interactionCreate', async (interaction) => {
-  // XỬ LÝ KHI NGƯỜI DÙNG CHỌN BÀI TỪ MENU
+  // XỬ LÝ KHI NGƯỜI DÙNG CHỌN 1 BÀI TỪ MENU
   if (interaction.isStringSelectMenu() && interaction.customId === 'select_song') {
       const [searchId, index] = interaction.values[0].split('_');
       const songs = temporarySearchResults.get(searchId);
       
-      if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn!', ephemeral: true });
+      if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
 
       const selectedSong = songs[index];
+      let queue = musicQueues.get(interaction.guild.id);
+      if (!queue) return interaction.reply({ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
       
-      // Thêm selectedSong vào queue của bạn ở đây...
-      // Sau đó:
-      interaction.update({ content: `✅ Đã thêm bài **${selectedSong.title}** vào hàng chờ!`, components: [] });
-      // Dọn bộ nhớ
+      // Bơm bài hát đã chọn vào hàng chờ
+      queue.songs.push(selectedSong);
+      
+      interaction.update({ content: `✅ Đã chọn và thêm bài **${selectedSong.title}** vào hàng chờ!`, components: [] });
+      
+      // Kích hoạt hát ngay nếu bot đang nghỉ
+      if (queue.songs.length === 1 || !queue.playing) {
+          playNextSong(interaction.guild.id);
+      } else {
+          if (queue.dashboardMsg) queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+      }
       setTimeout(() => temporarySearchResults.delete(searchId), 60000);
   }
 
-  // XỬ LÝ KHI NGƯỜI DÙNG BẤM "PHÁT TẤT CẢ"
+  // XỬ LÝ KHI NGƯỜI DÙNG BẤM "PHÁT TOÀN BỘ PLAYLIST"
   if (interaction.isButton() && interaction.customId.startsWith('play_all_')) {
       const searchId = interaction.customId.split('_')[2];
       const songs = temporarySearchResults.get(searchId);
 
-      if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn!', ephemeral: true });
+      if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
 
-      // Thêm toàn bộ mảng songs vào queue của bạn...
-      interaction.update({ content: `✅ Đã thêm **${songs.length} bài hát** vào hàng chờ!`, components: [] });
-      // Dọn bộ nhớ
+      let queue = musicQueues.get(interaction.guild.id);
+      if (!queue) return interaction.reply({ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
+
+      // Bơm CÙNG LÚC TOÀN BỘ 100 BÀI HÁT vào hàng chờ
+      queue.songs.push(...songs);
+      
+      interaction.update({ content: `✅ Đã nuốt trọn **${songs.length} bài hát** vào hàng chờ thành công!`, components: [] });
+      
+      // Kích hoạt hát ngay nếu bot đang nghỉ
+      if (queue.songs.length === songs.length || !queue.playing) {
+          playNextSong(interaction.guild.id);
+      } else {
+          if (queue.dashboardMsg) queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+      }
       setTimeout(() => temporarySearchResults.delete(searchId), 60000);
   }
   const isChatCmd = typeof interaction.isChatInputCommand === 'function'
@@ -6926,25 +6946,19 @@ async function playNextSong(guildId) {
     }
     // =========================================================================
 
-    // ================= KHU VỰC CHỐNG LAG MÀ VẪN GIỮ NÚT VOLUME =================
+    // ================= KHU VỰC TẢI ÂM THANH (CHỐNG CẮT 30 GIÂY) =================
+    // Xóa bỏ đoạn ép chất lượng, để thư viện tự tải bản đầy đủ mượt nhất
+    const stream = await play.stream(song.url);
     
-    // 1. Ép hạ chất lượng tải về để cứu CPU
-    const stream = await play.stream(song.url, {
-        discordPlayerCompatibility: true, // Ép chuẩn định dạng Discord
-        quality: 1 // (0: Cao nhất, 1: Trung bình, 2: Thấp). Để 1 là nghe đã đủ hay rồi!
-    });
-    
-    // 2. Khởi tạo âm thanh và MỞ LẠI CÔNG TẮC VOLUME
     const resource = createAudioResource(stream.stream, { 
         inputType: stream.type, 
-        inlineVolume: true, // Đã bật lại nút tăng/giảm âm lượng!
-        silencePaddingFrames: 5 // Đệm thêm xíu khoảng lặng chống nhiễu
+        inlineVolume: true, // Vẫn giữ nút tăng giảm âm lượng
+        silencePaddingFrames: 5 
     });
     
-    // Nạp âm lượng lấy từ hàng chờ
+    // Nạp âm lượng mặc định
     resource.volume.setVolume(queue.volume ?? 0.6);
     queue.resource = resource;
-    
     // =========================================================================
 
     queue.player.play(resource);
@@ -7188,97 +7202,86 @@ async function handlePlayMusic(interaction) {
     if (songsToAdd.length === 0) return interaction.editReply('❌ Không tìm thấy bài hát nào từ yêu cầu của bạn.');
 
     let queue = musicQueues.get(interaction.guild.id);
-    const isNewQueue = !queue;
 
-    // TẠO HÀNG CHỜ VỚI ÂM LƯỢNG MẶC ĐỊNH 60% (0.6)
+    // TẠO HÀNG CHỜ NẾU CHƯA CÓ
     if (!queue) {
-      queue = {
-        textChannel: interaction.channel,
-        voiceChannel: voiceChannel,
-        connection: null,
-        player: createAudioPlayer(),
-        songs: [],
-        playing: true,
-        volume: 0.6, // <--- THAY ĐỔI MẶC ĐỊNH Ở ĐÂY
-        dashboardMsg: null
-      };
-      musicQueues.set(interaction.guild.id, queue);
+        queue = {
+            textChannel: interaction.channel,
+            voiceChannel: voiceChannel,
+            connection: null,
+            player: createAudioPlayer(),
+            songs: [],
+            playing: false,
+            volume: 0.6,
+            dashboardMsg: null
+        };
+        musicQueues.set(interaction.guild.id, queue);
+        
+        // Kết nối bot vào Voice Channel
+        queue.connection = joinVoiceChannel({
+            channelId: voiceChannel.id,
+            guildId: interaction.guild.id,
+            adapterCreator: interaction.guild.voiceAdapterCreator,
+        });
+        queue.connection.subscribe(queue.player);
+
+        // Chuyển bài tự động khi hát xong
+        queue.player.on(AudioPlayerStatus.Idle, () => {
+            queue.songs.shift(); 
+            playNextSong(interaction.guild.id);
+        });
     }
 
-    // Đẩy tất cả nhạc vào kho
-    queue.songs.push(...songsToAdd);
-
-    if (isNewQueue) {
-      queue.connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId: interaction.guild.id,
-        adapterCreator: interaction.guild.voiceAdapterCreator,
-      });
-      queue.connection.subscribe(queue.player);
-
-      queue.player.on(AudioPlayerStatus.Idle, () => {
-        queue.songs.shift(); 
-        playNextSong(interaction.guild.id);
-      });
-
-      await playNextSong(interaction.guild.id);
-      
-      // Thông báo thông minh
-      // Thay thế đoạn logic thêm nhạc trong handlePlayMusic của bạn bằng đoạn này:
-      if (songsToAdd.length > 1) {
-        // Lưu tạm vào bộ nhớ
+    // TÍNH NĂNG MENU CHỌN BÀI / PLAYLIST (HỖ TRỢ LÊN ĐẾN 100 BÀI)
+    if (songsToAdd.length > 1) {
+        // Lưu tạm vào bộ nhớ chờ user bấm nút
         const searchId = Date.now().toString();
         temporarySearchResults.set(searchId, songsToAdd);
 
-        // Tạo menu chọn (chỉ hiển thị tối đa 25 bài do giới hạn Discord)
+        // Chỉ hiển thị 25 bài đầu tiên lên Menu Dropdown (Giới hạn của Discord)
         const options = songsToAdd.slice(0, 25).map((song, index) => ({
             label: song.title.length > 50 ? song.title.substring(0, 47) + '...' : song.title,
-            value: `${searchId}_${index}` // Lưu ID và chỉ số bài hát
+            value: `${searchId}_${index}` 
         }));
 
         const menu = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
                 .setCustomId('select_song')
-                .setPlaceholder('Chọn bài hát bạn muốn phát...')
+                .setPlaceholder('Chọn 1 bài để phát ngay...')
                 .addOptions(options)
         );
 
         const btnAll = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId(`play_all_${searchId}`)
-                .setLabel('Phát tất cả vào hàng chờ')
+                .setLabel(`Phát toàn bộ ${songsToAdd.length} bài vào hàng chờ`)
                 .setStyle(ButtonStyle.Primary)
         );
 
         await interaction.editReply({
-            content: `🔍 Tìm thấy ${songsToAdd.length} bài hát! Chọn một bài để phát hoặc phát tất cả:`,
+            content: `🔍 Tìm thấy **${songsToAdd.length}** bài hát! Bạn muốn phát bài nào hay nạp tất cả?`,
             components: [menu, btnAll]
         });
-      } else {
-          await interaction.editReply(`✅ Đã thêm vào hàng chờ và chuẩn bị phát!`);
-      }
-      setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
-
-    } else {
-      if (songsToAdd.length > 1) {
-          await interaction.editReply(`✅ Đã thêm **Playlist gồm ${songsToAdd.length} bài** vào hàng chờ!`);
-      } else {
-          await interaction.editReply(`✅ Đã thêm vào hàng chờ: **${songsToAdd[0].title.replace('🔎 Đang tìm: ', '')}**`);
-      }
-      setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
-      
-      if (queue.songs.length === songsToAdd.length && !queue.playing) {
-          playNextSong(interaction.guild.id);
-      } else {
-          if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
-      }
+    } 
+    // TRƯỜNG HỢP TÌM THẤY CHỈ ĐÚNG 1 BÀI
+    else {
+        queue.songs.push(songsToAdd[0]);
+        await interaction.editReply(`✅ Đã thêm vào hàng chờ: **${songsToAdd[0].title.replace('🔎 Đang tìm: ', '')}**`);
+        setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
+        
+        // Nếu bot đang ngủ (chưa hát bài nào), thì gọi dậy hát luôn
+        if (queue.songs.length === 1 || !queue.playing) {
+            playNextSong(interaction.guild.id);
+        } else {
+            if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+        }
     }
 
   } catch (error) {
     console.error('Lỗi khi tải nhạc:', error);
     await interaction.editReply('❌ Có vẻ Playlist này để chế độ riêng tư hoặc API đang quá tải. Thử lại sau nhé!');
   }
-}
+} // <--- Đóng hàm handlePlayMusic tại đây
 
 // ===================== XỬ LÝ LỆNH /QUEUE =====================
 async function handleQueue(interaction) {
