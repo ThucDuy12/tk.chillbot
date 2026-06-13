@@ -7040,7 +7040,7 @@ async function handlePlayMusic(interaction) {
             }
         }
         // -------------------------------------------------------------
-        // TRƯỜNG HỢP 3: APPLE MUSIC (MỔ BỤNG JSON CHUẨN XÁC 100%)
+        // TRƯỜNG HỢP 3: APPLE MUSIC (MỔ BỤNG MỌI THẺ JSON VÀ BẮT LỖI PRIVATE)
         // -------------------------------------------------------------
         else if (query.includes('music.apple.com')) {
             try {
@@ -7050,6 +7050,7 @@ async function handlePlayMusic(interaction) {
                 const response = await fetch(query, {
                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
                 });
+                
                 if (!response.ok) throw new Error('Không thể truy cập Apple Music');
                 
                 const html = await response.text();
@@ -7058,79 +7059,75 @@ async function handlePlayMusic(interaction) {
                 let trackList = [];
                 const thumbnail = $('meta[property="og:image"]').attr('content') || null;
 
-                // TRUY TÌM KHO BÁU TRONG THẺ SCRIPT JSON CỦA APPLE
-                const serializedData = $('#serialized-server-data').text();
-                
-                if (serializedData) {
-                    const parsedJSON = JSON.parse(serializedData);
-                    
-                    // SỬA LỖI Ở ĐÂY: Dò đúng đường dẫn vào danh sách bài hát
-                    let sections = [];
-                    if (parsedJSON.data && parsedJSON.data[0] && parsedJSON.data[0].sections) {
-                        sections = parsedJSON.data[0].sections; // Cấu trúc chuẩn
-                    } else if (Array.isArray(parsedJSON) && parsedJSON[0]?.sections) {
-                        sections = parsedJSON[0].sections; // Cấu trúc dự phòng
-                    }
-                    
-                    for (const section of sections) {
-                        // Tìm đúng phần "track-list" chứa danh sách bài hát
-                        if (section.itemKind === 'trackLockup' || (section.id && section.id.includes('track-list'))) {
-                            const items = section.items || [];
-                            for (const item of items) {
-                                if (item.title) {
-                                    // 1. Lấy tên ca sĩ
+                // CỖ MÁY ĐÀO XỚI JSON ĐA NĂNG (Quét mọi ngóc ngách của Apple)
+                const findTracks = (obj) => {
+                    if (!obj) return;
+                    if (Array.isArray(obj)) {
+                        obj.forEach(findTracks);
+                    } else if (typeof obj === 'object') {
+                        // Nếu object chứa danh sách bài hát
+                        if (Array.isArray(obj.items) && obj.items.length > 0 && obj.items[0].title && (obj.itemKind === 'trackLockup' || (obj.id && typeof obj.id === 'string' && obj.id.includes('track-list')))) {
+                            obj.items.forEach(item => {
+                                if (item.title && !trackList.some(t => t.title === item.title)) {
                                     let artist = item.artistName || '';
                                     if (!artist && item.subtitleLinks) {
-                                        artist = item.subtitleLinks.map(link => link.title).join(', ');
+                                        artist = item.subtitleLinks.map(l => l.title).join(', ');
                                     }
-                                    
-                                    // 2. Chuyển đổi thời lượng từ mili-giây sang phút:giây
                                     let durationStr = '0:00';
                                     if (item.duration) {
                                         const mins = Math.floor(item.duration / 60000);
                                         const secs = Math.floor((item.duration % 60000) / 1000);
                                         durationStr = `${mins}:${secs.toString().padStart(2, '0')}`;
                                     }
-
-                                    // 3. Đóng gói vào danh sách
                                     trackList.push({
-                                        title: `${item.title} - ${artist}`.trim(),
+                                        title: `${item.title} - ${artist}`.replace(/ - $/,'').trim(),
                                         resolveQuery: `${item.title} ${artist}`.trim(),
                                         thumbnail: thumbnail,
                                         durationRaw: durationStr,
                                         requester: interaction.user.id,
-                                        url: null // Bàn giao cho Lazy Load đi lùng audio
+                                        url: null
                                     });
                                 }
-                            }
+                            });
                         }
+                        // Quét tiếp vào các lớp sâu hơn
+                        Object.values(obj).forEach(findTracks);
                     }
-                }
+                };
 
-                // NẾU TÌM THẤY DANH SÁCH (PLAYLIST)
+                // Lật tung TẤT CẢ các thẻ script chứa JSON trên trang web
+                $('script[type="application/json"], script[type="application/ld+json"]').each((i, el) => {
+                    try {
+                        const parsedJSON = JSON.parse($(el).text());
+                        findTracks(parsedJSON);
+                    } catch(e) {}
+                });
+
+                // XỬ LÝ KẾT QUẢ
                 if (trackList.length > 0) {
                     songsToAdd.push(...trackList);
-                } 
-                // CỨU CÁNH: NẾU LÀ BÀI ĐƠN HOẶC JSON LỖI
-                else {
-                    let title = $('meta[property="og:title"]').attr('content') || $('title').text();
-                    title = title.replace(/ - Single by.*/i, '')
-                                 .replace(/ - EP by.*/i, '')
-                                 .replace(/ on Apple Music/i, '')
-                                 .trim();
-                    
-                    songsToAdd.push({
-                        title: title,
-                        resolveQuery: title,
-                        thumbnail: thumbnail,
-                        durationRaw: '0:00',
-                        requester: interaction.user.id,
-                        url: null
-                    });
+                } else {
+                    // NẾU KHÔNG TÌM THẤY BÀI NÀO TRONG PLAYLIST
+                    if (query.includes('/playlist/') || query.includes('/album/')) {
+                        return interaction.editReply('❌ **Apple Music chặn Bot đọc Playlist này!**\nLý do: Đây là Playlist **Cộng tác (Collaborative)** hoặc **Riêng tư**. Vui lòng tắt tính năng Cộng tác và chuyển thành Công khai (Public) nhé!');
+                    } else {
+                        // CỨU CÁNH CHO BÀI HÁT ĐƠN
+                        let title = $('meta[property="og:title"]').attr('content') || $('title').text();
+                        title = title.replace(/ - Single by.*/i, '').replace(/ - EP by.*/i, '').replace(/ on Apple Music/i, '').trim();
+                        
+                        songsToAdd.push({
+                            title: title,
+                            resolveQuery: title,
+                            thumbnail: thumbnail,
+                            durationRaw: '0:00',
+                            requester: interaction.user.id,
+                            url: null
+                        });
+                    }
                 }
             } catch (apErr) {
                 console.error('Lỗi xử lý Apple Music:', apErr);
-                return interaction.editReply('❌ Bot không thể đọc được link Apple Music này (Có thể do mạng hoặc link bị ẩn).');
+                return interaction.editReply('❌ Bot không thể đọc được link Apple Music này do lỗi kết nối.');
             }
         }
         // -------------------------------------------------------------
