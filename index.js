@@ -7040,7 +7040,7 @@ async function handlePlayMusic(interaction) {
             }
         }
         // -------------------------------------------------------------
-        // TRƯỜNG HỢP 3: APPLE MUSIC (MỔ BỤNG JSON TỪ SERIALIZED-SERVER-DATA)
+        // TRƯỜNG HỢP 3: APPLE MUSIC (MỔ BỤNG JSON CHUẨN XÁC 100%)
         // -------------------------------------------------------------
         else if (query.includes('music.apple.com')) {
             try {
@@ -7063,7 +7063,14 @@ async function handlePlayMusic(interaction) {
                 
                 if (serializedData) {
                     const parsedJSON = JSON.parse(serializedData);
-                    const sections = parsedJSON[0]?.sections || [];
+                    
+                    // SỬA LỖI Ở ĐÂY: Dò đúng đường dẫn vào danh sách bài hát
+                    let sections = [];
+                    if (parsedJSON.data && parsedJSON.data[0] && parsedJSON.data[0].sections) {
+                        sections = parsedJSON.data[0].sections; // Cấu trúc chuẩn
+                    } else if (Array.isArray(parsedJSON) && parsedJSON[0]?.sections) {
+                        sections = parsedJSON[0].sections; // Cấu trúc dự phòng
+                    }
                     
                     for (const section of sections) {
                         // Tìm đúng phần "track-list" chứa danh sách bài hát
