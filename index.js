@@ -3727,13 +3727,13 @@ client.on('interactionCreate', async (interaction) => {
         const customId = interaction.customId;
 
         // ===================== XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC (ĐỂ NGOÀI CÙNG) =====================
+        // ===================== XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC =====================
         if (customId.startsWith('music_')) {
             const queue = musicQueues.get(interaction.guild.id);
             if (!queue) {
                 return interaction.reply({ content: '❌ Nhạc đang tắt, bạn không thể bấm nút này.', ephemeral: true }).catch(()=>{});
             }
 
-            // Chặn không cho người ngoài phòng voice phá đám
             if (interaction.member.voice.channel?.id !== queue.voiceChannel.id) {
                 return interaction.reply({ content: '❌ Bạn phải vào chung phòng Voice với bot mới điều khiển được!', ephemeral: true }).catch(()=>{});
             }
@@ -3747,36 +3747,38 @@ client.on('interactionCreate', async (interaction) => {
                     }
                 } 
                 else if (customId === 'music_skip') {
-                    queue.player.stop(); // Cắt nguồn bài hiện tại -> tự động kích hoạt event chuyển bài
+                    queue.forceSkip = true; // Dù đang bật Loop, bấm Skip vẫn phải qua bài mới!
+                    queue.player.stop(); 
                     return interaction.deferUpdate().catch(()=>{}); 
                 } 
                 else if (customId === 'music_stop') {
-                  if (queue.progressInterval) clearInterval(queue.progressInterval); // Tắt thanh trượt
+                  if (queue.progressInterval) clearInterval(queue.progressInterval);
                   queue.songs = [];
                   queue.player.stop(); 
                   return interaction.update(createMusicDashboard(queue)).catch(()=>{});
                 }
+                else if (customId === 'music_loop') {
+                  queue.loop = !queue.loop; // Bật / Tắt trạng thái lặp
+                }
                 else if (customId === 'music_volup') {
-                    // Lấy gốc 0.6 thay vì 1.0
                     queue.volume = Math.min((queue.volume ?? 0.6) + 0.2, 2.0); 
                     if (queue.resource) queue.resource.volume.setVolume(queue.volume);
                 } 
                 else if (customId === 'music_voldown') {
-                    // Lấy gốc 0.6 thay vì 1.0
                     queue.volume = Math.max((queue.volume ?? 0.6) - 0.2, 0.1); 
                     if (queue.resource) queue.resource.volume.setVolume(queue.volume);
                 }
 
-                // BÍ QUYẾT DIỆT LỖI: Trả lời trực tiếp ngay vào cái nút vừa bấm
+                // Cập nhật giao diện nút bấm
                 await interaction.update(createMusicDashboard(queue)).catch(()=>{});
                 
             } catch(e) {
-                console.error("Lỗi nút bấm:", e);
+                console.error("Lỗi nút bấm nhạc:", e);
                 if (!interaction.replied && !interaction.deferred) {
                     await interaction.deferUpdate().catch(()=>{});
                 }
             }
-            return; // Xử lý xong nút nhạc thì thoát luôn, không chạy xuống dưới nữa
+            return; 
         }
 
         // ===================== XỬ LÝ NÚT BẤM MARKETPLACE =====================
@@ -6875,7 +6877,7 @@ function buildProgressBar(elapsedSec, totalSec) {
     return bar;
 }
 
-// ===================== GIAO DIỆN PREMIUM (NÚT NGANG + THANH TRƯỢT) =====================
+// ===================== GIAO DIỆN PREMIUM (2 HÀNG NÚT CÓ LOOP) =====================
 function createMusicDashboard(queue) {
   if (!queue || queue.songs.length === 0) {
       return {
@@ -6900,26 +6902,34 @@ function createMusicDashboard(queue) {
   const totalSec = parseDurationToSec(currentSong.durationRaw);
   const progressBar = buildProgressBar(elapsedSec, totalSec);
   const elapsedStr = formatSecToTime(elapsedSec);
+  
+  // Trạng thái lặp
+  const loopText = queue.loop ? '🔂 **Đang lặp:** BẬT' : '🔁 **Đang lặp:** TẮT';
 
   const embed = new EmbedBuilder()
     .setAuthor({ name: 'NOW PLAYING', iconURL: 'https://cdn-icons-png.flaticon.com/512/659/659056.png' })
     .setTitle(currentSong.title)
     .setURL(currentSong.url)
-    .setDescription(`${progressBar} \`[${elapsedStr} / ${currentSong.durationRaw}]\`\n\n> 👤 **Yêu cầu bởi:** <@${currentSong.requester}>\n> 🔊 **Âm lượng:** \`${volPercent}%\``)
+    .setDescription(`${progressBar} \`[${elapsedStr} / ${currentSong.durationRaw}]\`\n\n> 👤 **Yêu cầu bởi:** <@${currentSong.requester}>\n> 🔊 **Âm lượng:** \`${volPercent}%\`\n> ${loopText}`)
     .setImage(currentSong.thumbnail)
     .setColor(0x2b2d31)
     .setFooter({ text: `Hàng chờ: ${queue.songs.length - 1} bài • Độc quyền Tk.Chill` });
 
-  // GỘP CHÍNH XÁC 5 NÚT VÀO ĐÚNG 1 HÀNG NGANG
-  const row = new ActionRowBuilder().addComponents(
+  // HÀNG NÚT 1: CHUYỂN BÀI & LẶP (4 nút)
+  const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('music_pause').setEmoji(queue.playing ? '⏸️' : '▶️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('music_skip').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('music_stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('music_loop').setEmoji(queue.loop ? '🔂' : '🔁').setStyle(queue.loop ? ButtonStyle.Success : ButtonStyle.Secondary)
+  );
+
+  // HÀNG NÚT 2: ÂM LƯỢNG (2 nút)
+  const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('music_voldown').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('music_volup').setEmoji('🔊').setStyle(ButtonStyle.Secondary)
   );
 
-  return { embeds: [embed], components: [row] };
+  return { embeds: [embed], components: [row1, row2] };
 }
 
 // ===================== CỖ MÁY XỬ LÝ NHẠC (LAZY LOAD) =====================
@@ -7230,7 +7240,9 @@ async function handlePlayMusic(interaction) {
             songs: [],
             playing: false,
             volume: 0.6,
-            dashboardMsg: null
+            dashboardMsg: null,
+            loop: false,       // <-- THÊM CỜ LOOP VÀO ĐÂY
+            forceSkip: false   // <-- Cờ ép qua bài (dù đang bật loop)
         };
         musicQueues.set(interaction.guild.id, queue);
         
@@ -7242,9 +7254,14 @@ async function handlePlayMusic(interaction) {
         });
         queue.connection.subscribe(queue.player);
 
-        // Chuyển bài tự động khi hát xong
+        // LOGIC CHUYỂN BÀI / LẶP LẠI BÀI THÔNG MINH
         queue.player.on(AudioPlayerStatus.Idle, () => {
-            queue.songs.shift(); 
+            // Nếu không bật Lặp, HOẶC người dùng cố tình bấm Nút Skip -> thì vứt bài cũ đi
+            if (!queue.loop || queue.forceSkip) {
+                queue.songs.shift(); 
+            }
+            queue.forceSkip = false; // Reset lại cờ ép qua bài
+            
             playNextSong(interaction.guild.id);
         });
     }
