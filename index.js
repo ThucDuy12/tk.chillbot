@@ -3702,6 +3702,9 @@ client.on('interactionCreate', async (interaction) => {
         case 'clear':
           await handleClearQueue(interaction);
           break;
+        case 'setup_vatsim_verify':
+          await handleSetupVatsimVerify(interaction);
+          break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
           const anh2 = interaction.options.getAttachment('anh2');
