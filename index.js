@@ -5944,10 +5944,18 @@ async function handleMetar(interaction) {
     
     // 4. Xử lý hiển thị D-ATIS (Tách riêng, Gộp chung, hoặc Ẩn đi)
     if (hasAtis) {
+      // =========================================================
+      // LUẬT ĐẶC CÁCH CHO VVTS: Chỉ dùng Arrival ATIS như đời thực
+      // Ép bot vứt bỏ Departure ATIS (nếu có) để tránh hiển thị rác
+      // =========================================================
+      if (icao === 'VVTS') {
+        atisData.departure = null;
+      }
+
       // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr (nội dung y hệt nhau)
       if (atisData.arrival && atisData.departure && atisData.arrival === atisData.departure) {
         const formatted = formatATISText(atisData.arrival);
-        replyContent += `\n📻 **D-ATIS (${icao}):**\n\`\`\`${formatted}\`\`\``;
+        replyContent += `\n📻 **D-ATIS Chung (${icao}):**\n\`\`\`${formatted}\`\`\``;
       } 
       // Trường hợp 2: Tách biệt rõ ràng hoặc chỉ có 1 trong 2
       else {
@@ -5957,7 +5965,7 @@ async function handleMetar(interaction) {
           replyContent += `\n🛬 **Arrival ATIS (${icao}):**\n\`\`\`${formattedArr}\`\`\``;
         }
         
-        // Chỉ hiện Departure nếu thực sự có dữ liệu
+        // Chỉ hiện Departure nếu thực sự có dữ liệu (đã bị chặn ở VVTS)
         if (atisData.departure) {
           const formattedDep = formatATISText(atisData.departure);
           replyContent += `\n🛫 **Departure ATIS (${icao}):**\n\`\`\`${formattedDep}\`\`\``;
@@ -5981,13 +5989,20 @@ async function handleRunway(interaction) {
   await interaction.deferReply();
 
   try {
-    // 1. Lấy METAR để tính gió
+    // 1. LẤY METAR ĐỂ TÍNH GIÓ (ĐÃ NÂNG CẤP HỆ THỐNG DỰ PHÒNG CHECKWX)
+    let metar = null;
     const atisData = await fetchATIS(icao);
-    if (!atisData || !atisData.metar) {
-      return await interaction.editReply({ content: `❌ Không lấy được dữ liệu METAR cho sân bay ${icao} để tính toán gió.` });
+    
+    if (atisData && atisData.metar) {
+      metar = atisData.metar; // Lấy từ atis.guru nếu có
+    } else {
+      // Nếu atis.guru không có, gọi cứu viện CheckWX
+      metar = await fetchMetarFromCheckWX(icao);
     }
 
-    const metar = atisData.metar;
+    if (!metar) {
+      return await interaction.editReply({ content: `❌ Không lấy được dữ liệu METAR cho sân bay ${icao} trên toàn bộ hệ thống để tính toán gió.` });
+    }
     
     // Tìm hướng gió và tốc độ gió trong METAR (VD: 25015G25KT, VRB02KT)
     const windMatch = metar.match(/(VRB|\d{3})(\d{2,3})(?:G\d{2,3})?KT/);
