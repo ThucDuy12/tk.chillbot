@@ -5986,20 +5986,19 @@ async function handleMetar(interaction) {
   }
 }
 
-// ===================== ACTIVE RUNWAY CALCULATOR (GLOBAL) =====================
+// ===================== ACTIVE RUNWAY CALCULATOR (100% AUTO GLOBAL) =====================
 async function handleRunway(interaction) {
   const icao = interaction.options.getString('icao').toUpperCase();
   await interaction.deferReply();
 
   try {
-    // 1. LẤY METAR ĐỂ TÍNH GIÓ (ĐÃ NÂNG CẤP HỆ THỐNG DỰ PHÒNG CHECKWX)
+    // 1. LẤY METAR ĐỂ TÍNH GIÓ 
     let metar = null;
     const atisData = await fetchATIS(icao);
     
     if (atisData && atisData.metar) {
-      metar = atisData.metar; // Lấy từ atis.guru nếu có
+      metar = atisData.metar; 
     } else {
-      // Nếu atis.guru không có, gọi cứu viện CheckWX
       metar = await fetchMetarFromCheckWX(icao);
     }
 
@@ -6033,24 +6032,21 @@ async function handleRunway(interaction) {
     embed.addFields({ name: '🌬️ Gió hiện tại', value: `Hướng: **${windDir}°** | Tốc độ: **${windSpeed} KT**`, inline: false });
 
     // ==========================================
-    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TOÀN CẦU TỪ API
+    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỰ ĐỘNG TỪ API (Không cần nhập tay)
     // ==========================================
-    let runways = null;
+    let runways = [];
     try {
       const fetch = (await import('node-fetch')).default;
-      // Dùng CheckWX API để gọi thông tin cấu trúc của bất kỳ sân bay nào
       const res = await fetch(`https://api.checkwx.com/station/${icao}`, {
         headers: { 'X-API-Key': CHECKWX_API_KEY }
       });
       
       if (res.ok) {
         const data = await res.json();
-        // Nếu API trả về dữ liệu và có danh sách runways
+        // Cào đường băng từ API
         if (data && data.data && data.data.length > 0 && data.data[0].runways) {
-          runways = [];
           data.data[0].runways.forEach(rw => {
-            // Tách tên đường băng (ident1, ident2) ra.
-            // VD: "07L" -> xóa bỏ chữ L -> còn "07" -> Ép kiểu số = 7 -> nhân 10 = 70 độ
+            // Tách tên đường băng và quy đổi ra góc (Ví dụ 07L -> 07 -> 70 độ)
             if (rw.ident1) {
               const num1 = parseInt(rw.ident1.replace(/\D/g, ''), 10);
               if (!isNaN(num1)) runways.push({ id: rw.ident1, heading: num1 * 10 });
@@ -6063,27 +6059,16 @@ async function handleRunway(interaction) {
         }
       }
     } catch (e) {
-      console.error('Lỗi khi cào dữ liệu sân bay toàn cầu:', e);
+      console.error('Lỗi khi kéo dữ liệu sân bay toàn cầu:', e);
     }
 
-    // 3. Hệ thống dự phòng (Phòng hờ API sập hoặc sân bay quá hẻo lánh không có trên API)
-    if (!runways || runways.length === 0) {
-      const fallbackRunways = {
-        'VVTS': [{ id: '07', heading: 70 }, { id: '25', heading: 250 }],
-        'VVNB': [{ id: '11', heading: 110 }, { id: '29', heading: 290 }],
-        'VVDN': [{ id: '17', heading: 170 }, { id: '35', heading: 350 }],
-        'VVCR': [{ id: '02', heading: 20 }, { id: '20', heading: 200 }],
-        'VVPQ': [{ id: '10', heading: 100 }, { id: '28', heading: 280 }],
-        'VVCI': [{ id: '07', heading: 40 }, { id: '25', heading: 220 }],
-      };
-      runways = fallbackRunways[icao];
-    }
-
-    // 4. Tính toán đường băng thuận lợi nhất
-    if (!runways || runways.length === 0) {
+    // ==========================================
+    // 3. TÍNH TOÁN (Nếu có đường băng)
+    // ==========================================
+    if (runways.length === 0) {
       embed.addFields({ 
         name: '⚠️ Lưu ý', 
-        value: `Sân bay **${icao}** quá lạ, không có dữ liệu đường băng trong hệ thống API toàn cầu. Tuy nhiên bạn có thể tự đối chiếu hướng gió **${windDir}°** với chart sân bay nhé.` 
+        value: `Hệ thống API hiện không có dữ liệu cấu trúc đường băng của sân bay **${icao}**. Tuy nhiên, dựa vào METAR, gió đang thổi từ hướng **${windDir}°**, bạn có thể đối chiếu với Chart của sân bay để chọn đường băng đón gió nhé!` 
       });
     } else {
       let bestRunway = null;
@@ -6100,14 +6085,14 @@ async function handleRunway(interaction) {
         }
       });
 
-      // Tính Component (Dùng lượng giác để bóc tách gió ngược và gió ngang)
+      // Tính Component (Dùng lượng giác để bóc tách gió ngược và ngang)
       const angleRad = minDiff * (Math.PI / 180);
       const headwind = Math.abs(Math.round(Math.cos(angleRad) * windSpeed));
       const crosswind = Math.abs(Math.round(Math.sin(angleRad) * windSpeed));
 
       embed.addFields({
         name: '🎯 Đường băng thuận lợi nhất',
-        value: `**Runway ${bestRunway.id}** (Lệch gió so với tâm đường băng: ${minDiff}°)`,
+        value: `**Runway ${bestRunway.id}** (Lệch gió so với trục đường băng: ${minDiff}°)`,
         inline: false
       });
       embed.addFields({
@@ -6115,7 +6100,7 @@ async function handleRunway(interaction) {
         value: `Gió ngược (Headwind): **${headwind} KT**\nGió ngang (Crosswind): **${crosswind} KT**`,
         inline: false
       });
-      embed.setFooter({ text: 'Lưu ý: Luôn tuân theo huấn lệnh của ATC (nếu có) do ATC có thể áp dụng Preferential Runway.' });
+      embed.setFooter({ text: 'Lưu ý: Luôn tuân theo huấn lệnh của ATC (nếu có).' });
     }
 
     await interaction.editReply({ embeds: [embed] });
@@ -6125,7 +6110,7 @@ async function handleRunway(interaction) {
   }
 }
 
-// ===================== TAF DECODER (CHECKWX API) =====================
+// ===================== TAF DECODER (CHECKWX API - SUPER DETAILED) =====================
 async function handleTaf(interaction) {
   const icao = interaction.options.getString('icao').toUpperCase();
   await interaction.deferReply();
@@ -6136,7 +6121,7 @@ async function handleTaf(interaction) {
 
   try {
     const fetch = (await import('node-fetch')).default;
-    // Gọi API của CheckWX
+    // Gọi API của CheckWX bản Decoded (Nó đã bóc tách sẵn mọi thứ y hệt metar-taf.com)
     const response = await fetch(`https://api.checkwx.com/taf/${icao}/decoded`, {
       headers: { 'X-API-Key': CHECKWX_API_KEY }
     });
@@ -6152,75 +6137,91 @@ async function handleTaf(interaction) {
     }
 
     const tafData = data.data[0];
+    
+    // Tự động phân tích thời gian hiệu lực tổng của TAF
+    const validFrom = tafData.timestamp?.from ? `Từ ${tafData.timestamp.from}` : '';
+    const validTo = tafData.timestamp?.to ? `Đến ${tafData.timestamp.to}` : '';
+
     const embed = new EmbedBuilder()
       .setTitle(`🌦️ TAF Decoder - ${icao}`)
-      .setDescription(`**Nguyên gốc (Raw TAF):**\n\`\`\`${tafData.raw_text}\`\`\``)
-      .setColor(0xf39c12)
+      .setDescription(`**Hiệu lực:** ${validFrom} ➔ ${validTo}\n\n**Bản gốc (Raw TAF):**\n\`\`\`${tafData.raw_text}\`\`\``)
+      .setColor(0x00A8FF) // Màu xanh dương chuyên nghiệp
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/1163/1163624.png')
       .setTimestamp()
-      .setFooter({ text: 'Powered by CheckWX API' });
+      .setFooter({ text: 'Dữ liệu được bóc tách từ CheckWX Aviation API' });
 
     if (tafData.forecast && tafData.forecast.length > 0) {
-      const MAX_FORECASTS = 5; // Tăng lên 5 giai đoạn cho thoải mái
+      const MAX_FORECASTS = 6; // Hiển thị chi tiết 6 mốc thay đổi thời tiết
       
       tafData.forecast.slice(0, MAX_FORECASTS).forEach((fcst, index) => {
-        // [ĐÃ SỬA] Đọc đúng trường thời gian của API (forecast_from / forecast_to)
         let fromTime = fcst.timestamp?.forecast_from || fcst.timestamp?.from;
         let toTime = fcst.timestamp?.forecast_to || fcst.timestamp?.to;
-        
-        let timeStr = (!fromTime && !toTime) ? 'Toàn bộ thời gian' : `Từ **${fromTime || 'Không rõ'}** đến **${toTime || 'Không rõ'}**`;
+        let timeStr = (!fromTime && !toTime) ? 'Toàn bộ thời gian' : `${fromTime || '???'} ➔ ${toTime || '???'}`;
         
         let details = [];
 
-        // Hướng gió và tốc độ
+        // 1. Phân tích Gió chi tiết
         if (fcst.wind) {
-          let windStr = `🌬️ Gió: ${fcst.wind.degrees || 'VRB'}° ở ${fcst.wind.speed_kts || 0} KT`;
-          if (fcst.wind.gust_kts) windStr += ` (Giật ${fcst.wind.gust_kts} KT)`;
-          details.push(windStr);
+          let windDir = fcst.wind.degrees ? `${fcst.wind.degrees}°` : 'VRB (Đổi hướng)';
+          let windStr = `**Gió:** ${windDir} ở mức **${fcst.wind.speed_kts || 0} KT**`;
+          if (fcst.wind.gust_kts) windStr += ` *(Giật mạnh lên tới ${fcst.wind.gust_kts} KT)*`;
+          details.push(`🌬️ ${windStr}`);
         }
         
-        // Tầm nhìn
+        // 2. Tầm nhìn
         if (fcst.visibility?.meters) {
-          details.push(`👁️ Tầm nhìn: ${fcst.visibility.meters}m`);
+          let vis = fcst.visibility.meters;
+          let visStr = vis >= 9999 ? '10km+ (Tốt)' : `${vis} mét`;
+          details.push(`👁️ **Tầm nhìn:** ${visStr}`);
         }
         
-        // Thời tiết hiện tại
+        // 3. Hiện tượng thời tiết (Mưa, bão, sương mù...)
         if (fcst.conditions && fcst.conditions.length > 0) {
-          details.push(`🌧️ Thời tiết: ${fcst.conditions.map(c => c.text || c.code).join(', ')}`);
+          const wx = fcst.conditions.map(c => c.text || c.code).join(', ');
+          details.push(`🌧️ **Thời tiết:** ${wx}`);
         }
         
-        // Mây [ĐÃ VÁ LỖI KHÔNG RÕ FT]
+        // 4. Các tầng mây chi tiết
         if (fcst.clouds && fcst.clouds.length > 0) {
           const cloudDetails = fcst.clouds.map(c => {
-            // Thử bắt nhiều trường trả về khác nhau của API
             let height = c.base_feet_agl || c.feet || c.base_feet || c.base;
-            
-            // Nếu API vẫn không có độ cao, tự tách số từ Raw Code (VD: SCT017 -> 1700)
             if (!height && c.code) {
               const match = c.code.match(/\d{3}/);
               if (match) height = parseInt(match[0]) * 100;
             }
-            
             const heightText = height ? `${height} ft` : 'Sát mặt đất';
-            return `${c.text || c.code} ở ${heightText}`;
+            return `**${c.text || c.code}** (${heightText})`;
           });
-          details.push(`☁️ Mây: ${cloudDetails.join(', ')}`);
+          details.push(`☁️ **Mây:** ${cloudDetails.join(' | ')}`);
+        } else {
+          details.push(`☁️ **Mây:** Trời quang (CAVOK/NSC)`);
         }
 
-        // Tên khối thay đổi (TEMPO, BECMG...)
-        let indicatorName = fcst.change?.indicator?.code || fcst.change?.indicator?.text || fcst.change?.indicator || 'Dự báo gốc';
+        // Đặt tên khối thay đổi cho sang chảnh
+        let indicatorCode = fcst.change?.indicator?.code || fcst.change?.indicator?.text || fcst.change?.indicator || 'INITIAL';
+        
+        // Dịch nghĩa các mã TAF
+        const indicatorMap = {
+          'TEMPO': '🟡 Biến động tạm thời (TEMPO)',
+          'BECMG': '🔵 Thay đổi dần thành (BECMG)',
+          'FM': '🟢 Bắt đầu từ (FM)',
+          'PROB30': '🟠 Xác suất 30% xảy ra (PROB30)',
+          'PROB40': '🔴 Xác suất 40% xảy ra (PROB40)',
+          'INITIAL': '✅ Dự báo ban đầu'
+        };
+        let niceIndicator = indicatorMap[indicatorCode] || `🔹 ${indicatorCode}`;
 
         embed.addFields({
-          name: `🕒 Giai đoạn ${index + 1} (${indicatorName})`,
-          value: `${timeStr}\n${details.length > 0 ? details.join('\n') : '*Không có hiện tượng đặc biệt*'}`,
+          name: `${niceIndicator} [${timeStr}]`,
+          value: details.length > 0 ? details.join('\n') : '> Thời tiết không có hiện tượng cản trở.',
           inline: false
         });
       });
 
-      // Nếu còn nhiều hơn 5 giai đoạn, báo cho người dùng biết
       if (tafData.forecast.length > MAX_FORECASTS) {
         embed.addFields({
           name: '...',
-          value: `*Còn ${tafData.forecast.length - MAX_FORECASTS} giai đoạn thay đổi nữa bị ẩn đi để tránh trôi chat.*`,
+          value: `*Còn ${tafData.forecast.length - MAX_FORECASTS} mốc thời gian phụ nữa được ẩn đi cho gọn.*`,
           inline: false
         });
       }
