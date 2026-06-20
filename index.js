@@ -6071,7 +6071,7 @@ async function handleRunway(interaction) {
         'VVDN': [{ id: '17', heading: 170 }, { id: '35', heading: 350 }],
         'VVCR': [{ id: '02', heading: 20 }, { id: '20', heading: 200 }],
         'VVPQ': [{ id: '10', heading: 100 }, { id: '28', heading: 280 }],
-        'VVCI': [{ id: '04', heading: 40 }, { id: '22', heading: 220 }],
+        'VVCI': [{ id: '07', heading: 40 }, { id: '25', heading: 220 }],
       };
       runways = fallbackRunways[icao];
     }
@@ -7547,7 +7547,10 @@ async function handleClearQueue(interaction) {
 }
 
 async function handleSetupVatsimVerify(interaction) {
-  const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+  // Bọc thép an toàn: Kiểm tra cả cache lẫn dạng mảng thô của Discord API
+  const memberRoles = interaction.member?.roles;
+  const hasAdmin = memberRoles?.cache?.has(roles.adminRoleId) || (Array.isArray(memberRoles) && memberRoles.includes(roles.adminRoleId));
+
   if (!hasAdmin && interaction.user.id !== OWNER_ID) {
     return interaction.reply({ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
   }
@@ -7565,7 +7568,6 @@ async function handleSetupVatsimVerify(interaction) {
   await interaction.channel.send({ embeds: [embed], components: [row] });
   await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
 }
-
 
 
 // ===================== LOGIN =====================
