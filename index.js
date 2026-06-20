@@ -5986,7 +5986,7 @@ async function handleMetar(interaction) {
   }
 }
 
-// ===================== ACTIVE RUNWAY CALCULATOR (100% AUTO GLOBAL) =====================
+// ===================== ACTIVE RUNWAY CALCULATOR (HYBRID: API + LOCAL DB) =====================
 async function handleRunway(interaction) {
   const icao = interaction.options.getString('icao').toUpperCase();
   await interaction.deferReply();
@@ -6032,7 +6032,7 @@ async function handleRunway(interaction) {
     embed.addFields({ name: '🌬️ Gió hiện tại', value: `Hướng: **${windDir}°** | Tốc độ: **${windSpeed} KT**`, inline: false });
 
     // ==========================================
-    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỰ ĐỘNG TỪ API (Không cần nhập tay)
+    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỰ ĐỘNG TỪ API
     // ==========================================
     let runways = [];
     try {
@@ -6046,7 +6046,6 @@ async function handleRunway(interaction) {
         // Cào đường băng từ API
         if (data && data.data && data.data.length > 0 && data.data[0].runways) {
           data.data[0].runways.forEach(rw => {
-            // Tách tên đường băng và quy đổi ra góc (Ví dụ 07L -> 07 -> 70 độ)
             if (rw.ident1) {
               const num1 = parseInt(rw.ident1.replace(/\D/g, ''), 10);
               if (!isNaN(num1)) runways.push({ id: rw.ident1, heading: num1 * 10 });
@@ -6063,12 +6062,34 @@ async function handleRunway(interaction) {
     }
 
     // ==========================================
-    // 3. TÍNH TOÁN (Nếu có đường băng)
+    // 3. HỆ THỐNG DỰ PHÒNG (DATABASE NỘI BỘ) - Cứu cánh khi API ngáo
+    // ==========================================
+    if (runways.length === 0) {
+      const fallbackRunways = {
+        'VVTS': [{ id: '07', heading: 70 }, { id: '25', heading: 250 }],
+        'VVNB': [{ id: '11', heading: 110 }, { id: '29', heading: 290 }],
+        'VVDN': [{ id: '17', heading: 170 }, { id: '35', heading: 350 }],
+        'VVCR': [{ id: '02', heading: 20 }, { id: '20', heading: 200 }],
+        'VVPQ': [{ id: '10', heading: 100 }, { id: '28', heading: 280 }],
+        'VVCI': [{ id: '07', heading: 70 }, { id: '25', heading: 250 }], // Đã fix 07/25
+        'VTBS': [{ id: '01', heading: 10 }, { id: '19', heading: 190 }],
+        'WSSS': [{ id: '02', heading: 20 }, { id: '20', heading: 200 }],
+        'VCAI': [{ id: '09', heading: 90 }, { id: '27', heading: 270 }]
+      };
+      
+      // Nếu có trong sổ tay nội bộ thì lôi ra xài
+      if (fallbackRunways[icao]) {
+        runways = fallbackRunways[icao];
+      }
+    }
+
+    // ==========================================
+    // 4. TÍNH TOÁN
     // ==========================================
     if (runways.length === 0) {
       embed.addFields({ 
         name: '⚠️ Lưu ý', 
-        value: `Hệ thống API hiện không có dữ liệu cấu trúc đường băng của sân bay **${icao}**. Tuy nhiên, dựa vào METAR, gió đang thổi từ hướng **${windDir}°**, bạn có thể đối chiếu với Chart của sân bay để chọn đường băng đón gió nhé!` 
+        value: `Sân bay **${icao}** không có dữ liệu đường băng trong hệ thống API toàn cầu lẫn Database nội bộ. Tuy nhiên, dựa vào METAR, gió đang thổi từ hướng **${windDir}°**, bạn có thể tự đối chiếu với Chart nhé!` 
       });
     } else {
       let bestRunway = null;
