@@ -266,6 +266,8 @@ let roles = {
     { name: 'X-Plane 11/12', id: '1365961407551766538' },
     { name: 'Pending', id: '1511014904142762104' },
   ],
+  vatsimPilotRoleId: process.env.VATSIM_PILOT_ROLE_ID || '1517724342270558218',
+  vatsimAtcRoleId: process.env.VATSIM_ATC_ROLE_ID || '1393133850640781383',
 };
 let awardSent = fs.existsSync(AWARD_SENT_FILE) ? 
   JSON.parse(fs.readFileSync(AWARD_SENT_FILE, 'utf8')) : 
@@ -3236,6 +3238,10 @@ client.once('ready', async () => {
     new SlashCommandBuilder()
       .setName('clear')
       .setDescription('🧹 Xóa toàn bộ bài hát đang chờ (giữ lại bài đang phát)'),
+    new SlashCommandBuilder()
+      .setName('setup_vatsim_verify')
+      .setDescription('Tạo bảng xác thực CID nhận role VATSIM (Admin only)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -4890,6 +4896,32 @@ async function handleButton(interaction) {
     }
     return;
   }
+
+  // Xử lý nút bấm Xác thực VATSIM
+  if (customId === 'btn_verify_pilot' || customId === 'btn_verify_atc') {
+    const roleType = customId === 'btn_verify_pilot' ? 'pilot' : 'atc';
+    
+    // Tạo Popup (Modal) yêu cầu nhập CID
+    const modal = new ModalBuilder()
+        .setCustomId(`modal_verify_${roleType}`)
+        .setTitle(`Xác nhận VATSIM ${roleType.toUpperCase()}`);
+
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId('cid_input')
+                .setLabel('Nhập VATSIM CID của bạn')
+                .setPlaceholder('VD: 1000000')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMinLength(5)
+                .setMaxLength(8)
+        )
+    );
+    await interaction.showModal(modal);
+    return;
+  }
+
   if (customId.startsWith('group_')) {
     const parts = customId.split('_');
     const action = parts[1];
@@ -5021,6 +5053,65 @@ async function handleSendAward(interaction) {
 }
 
 async function handleModal(interaction) {
+  // Nhận dữ liệu nộp từ Popup Xác thực VATSIM
+  if (interaction.customId.startsWith('modal_verify_')) {
+    const roleType = interaction.customId.split('_')[2]; // 'pilot' hoặc 'atc'
+    const cidStr = interaction.fields.getTextInputValue('cid_input').trim();
+    const cid = parseInt(cidStr);
+
+    if (isNaN(cid)) {
+      return interaction.reply({ content: '❌ CID không hợp lệ. Vui lòng nhập số.', ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true }); // Chờ API VATSIM phản hồi
+
+    // Dùng lại hàm có sẵn trong code của bạn
+    const stats = await fetchVatsimStatsById(cid);
+    
+    if (!stats) {
+      return interaction.editReply({ content: `❌ Không tìm thấy thông tin trên VATSIM cho CID **${cid}**. Vui lòng kiểm tra lại.` });
+    }
+
+    // Tài khoản bị Suspended (VATSIM API trả về rating 0)
+    if (stats.rating === 0) {
+      return interaction.editReply({ content: `❌ Tài khoản VATSIM của bạn (CID: ${cid}) hiện đang bị **Suspended**. Hệ thống từ chối cấp Role.` });
+    }
+
+    // XÉT DUYỆT PILOT
+    if (roleType === 'pilot') {
+      if (stats.pilot_hours > 10) {
+        try {
+          const member = await interaction.guild.members.fetch(interaction.user.id);
+          await member.roles.add(roles.vatsimPilotRoleId);
+          return interaction.editReply({ content: `✅ Xác thực thành công! Bạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã cấp Role **VATSIM Pilot**.` });
+        } catch (err) {
+          return interaction.editReply({ content: `⚠️ Đã đủ điều kiện nhưng bot không thể cấp role. Vị trí Role của Bot phải nằm trên Role Pilot trong cài đặt Server.` });
+        }
+      } else {
+        return interaction.editReply({ content: `❌ Từ chối: Bạn mới có **${stats.pilot_hours.toFixed(1)}** giờ bay. Cần bay trên 10 giờ để nhận role Pilot.` });
+      }
+    } 
+    // XÉT DUYỆT ATC
+    else if (roleType === 'atc') {
+      if (stats.rating > 1) { // 1 là OBS, > 1 là từ S1 trở lên
+        try {
+          const member = await interaction.guild.members.fetch(interaction.user.id);
+          await member.roles.add(roles.vatsimAtcRoleId);
+          
+          const vatsimRatingsSpoken = { 2: 'S1', 3: 'S2', 4: 'S3', 5: 'C1', 6: 'C2', 7: 'C3', 8: 'I1', 9: 'I2', 10: 'I3', 11: 'SUP', 12: 'ADM' };
+          const ratingStr = vatsimRatingsSpoken[stats.rating] || `R${stats.rating}`;
+          
+          return interaction.editReply({ content: `✅ Xác thực thành công! Rating của bạn là **${ratingStr}**. Đã cấp Role **VATSIM ATC**.` });
+        } catch (err) {
+          return interaction.editReply({ content: `⚠️ Đã đủ điều kiện nhưng bot không thể cấp role. Vị trí Role của Bot phải nằm trên Role ATC trong cài đặt Server.` });
+        }
+      } else {
+        return interaction.editReply({ content: `❌ Từ chối: Rating của bạn hiện tại là **OBS** (hoặc thấp hơn). Yêu cầu ATC từ hạng S1 trở lên.` });
+      }
+    }
+    return;
+  }
+  
   if (interaction.customId === 'group_modal') {
     const dep = interaction.fields.getTextInputValue('dep').toUpperCase();
     const arr = interaction.fields.getTextInputValue('arr').toUpperCase();
@@ -5835,10 +5926,10 @@ async function handleMetar(interaction) {
     const atisData = await fetchATIS(icao);
     
     let metarText = atisData ? atisData.metar : null;
-    let atisText = atisData ? (atisData.arrival || atisData.departure) : null;
+    let hasAtis = atisData && (atisData.arrival || atisData.departure);
 
     // 2. Fallback CheckWX: Chỉ gọi khi hoàn toàn trắng tay (Không D-ATIS và Không METAR)
-    if (!metarText && !atisText) {
+    if (!metarText && !hasAtis) {
       metarText = await fetchMetarFromCheckWX(icao);
     }
     
@@ -5851,10 +5942,27 @@ async function handleMetar(interaction) {
       replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`❌ Không tìm thấy METAR trên cả atis.guru lẫn CheckWX.\`\`\``;
     }
     
-    // 4. Xử lý hiển thị D-ATIS
-    if (atisText) {
-      const formattedAtis = formatATISText(atisText);
-      replyContent += `\n🛬 **D-ATIS (${icao}):**\n\`\`\`${formattedAtis}\`\`\``;
+    // 4. Xử lý hiển thị D-ATIS (Tách riêng, Gộp chung, hoặc Ẩn đi)
+    if (hasAtis) {
+      // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr (nội dung y hệt nhau)
+      if (atisData.arrival && atisData.departure && atisData.arrival === atisData.departure) {
+        const formatted = formatATISText(atisData.arrival);
+        replyContent += `\n📻 **D-ATIS (${icao}):**\n\`\`\`${formatted}\`\`\``;
+      } 
+      // Trường hợp 2: Tách biệt rõ ràng hoặc chỉ có 1 trong 2
+      else {
+        // Chỉ hiện Arrival nếu thực sự có dữ liệu
+        if (atisData.arrival) {
+          const formattedArr = formatATISText(atisData.arrival);
+          replyContent += `\n🛬 **Arrival ATIS (${icao}):**\n\`\`\`${formattedArr}\`\`\``;
+        }
+        
+        // Chỉ hiện Departure nếu thực sự có dữ liệu
+        if (atisData.departure) {
+          const formattedDep = formatATISText(atisData.departure);
+          replyContent += `\n🛫 **Departure ATIS (${icao}):**\n\`\`\`${formattedDep}\`\`\``;
+        }
+      }
     } else {
       replyContent += `\n⚠️ Hiện tại không có dữ liệu D-ATIS cho ${icao} (hoặc atis.guru đang cập nhật). Pilot vui lòng tự đọc METAR ở trên nhé!`;
     }
@@ -5867,100 +5975,136 @@ async function handleMetar(interaction) {
   }
 }
 
-// ===================== ACTIVE RUNWAY CALCULATOR =====================
+// ===================== ACTIVE RUNWAY CALCULATOR (GLOBAL) =====================
 async function handleRunway(interaction) {
-  const icao = interaction.options.getString('icao').toUpperCase();
-  await interaction.deferReply();
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply();
 
-  try {
-    // Dùng lại hàm fetchATIS hiện có của bạn để lấy METAR mới nhất
-    const atisData = await fetchATIS(icao);
-    if (!atisData || !atisData.metar) {
-      return await interaction.editReply({ content: `❌ Không lấy được dữ liệu METAR cho sân bay ${icao} để tính toán gió.` });
-    }
+  try {
+    // 1. Lấy METAR để tính gió
+    const atisData = await fetchATIS(icao);
+    if (!atisData || !atisData.metar) {
+      return await interaction.editReply({ content: `❌ Không lấy được dữ liệu METAR cho sân bay ${icao} để tính toán gió.` });
+    }
 
-    const metar = atisData.metar;
-    
-    // Tìm hướng gió và tốc độ gió trong METAR (VD: 25015G25KT, VRB02KT)
-    const windMatch = metar.match(/(VRB|\d{3})(\d{2,3})(?:G\d{2,3})?KT/);
-    if (!windMatch) {
-      return await interaction.editReply({ content: `❌ Không tìm thấy thông số gió hợp lệ trong METAR của ${icao}.\n\`METAR: ${metar}\`` });
-    }
+    const metar = atisData.metar;
+    
+    // Tìm hướng gió và tốc độ gió trong METAR (VD: 25015G25KT, VRB02KT)
+    const windMatch = metar.match(/(VRB|\d{3})(\d{2,3})(?:G\d{2,3})?KT/);
+    if (!windMatch) {
+      return await interaction.editReply({ content: `❌ Không tìm thấy thông số gió hợp lệ trong METAR của ${icao}.\n\`METAR: ${metar}\`` });
+    }
 
-    const windDirStr = windMatch[1];
-    const windSpeed = parseInt(windMatch[2], 10);
+    const windDirStr = windMatch[1];
+    const windSpeed = parseInt(windMatch[2], 10);
 
-    let embed = new EmbedBuilder()
-      .setTitle(`🛫 Active Runway Indicator - ${icao}`)
-      .setDescription(`Dựa trên METAR gần nhất:\n\`\`\`${metar}\`\`\``)
-      .setColor(0x3498db)
-      .setTimestamp();
+    let embed = new EmbedBuilder()
+      .setTitle(`🛫 Active Runway Indicator - ${icao}`)
+      .setDescription(`Dựa trên METAR gần nhất:\n\`\`\`${metar}\`\`\``)
+      .setColor(0x3498db)
+      .setTimestamp();
 
-    // Nếu gió đổi hướng liên tục (VRB) hoặc quá nhẹ (<3 KT)
-    if (windDirStr === 'VRB' || windSpeed < 3) {
-      embed.addFields({ name: '🌬️ Gió', value: 'Gió nhẹ hoặc đổi hướng liên tục (Calm/Variable).', inline: false });
-      embed.addFields({ name: '✅ Đề xuất', value: 'Có thể sử dụng đường băng tùy ý hoặc theo cấu hình tiêu chuẩn của ATC/Sân bay.', inline: false });
-      return await interaction.editReply({ embeds: [embed] });
-    }
+    // Nếu gió đổi hướng liên tục (VRB) hoặc quá nhẹ (<3 KT)
+    if (windDirStr === 'VRB' || windSpeed < 3) {
+      embed.addFields({ name: '🌬️ Gió', value: 'Gió nhẹ hoặc đổi hướng liên tục (Calm/Variable).', inline: false });
+      embed.addFields({ name: '✅ Đề xuất', value: 'Có thể sử dụng đường băng tùy ý hoặc theo quy trình tiêu chuẩn của ATC/Sân bay.', inline: false });
+      return await interaction.editReply({ embeds: [embed] });
+    }
 
-    const windDir = parseInt(windDirStr, 10);
-    embed.addFields({ name: '🌬️ Gió hiện tại', value: `Hướng: **${windDir}°** | Tốc độ: **${windSpeed} KT**`, inline: false });
+    const windDir = parseInt(windDirStr, 10);
+    embed.addFields({ name: '🌬️ Gió hiện tại', value: `Hướng: **${windDir}°** | Tốc độ: **${windSpeed} KT**`, inline: false });
 
-    // Database đường băng tĩnh (Bạn có thể thêm các sân bay khác tại đây)
-    const airportRunways = {
-      'VVTS': [{ id: '07', heading: 70 }, { id: '25', heading: 250 }],
-      'VVNB': [{ id: '11', heading: 110 }, { id: '29', heading: 290 }],
-      'VVDN': [{ id: '17', heading: 170 }, { id: '35', heading: 350 }],
-      'VVCR': [{ id: '02', heading: 20 }, { id: '20', heading: 200 }],
-      'VVPQ': [{ id: '10', heading: 100 }, { id: '28', heading: 280 }],
-      'VVCI': [{ id: '04', heading: 40 }, { id: '22', heading: 220 }],
-    };
+    // ==========================================
+    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TOÀN CẦU TỪ API
+    // ==========================================
+    let runways = null;
+    try {
+      const fetch = (await import('node-fetch')).default;
+      // Dùng CheckWX API để gọi thông tin cấu trúc của bất kỳ sân bay nào
+      const res = await fetch(`https://api.checkwx.com/station/${icao}`, {
+        headers: { 'X-API-Key': CHECKWX_API_KEY }
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        // Nếu API trả về dữ liệu và có danh sách runways
+        if (data && data.data && data.data.length > 0 && data.data[0].runways) {
+          runways = [];
+          data.data[0].runways.forEach(rw => {
+            // Tách tên đường băng (ident1, ident2) ra.
+            // VD: "07L" -> xóa bỏ chữ L -> còn "07" -> Ép kiểu số = 7 -> nhân 10 = 70 độ
+            if (rw.ident1) {
+              const num1 = parseInt(rw.ident1.replace(/\D/g, ''), 10);
+              if (!isNaN(num1)) runways.push({ id: rw.ident1, heading: num1 * 10 });
+            }
+            if (rw.ident2) {
+              const num2 = parseInt(rw.ident2.replace(/\D/g, ''), 10);
+              if (!isNaN(num2)) runways.push({ id: rw.ident2, heading: num2 * 10 });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Lỗi khi cào dữ liệu sân bay toàn cầu:', e);
+    }
 
-    const runways = airportRunways[icao];
-    
-    if (!runways) {
-      embed.addFields({ 
-        name: '⚠️ Lưu ý', 
-        value: `Sân bay **${icao}** chưa có dữ liệu đường băng trong hệ thống tính toán của bot. Tuy nhiên bạn có thể tự đối chiếu hướng gió **${windDir}°** với chart sân bay nhé.` 
-      });
-    } else {
-      let bestRunway = null;
-      let minDiff = 180;
+    // 3. Hệ thống dự phòng (Phòng hờ API sập hoặc sân bay quá hẻo lánh không có trên API)
+    if (!runways || runways.length === 0) {
+      const fallbackRunways = {
+        'VVTS': [{ id: '07', heading: 70 }, { id: '25', heading: 250 }],
+        'VVNB': [{ id: '11', heading: 110 }, { id: '29', heading: 290 }],
+        'VVDN': [{ id: '17', heading: 170 }, { id: '35', heading: 350 }],
+        'VVCR': [{ id: '02', heading: 20 }, { id: '20', heading: 200 }],
+        'VVPQ': [{ id: '10', heading: 100 }, { id: '28', heading: 280 }],
+        'VVCI': [{ id: '04', heading: 40 }, { id: '22', heading: 220 }],
+      };
+      runways = fallbackRunways[icao];
+    }
 
-      // Tìm đường băng đón gió trực diện nhất (Headwind)
-      runways.forEach(rw => {
-        let diff = Math.abs(windDir - rw.heading);
-        if (diff > 180) diff = 360 - diff; 
-        
-        if (diff < minDiff) {
-          minDiff = diff;
-          bestRunway = rw;
-        }
-      });
+    // 4. Tính toán đường băng thuận lợi nhất
+    if (!runways || runways.length === 0) {
+      embed.addFields({ 
+        name: '⚠️ Lưu ý', 
+        value: `Sân bay **${icao}** quá lạ, không có dữ liệu đường băng trong hệ thống API toàn cầu. Tuy nhiên bạn có thể tự đối chiếu hướng gió **${windDir}°** với chart sân bay nhé.` 
+      });
+    } else {
+      let bestRunway = null;
+      let minDiff = 180;
 
-      // Tính Component (Sử dụng lượng giác cơ bản)
-      const angleRad = minDiff * (Math.PI / 180);
-      const headwind = Math.abs(Math.round(Math.cos(angleRad) * windSpeed));
-      const crosswind = Math.abs(Math.round(Math.sin(angleRad) * windSpeed));
+      // Tìm đường băng đón gió trực diện nhất (Headwind)
+      runways.forEach(rw => {
+        let diff = Math.abs(windDir - rw.heading);
+        if (diff > 180) diff = 360 - diff; 
+        
+        if (diff < minDiff) {
+          minDiff = diff;
+          bestRunway = rw;
+        }
+      });
 
-      embed.addFields({
-        name: '🎯 Đường băng thuận lợi nhất',
-        value: `**Runway ${bestRunway.id}** (Lệch gió so với tâm đường băng: ${minDiff}°)`,
-        inline: false
-      });
-      embed.addFields({
-        name: '✈️ Phân tích thành phần gió',
-        value: `Gió ngược (Headwind): **${headwind} KT**\nGió ngang (Crosswind): **${crosswind} KT**`,
-        inline: false
-      });
-      embed.setFooter({ text: 'Lưu ý: Luôn tuân theo huấn lệnh của ATC (nếu có) do ATC có thể áp dụng quy trình ưu tiên đường băng (Preferential Runway).' });
-    }
+      // Tính Component (Dùng lượng giác để bóc tách gió ngược và gió ngang)
+      const angleRad = minDiff * (Math.PI / 180);
+      const headwind = Math.abs(Math.round(Math.cos(angleRad) * windSpeed));
+      const crosswind = Math.abs(Math.round(Math.sin(angleRad) * windSpeed));
 
-    await interaction.editReply({ embeds: [embed] });
-  } catch (error) {
-    console.error('Runway calc error:', error);
-    await interaction.editReply({ content: '❌ Có lỗi xảy ra khi tính toán đường băng.' });
-  }
+      embed.addFields({
+        name: '🎯 Đường băng thuận lợi nhất',
+        value: `**Runway ${bestRunway.id}** (Lệch gió so với tâm đường băng: ${minDiff}°)`,
+        inline: false
+      });
+      embed.addFields({
+        name: '✈️ Phân tích thành phần gió',
+        value: `Gió ngược (Headwind): **${headwind} KT**\nGió ngang (Crosswind): **${crosswind} KT**`,
+        inline: false
+      });
+      embed.setFooter({ text: 'Lưu ý: Luôn tuân theo huấn lệnh của ATC (nếu có) do ATC có thể áp dụng Preferential Runway.' });
+    }
+
+    await interaction.editReply({ embeds: [embed] });
+  } catch (error) {
+    console.error('Runway calc error:', error);
+    await interaction.editReply({ content: '❌ Có lỗi xảy ra khi tính toán đường băng.' });
+  }
 }
 
 // ===================== TAF DECODER (CHECKWX API) =====================
@@ -7386,6 +7530,28 @@ async function handleClearQueue(interaction) {
         await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
     }
 }
+
+async function handleSetupVatsimVerify(interaction) {
+  const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+  if (!hasAdmin && interaction.user.id !== OWNER_ID) {
+    return interaction.reply({ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle('🔗 LIÊN KẾT TÀI KHOẢN VATSIM')
+    .setDescription('Nhấn vào nút bên dưới và nhập **VATSIM ID (CID)** của bạn để hệ thống kiểm tra dữ liệu bay và tự động cấp Role.\n\n✈️ **VATSIM Pilot:** Yêu cầu bay trên 10 giờ.\n📡 **VATSIM ATC:** Yêu cầu Rating từ S1 trở lên (Không tính OBS).')
+    .setColor(0x3498db);
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('btn_verify_pilot').setLabel('Xin Role Pilot').setStyle(ButtonStyle.Primary).setEmoji('✈️'),
+    new ButtonBuilder().setCustomId('btn_verify_atc').setLabel('Xin Role ATC').setStyle(ButtonStyle.Success).setEmoji('📡')
+  );
+
+  await interaction.channel.send({ embeds: [embed], components: [row] });
+  await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
+}
+
+
 
 // ===================== LOGIN =====================
 client.login(TOKEN);
