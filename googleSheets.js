@@ -7811,7 +7811,7 @@ if (BOT2_URL) {
     setInterval(async () => {
         try {
             const response = await fetch(BOT2_URL);
-            console.log(`[Ping Chéo] Đã chọc Bot 2, Status: ${response.status}`);
+            console.log(`[Ping Chéo] Đã chọc Bo t 2, Status: ${response.status}`);
         } catch (error) {
             console.error(`[Ping Chéo] Lỗi khi chọc Bot 2:`, error.message);
         }
