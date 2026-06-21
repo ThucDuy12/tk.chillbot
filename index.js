@@ -7791,3 +7791,30 @@ async function handleSetupVatsimVerify(interaction) {
   await interaction.channel.send({ embeds: [embed], components: [row] });
   await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
 }
+
+// ===================== LOGIN =====================
+client.login(TOKEN);
+
+// === WEB SERVER & PING CHÉO ===
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot 1 is alive!');
+}).listen(port, () => {
+    console.log(`HTTP server running on port ${port}`);
+});
+
+const BOT2_URL = process.env.BOT2_URL; 
+
+if (BOT2_URL) {
+    setInterval(async () => {
+        try {
+            const response = await fetch(BOT2_URL);
+            console.log(`[Ping Chéo] Đã chọc Bot 2, Status: ${response.status}`);
+        } catch (error) {
+            console.error(`[Ping Chéo] Lỗi khi chọc Bot 2:`, error.message);
+        }
+    }, 14 * 60 * 1000);
+} else {
+    console.log("⚠️ Chưa cài BOT2_URL, tính năng Ping chéo đang tắt.");
+}
