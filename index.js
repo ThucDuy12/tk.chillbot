@@ -46,21 +46,23 @@ function downloadBuffer(url) {
 }
 
 const {
-  Client,
-  GatewayIntentBits,
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-  StringSelectMenuBuilder,
-  ChannelType,
-  PermissionsBitField,
-  AttachmentBuilder,
-  Partials,                       
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  StringSelectMenuBuilder,
+  ChannelType,
+  PermissionsBitField,
+  AttachmentBuilder,
+  Partials,                        
   PermissionFlagsBits,
+  ContextMenuCommandBuilder, // THÊM CÁI NÀY
+  ApplicationCommandType     // THÊM CÁI NÀY
 } = require('discord.js');
 
 const { SlashCommandBuilder } = require('@discordjs/builders');
@@ -3255,6 +3257,9 @@ client.once('ready', async () => {
       .setName('setup_vatsim_verify')
       .setDescription('Tạo bảng xác thực CID nhận role VATSIM (Admin only)')
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    new ContextMenuCommandBuilder()
+      .setName('Tạo Quote')
+      .setType(ApplicationCommandType.Message),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3560,6 +3565,26 @@ client.on('guildMemberAdd', async (member) => {
 
 // ===================== INTERACTIONS =====================
 client.on('interactionCreate', async (interaction) => {
+  if (interaction.isMessageContextMenuCommand()) {
+      if (interaction.commandName === 'Tạo Quote') {
+          await interaction.deferReply();
+          try {
+              const targetMessage = interaction.targetMessage;
+              if (!targetMessage.content && targetMessage.attachments.size === 0) {
+                  return interaction.editReply('❌ Tin nhắn này trống không, không thể tạo Quote!');
+              }
+
+              const buffer = await generateQuoteImage(targetMessage);
+              const attachment = new AttachmentBuilder(buffer, { name: 'tk_quote.png' });
+              
+              await interaction.editReply({ files: [attachment] });
+          } catch (err) {
+              console.error('Lỗi tạo Quote:', err);
+              await interaction.editReply('❌ Đã có lỗi xảy ra khi vẽ ảnh Quote.');
+          }
+      }
+      return;
+  }
   // XỬ LÝ KHI NGƯỜI DÙNG CHỌN 1 BÀI TỪ MENU
   if (interaction.isStringSelectMenu() && interaction.customId === 'select_song') {
       const [searchId, index] = interaction.values[0].split('_');
@@ -3608,6 +3633,7 @@ client.on('interactionCreate', async (interaction) => {
       }
       setTimeout(() => temporarySearchResults.delete(searchId), 60000);
   }
+
   const isChatCmd = typeof interaction.isChatInputCommand === 'function'
     ? interaction.isChatInputCommand()
     : (typeof interaction.isCommand === 'function' ? interaction.isCommand() : false);
@@ -4116,6 +4142,30 @@ client.on('messageCreate', async (message) => {
       return; // Dừng việc xử lý các lệnh khác
     }
   }
+  // ================= TÍNH NĂNG TẠO QUOTE KHI REPLY + PING BOT =================
+  const isMentionedExplicitly = message.content.includes(`<@${client.user.id}>`) || message.content.includes(`<@!${client.user.id}>`);
+  
+  if (isMentionedExplicitly && message.reference && message.content.toLowerCase().includes('quote')) {
+      try {
+          // Lấy tin nhắn gốc mà người dùng đang Reply
+          const targetMessage = await message.channel.messages.fetch(message.reference.messageId);
+          
+          if (!targetMessage.content && targetMessage.attachments.size === 0) {
+              return message.reply('❌ Tin nhắn bạn reply không có nội dung chữ để tạo quote!');
+          }
+
+          const processingMsg = await message.reply('📸 Đang chụp ảnh trích dẫn, chờ xíu nha...');
+          
+          const buffer = await generateQuoteImage(targetMessage);
+          const attachment = new AttachmentBuilder(buffer, { name: 'tk_quote.png' });
+          
+          await processingMsg.edit({ content: '', files: [attachment] });
+      } catch (err) {
+          console.error('Lỗi khi tạo quote từ reply:', err);
+          message.reply('❌ Lỗi khi vẽ ảnh quote!');
+      }
+      return; // Dừng lại ở đây, không chuyển đoạn chat này cho Gemini đọc nữa
+  }
 
   // ================= TÍNH NĂNG 1: RÀNG BUỘC AI CHAT =================
   // Chỉ nhận diện là ping khi tag thẳng ID bot, không tính việc reply tin nhắn thông thường
@@ -4153,6 +4203,7 @@ client.on('messageCreate', async (message) => {
     }
     await message.channel.send({ embeds: [embed] });
   }
+
 });
 
 // ===================== /TIME =====================
@@ -7751,6 +7802,100 @@ async function handleSetupVatsimVerify(interaction) {
   await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
 }
 
+// ===================== QUOTE GENERATOR (CANVAS) =====================
+async function generateQuoteImage(targetMessage) {
+    const canvas = createCanvas(1200, 630);
+    const ctx = canvas.getContext('2d');
+
+    // 1. Nền đen
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 2. Tải và vẽ Avatar bên trái
+    try {
+        const avatarUrl = targetMessage.author.displayAvatarURL({ extension: 'png', size: 1024 });
+        const avatar = await loadImage(avatarUrl);
+        
+        // Căn chỉnh ảnh avatar chiếm nửa bên trái màn hình
+        const scale = Math.max(canvas.height / avatar.height, (canvas.width * 0.6) / avatar.width);
+        const w = avatar.width * scale;
+        const h = avatar.height * scale;
+        ctx.drawImage(avatar, 0, (canvas.height - h) / 2, w, h);
+    } catch (e) {
+        console.error("Không tải được avatar cho quote:", e);
+    }
+
+    // 3. Phủ dải Gradient đen từ trái sang phải để tạo hiệu ứng mờ dần (Fade to black)
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width * 0.7, 0);
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.1)');
+    gradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.8)');
+    gradient.addColorStop(0.6, 'rgba(0, 0, 0, 1)');
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(canvas.width * 0.6, 0, canvas.width * 0.4, canvas.height); // Nửa phải đen đặc
+
+    // 4. Thiết lập chữ và Word Wrap
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    
+    let textContent = targetMessage.cleanContent || '';
+    if (!textContent && targetMessage.attachments.size > 0) textContent = "[Đã gửi một ảnh/tệp]";
+    if (textContent.length > 200) textContent = textContent.substring(0, 200) + '...';
+
+    const text = `"${textContent}"`;
+    const displayName = `- ${targetMessage.member?.displayName || targetMessage.author.globalName || targetMessage.author.username}`;
+    const username = `@${targetMessage.author.username}`;
+
+    // Hàm tự động xuống dòng (Word wrap)
+    function wrapText(context, text, x, y, maxWidth, lineHeight) {
+        const words = text.split(' ');
+        let line = '';
+        let lines = [];
+
+        for(let n = 0; n < words.length; n++) {
+            const testLine = line + words[n] + ' ';
+            const metrics = context.measureText(testLine);
+            if (metrics.width > maxWidth && n > 0) {
+                lines.push(line);
+                line = words[n] + ' ';
+            } else {
+                line = testLine;
+            }
+        }
+        lines.push(line);
+        
+        // Căn giữa theo cụm văn bản
+        let currentY = y - ((lines.length - 1) * lineHeight) / 2; 
+        for(let i = 0; i < lines.length; i++) {
+            context.fillText(lines[i], x, currentY);
+            currentY += lineHeight;
+        }
+        return currentY; 
+    }
+
+    // Vẽ Nội dung tin nhắn
+    ctx.font = 'italic 45px sans-serif'; 
+    let endY = wrapText(ctx, text, canvas.width * 0.7, canvas.height / 2 - 40, 500, 60);
+
+    // Vẽ Tên hiển thị
+    ctx.font = 'bold 35px sans-serif';
+    ctx.fillText(displayName, canvas.width * 0.7, endY + 30);
+
+    // Vẽ Username
+    ctx.font = '25px sans-serif';
+    ctx.fillStyle = '#aaaaaa';
+    ctx.fillText(username, canvas.width * 0.7, endY + 70);
+
+    // Watermark nhỏ góc phải dưới
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#555555';
+    ctx.textAlign = 'right';
+    ctx.fillText('Made by tk.chill', canvas.width - 20, canvas.height - 20);
+
+    return canvas.toBuffer('image/png');
+}
 
 // ===================== LOGIN =====================
 client.login(TOKEN);
