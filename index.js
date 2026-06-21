@@ -7801,7 +7801,7 @@ async function handleSetupVatsimVerify(interaction) {
   await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
 }
 
-// ===================== QUOTE GENERATOR (CANVAS - SIÊU MƯỢT) =====================
+// ===================== QUOTE GENERATOR (CANVAS - SIÊU MƯỢT, CHỐNG SẬP) =====================
 async function generateQuoteImage(targetMessage) {
     const canvas = createCanvas(1200, 630);
     const ctx = canvas.getContext('2d');
@@ -7810,24 +7810,36 @@ async function generateQuoteImage(targetMessage) {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 2. Tải và vẽ Avatar (DÙNG FETCH TẢI BUFFER CHỐNG TREO CANVAS)
+    // 2. Tải và vẽ Avatar (TỐI ƯU HÓA: Bỏ qua lỗi nếu tải chậm)
     try {
-        const avatarUrl = targetMessage.author.displayAvatarURL({ extension: 'png', size: 1024 });
-        
-        // Tải ảnh vật lý về trước để Canvas không bị đơ
         const fetch = (await import('node-fetch')).default;
-        const res = await fetch(avatarUrl);
-        const arrayBuffer = await res.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const avatar = await loadImage(buffer);
         
-        // Căn chỉnh ảnh avatar chiếm nửa bên trái màn hình
-        const scale = Math.max(canvas.height / avatar.height, (canvas.width * 0.55) / avatar.width);
-        const w = avatar.width * scale;
-        const h = avatar.height * scale;
-        ctx.drawImage(avatar, 0, (canvas.height - h) / 2, w, h);
+        // Cố tình lấy ảnh nhỏ (size 512) để tải nhanh hơn, tránh lỗi Abort
+        let avatarUrl = targetMessage.author.displayAvatarURL({ extension: 'png', forceStatic: true, size: 512 });
+        
+        // Ép thời gian chờ (Timeout) là 2.5 giây. Nếu quá 2.5s không tải được thì nhảy xuống catch
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+        const res = await fetch(avatarUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+            const arrayBuffer = await res.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const avatar = await loadImage(buffer);
+            
+            // Vẽ avatar chiếm 55% màn hình bên trái
+            const scale = Math.max(canvas.height / avatar.height, (canvas.width * 0.55) / avatar.width);
+            const w = avatar.width * scale;
+            const h = avatar.height * scale;
+            ctx.drawImage(avatar, 0, (canvas.height - h) / 2, w, h);
+        }
     } catch (e) {
-        console.error("Không tải được avatar cho quote:", e);
+        // Nếu tải avatar thất bại (mạng lag/Discord chặn), vẽ một cái nền xám làm avatar tạm
+        console.warn("Bỏ qua tải avatar do mạng chậm, dùng avatar mặc định.");
+        ctx.fillStyle = '#333333';
+        ctx.fillRect(0, 0, canvas.width * 0.55, canvas.height);
     }
 
     // 3. Phủ dải Gradient đen từ trái sang phải
@@ -7839,7 +7851,7 @@ async function generateQuoteImage(targetMessage) {
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#000000';
-    ctx.fillRect(canvas.width * 0.55, 0, canvas.width * 0.45, canvas.height); // Nửa phải đen đặc
+    ctx.fillRect(canvas.width * 0.55, 0, canvas.width * 0.45, canvas.height); 
 
     // 4. Thiết lập chữ và Word Wrap
     ctx.fillStyle = '#ffffff';
@@ -7871,30 +7883,26 @@ async function generateQuoteImage(targetMessage) {
         }
         lines.push(line.trim());
         
-        // Căn giữa theo cụm văn bản
         let currentY = y - ((lines.length - 1) * lineHeight) / 2; 
         for(let i = 0; i < lines.length; i++) {
             context.fillText(lines[i], x, currentY);
             currentY += lineHeight;
         }
-        return currentY + ((lines.length - 1) * lineHeight); // Trả về tọa độ Y cuối cùng
+        return currentY + ((lines.length - 1) * lineHeight); 
     }
 
-    // Vẽ Nội dung tin nhắn
-    ctx.font = 'italic 45px sans-serif'; 
-    let endY = wrapText(ctx, text, canvas.width * 0.75, canvas.height / 2 - 40, 500, 60);
+    // Mẹo nhỏ: Dùng Font chữ mặc định của hệ thống để không bị lỗi ô vuông
+    ctx.font = 'italic 45px "Segoe UI", Arial, sans-serif'; 
+    let endY = wrapText(ctx, text, canvas.width * 0.75, canvas.height / 2 - 40, 480, 60);
 
-    // Vẽ Tên hiển thị
-    ctx.font = 'bold 35px sans-serif';
+    ctx.font = 'bold 35px "Segoe UI", Arial, sans-serif';
     ctx.fillText(displayName, canvas.width * 0.75, endY + 20);
 
-    // Vẽ Username
-    ctx.font = '25px sans-serif';
+    ctx.font = '25px "Segoe UI", Arial, sans-serif';
     ctx.fillStyle = '#aaaaaa';
     ctx.fillText(username, canvas.width * 0.75, endY + 60);
 
-    // Watermark nhỏ góc phải dưới
-    ctx.font = '18px sans-serif';
+    ctx.font = '18px "Segoe UI", Arial, sans-serif';
     ctx.fillStyle = '#555555';
     ctx.textAlign = 'right';
     ctx.fillText('Made by tk.chill', canvas.width - 20, canvas.height - 20);
