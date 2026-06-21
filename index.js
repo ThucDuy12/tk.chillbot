@@ -60,9 +60,7 @@ const {
   PermissionsBitField,
   AttachmentBuilder,
   Partials,                        
-  PermissionFlagsBits,
-  ContextMenuCommandBuilder, // THÊM CÁI NÀY
-  ApplicationCommandType     // THÊM CÁI NÀY
+  PermissionFlagsBits
 } = require('discord.js');
 
 const { SlashCommandBuilder } = require('@discordjs/builders');
@@ -3257,9 +3255,6 @@ client.once('ready', async () => {
       .setName('setup_vatsim_verify')
       .setDescription('Tạo bảng xác thực CID nhận role VATSIM (Admin only)')
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
-    new ContextMenuCommandBuilder()
-      .setName('Tạo Quote')
-      .setType(ApplicationCommandType.Message),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3565,26 +3560,6 @@ client.on('guildMemberAdd', async (member) => {
 
 // ===================== INTERACTIONS =====================
 client.on('interactionCreate', async (interaction) => {
-  if (interaction.isMessageContextMenuCommand()) {
-      if (interaction.commandName === 'Tạo Quote') {
-          await interaction.deferReply();
-          try {
-              const targetMessage = interaction.targetMessage;
-              if (!targetMessage.content && targetMessage.attachments.size === 0) {
-                  return interaction.editReply('❌ Tin nhắn này trống không, không thể tạo Quote!');
-              }
-
-              const buffer = await generateQuoteImage(targetMessage);
-              const attachment = new AttachmentBuilder(buffer, { name: 'tk_quote.png' });
-              
-              await interaction.editReply({ files: [attachment] });
-          } catch (err) {
-              console.error('Lỗi tạo Quote:', err);
-              await interaction.editReply('❌ Đã có lỗi xảy ra khi vẽ ảnh Quote.');
-          }
-      }
-      return;
-  }
   // XỬ LÝ KHI NGƯỜI DÙNG CHỌN 1 BÀI TỪ MENU
   if (interaction.isStringSelectMenu() && interaction.customId === 'select_song') {
       const [searchId, index] = interaction.values[0].split('_');
@@ -4143,53 +4118,6 @@ client.on('messageCreate', async (message) => {
 
   // KHAI BÁO 1 LẦN DUY NHẤT Ở ĐÂY ĐỂ DÙNG CHUNG CHO CẢ QUOTE LẪN AI CHAT
   const isMentionedExplicitly = message.content.includes(`<@${client.user.id}>`) || message.content.includes(`<@!${client.user.id}>`);
-
-  // ================= TÍNH NĂNG TẠO QUOTE KHI REPLY + PING BOT (CHẠY NGẦM) =================
-  if (isMentionedExplicitly && message.reference && message.content.toLowerCase().includes('quote')) {
-      try {
-          // Lấy tin nhắn gốc
-          const targetMessage = await message.channel.messages.fetch(message.reference.messageId);
-          
-          if (!targetMessage.content && targetMessage.attachments.size === 0) {
-              return message.reply('❌ Tin nhắn bạn reply không có nội dung chữ để tạo quote!');
-          }
-
-          // 1. Phản hồi ngay lập tức để Discord không báo lỗi Timeout
-          const processingMsg = await message.reply('📸 Đang đưa dữ liệu vào buồng tối xử lý ngầm. Bạn cứ chat bình thường nhé, lát có ảnh bot tự gửi lên...');
-          
-          // =========================================================
-          // 2. TÁCH LUỒNG (BACKGROUND JOB)
-          // Bọc quá trình render ảnh vào một hàm tự gọi (IIFE) và KHÔNG dùng 'await' ở ngoài.
-          // Nghĩa là Bot ném cục việc này ra một góc cho Nodejs tự làm, còn Bot đi làm việc khác.
-          // =========================================================
-          (async () => {
-              try {
-                  const buffer = await generateQuoteImage(targetMessage);
-                  const attachment = new AttachmentBuilder(buffer, { name: 'tk_quote.png' });
-                  
-                  // 3. Gửi hẳn một tin nhắn MỚI (Tránh dùng edit vì Discord rất hay cúp cầu dao khi edit file nặng)
-                  await message.channel.send({ 
-                      content: `✨ <@${message.author.id}>, tuyệt tác Quote của bạn đã ra lò:`, 
-                      files: [attachment],
-                      reply: { messageReference: targetMessage.id } // Mũi tên Reply trỏ thẳng vào tin gốc cho ngầu
-                  });
-
-                  // 4. Quăng xong ảnh rồi thì xóa cái tin báo "đang chờ" đi cho sạch rác
-                  await processingMsg.delete().catch(()=>{});
-
-              } catch (err) {
-                  console.error('Lỗi khi chạy ngầm tạo quote:', err);
-                  await processingMsg.edit('❌ Buồng tối bị lỗi! Rửa ảnh thất bại do server quá tải.').catch(()=>{});
-              }
-          })(); // <-- Dấu ngoặc này để hàm tự kích hoạt chạy ngầm
-
-      } catch (err) {
-          console.error('Lỗi lấy tin nhắn gốc:', err);
-          message.reply('❌ Lỗi không xác định được tin nhắn gốc!');
-      }
-      
-      return; // Chặn không cho AI Chat (Gemini) nhảy vào giành giật tin nhắn
-  }
 
   // ================= TÍNH NĂNG 1: RÀNG BUỘC AI CHAT =================
   if (message.channel.id === AI_CHANNEL_ID) {
@@ -7820,114 +7748,6 @@ async function handleSetupVatsimVerify(interaction) {
   await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
 }
 
-// ===================== QUOTE GENERATOR (CANVAS - SIÊU MƯỢT, CHỐNG SẬP) =====================
-async function generateQuoteImage(targetMessage) {
-    const canvas = createCanvas(1200, 630);
-    const ctx = canvas.getContext('2d');
-
-    // 1. Nền đen
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // 2. Tải và vẽ Avatar (TỐI ƯU HÓA: Bỏ qua lỗi nếu tải chậm)
-    try {
-        const fetch = (await import('node-fetch')).default;
-        
-        // Cố tình lấy ảnh nhỏ (size 512) để tải nhanh hơn, tránh lỗi Abort
-        let avatarUrl = targetMessage.author.displayAvatarURL({ extension: 'png', forceStatic: true, size: 512 });
-        
-        // Ép thời gian chờ (Timeout) là 2.5 giây. Nếu quá 2.5s không tải được thì nhảy xuống catch
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2500);
-
-        const res = await fetch(avatarUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-            const arrayBuffer = await res.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
-            const avatar = await loadImage(buffer);
-            
-            // Vẽ avatar chiếm 55% màn hình bên trái
-            const scale = Math.max(canvas.height / avatar.height, (canvas.width * 0.55) / avatar.width);
-            const w = avatar.width * scale;
-            const h = avatar.height * scale;
-            ctx.drawImage(avatar, 0, (canvas.height - h) / 2, w, h);
-        }
-    } catch (e) {
-        // Nếu tải avatar thất bại (mạng lag/Discord chặn), vẽ một cái nền xám làm avatar tạm
-        console.warn("Bỏ qua tải avatar do mạng chậm, dùng avatar mặc định.");
-        ctx.fillStyle = '#333333';
-        ctx.fillRect(0, 0, canvas.width * 0.55, canvas.height);
-    }
-
-    // 3. Phủ dải Gradient đen từ trái sang phải
-    const gradient = ctx.createLinearGradient(0, 0, canvas.width * 0.7, 0);
-    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.1)');
-    gradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.8)');
-    gradient.addColorStop(0.55, 'rgba(0, 0, 0, 1)');
-    
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(canvas.width * 0.55, 0, canvas.width * 0.45, canvas.height); 
-
-    // 4. Thiết lập chữ và Word Wrap
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    
-    let textContent = targetMessage.cleanContent || '';
-    if (!textContent && targetMessage.attachments.size > 0) textContent = "[Đã gửi một ảnh/tệp]";
-    if (textContent.length > 200) textContent = textContent.substring(0, 200) + '...';
-
-    const text = `"${textContent}"`;
-    const displayName = `- ${targetMessage.member?.displayName || targetMessage.author.globalName || targetMessage.author.username}`;
-    const username = `@${targetMessage.author.username}`;
-
-    // Hàm tự động xuống dòng (Word wrap)
-    function wrapText(context, text, x, y, maxWidth, lineHeight) {
-        const words = text.split(' ');
-        let line = '';
-        let lines = [];
-
-        for(let n = 0; n < words.length; n++) {
-            const testLine = line + words[n] + ' ';
-            const metrics = context.measureText(testLine);
-            if (metrics.width > maxWidth && n > 0) {
-                lines.push(line.trim());
-                line = words[n] + ' ';
-            } else {
-                line = testLine;
-            }
-        }
-        lines.push(line.trim());
-        
-        let currentY = y - ((lines.length - 1) * lineHeight) / 2; 
-        for(let i = 0; i < lines.length; i++) {
-            context.fillText(lines[i], x, currentY);
-            currentY += lineHeight;
-        }
-        return currentY + ((lines.length - 1) * lineHeight); 
-    }
-
-    // Mẹo nhỏ: Dùng Font chữ mặc định của hệ thống để không bị lỗi ô vuông
-    ctx.font = 'italic 45px "Segoe UI", Arial, sans-serif'; 
-    let endY = wrapText(ctx, text, canvas.width * 0.75, canvas.height / 2 - 40, 480, 60);
-
-    ctx.font = 'bold 35px "Segoe UI", Arial, sans-serif';
-    ctx.fillText(displayName, canvas.width * 0.75, endY + 20);
-
-    ctx.font = '25px "Segoe UI", Arial, sans-serif';
-    ctx.fillStyle = '#aaaaaa';
-    ctx.fillText(username, canvas.width * 0.75, endY + 60);
-
-    ctx.font = '18px "Segoe UI", Arial, sans-serif';
-    ctx.fillStyle = '#555555';
-    ctx.textAlign = 'right';
-    ctx.fillText('Made by tk.chill', canvas.width - 20, canvas.height - 20);
-
-    return canvas.toBuffer('image/png');
-}
 
 // ===================== LOGIN =====================
 client.login(TOKEN);
