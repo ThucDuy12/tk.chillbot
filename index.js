@@ -8,8 +8,9 @@ const {
   initGoogleSheets, loadControllerLeaderboard, loadPilotLeaderboard, 
   saveControllerLeaderboard, savePilotLeaderboard, loadPendingUsersSheet, 
   savePendingUsersSheet, loadSimbriefUsersSheet, saveSimbriefUsersSheet,
-  loadProfilesSheet,  // <-- Thêm vào
-  saveProfilesSheet   // <-- Thêm vào
+  loadProfilesSheet, saveProfilesSheet,
+  // Thêm 2 cái này vào:
+  loadVatsimLinksSheet, saveVatsimLinksSheet 
 } = require('./googleSheets');
 const { createCanvas, loadImage, GlobalFonts } = require('canvas');
 const fetch = require('node-fetch'); // Thêm nếu chưa có
@@ -100,6 +101,10 @@ const ACDM_CHANNEL_ID = process.env.ACDM_CHANNEL_ID || '1503763584105058434'; 
 const STATS_TOTAL_ID = process.env.STATS_TOTAL_ID || '1513738193986388140';
 const STATS_HUMAN_ID = process.env.STATS_HUMAN_ID || '1513738397938618508';
 const STATS_BOT_ID = process.env.STATS_BOT_ID || '1513738533188272218';
+
+// ===================== VATSIM VERIFY DATA =====================
+const pendingVerifyDMs = new Map(); // Lưu trạng thái user đang nhắn DM
+let vatsimLinksCache = {}; // Cache của sổ đỏ CID
 
 // ===================== VATSEA CONFIG =====================
 const STATSIM_API_KEY = process.env.STATSIM_API_KEY || '564eNsuJE8wTQw1hAZKGwHicOyVbmucoe3tZujdd';
@@ -3045,6 +3050,14 @@ client.once('ready', async () => {
     console.error('Lỗi nạp lịch thông báo:', e);
   }
 
+  // Load sổ đỏ CID từ Google Sheets
+  try {
+    if (typeof loadVatsimLinksSheet === 'function') {
+      vatsimLinksCache = await loadVatsimLinksSheet();
+      console.log(`✅ Đã tải ${Object.keys(vatsimLinksCache).length} liên kết VATSIM từ Google Sheets.`);
+    }
+  } catch (err) { console.error('Lỗi tải Vatsim Links:', err); }
+
   // Kiểm tra ngay khi khởi động
   setTimeout(() => {
     checkAndSendMonthlyAwards();
@@ -3698,7 +3711,6 @@ client.on('interactionCreate', async (interaction) => {
         case 'queue':
           await handleQueue(interaction);
           break;
-        // THÊM ĐOẠN NÀY VÀO DƯỚI LỆNH QUEUE:
         case 'clear':
           await handleClearQueue(interaction);
           break;
@@ -3976,6 +3988,104 @@ client.on('messageCreate', async (message) => {
 
   const userId = message.author.id;
   if (bans.users[userId] && bans.users[userId].endTime > Date.now()) return;
+
+  // ================= TÍNH NĂNG ĐỌC ẢNH & XÁC THỰC VATSIM TRONG DM =================
+  if (!message.guild && pendingVerifyDMs.has(message.author.id)) {
+      const verifySession = pendingVerifyDMs.get(message.author.id);
+      
+      // Nếu quá 5 phút thì hủy
+      if (Date.now() > verifySession.expires) {
+          pendingVerifyDMs.delete(message.author.id);
+          return message.reply('❌ Phiên xác thực của bạn đã hết hạn (quá 5 phút). Vui lòng quay lại Server bấm nút lại từ đầu.');
+      }
+
+      if (message.attachments.size === 0) {
+          return message.reply('❌ Bạn chưa đính kèm ảnh chụp màn hình profile VATSIM!');
+      }
+
+      // Lấy CID user gõ
+      const cidStr = message.content.replace(/[^0-9]/g, '');
+      const userCid = parseInt(cidStr);
+
+      if (isNaN(userCid) || cidStr.length < 5) {
+          return message.reply('❌ Vui lòng gõ mã CID của bạn kèm theo bức ảnh trong cùng một tin nhắn!');
+      }
+
+      const processingMsg = await message.reply('⏳ Đang quét bức ảnh của bạn...');
+
+      try {
+          // 1. CHỐNG TRỘM: Kiểm tra Sổ đỏ Google Sheets trước
+          if (vatsimLinksCache[message.author.id] && vatsimLinksCache[message.author.id] !== userCid) {
+              return processingMsg.edit(`❌ Bạn đã liên kết với CID **${vatsimLinksCache[message.author.id]}** rồi. Mỗi tài khoản Discord chỉ được 1 CID!`);
+          }
+          if (Object.values(vatsimLinksCache).includes(userCid) && vatsimLinksCache[message.author.id] !== userCid) {
+              return processingMsg.edit(`❌ CID **${userCid}** đã được một người khác trong Server sử dụng. Nếu bạn bị giả mạo, hãy báo Admin.`);
+          }
+
+          // 2. Tải ảnh và kêu GEMINI đọc chữ trong ảnh (OCR)
+          const attachment = message.attachments.first();
+          if (!attachment.contentType.startsWith('image/')) return processingMsg.edit('❌ File đính kèm không phải là hình ảnh.');
+
+          const imgBuffer = await downloadBuffer(attachment.url);
+          const base64Image = imgBuffer.toString('base64');
+
+          const prompt = "Đây là ảnh chụp màn hình hồ sơ VATSIM. Hãy tìm mã số CID (gồm 6 hoặc 7 chữ số) trong bức ảnh này. Chỉ trả lời lại bằng các con số bạn tìm thấy, không nói gì thêm. Nếu không thấy số nào, hãy trả lời là NOT_FOUND.";
+          const imagePart = { inlineData: { data: base64Image, mimeType: attachment.contentType } };
+
+          const aiResult = await geminiModel.generateContent([prompt, imagePart]);
+          const aiExtractedText = aiResult.response.text().trim();
+          const aiCid = parseInt(aiExtractedText.replace(/[^0-9]/g, ''));
+
+          // 3. ĐỐI CHIẾU ẢNH VÀ CHỮ
+          if (isNaN(aiCid) || aiCid !== userCid) {
+              return processingMsg.edit(`❌ **Xác thực thất bại!**\nBot quét được CID trong ảnh là: \`${aiExtractedText}\` nhưng bạn lại nhập là \`${userCid}\`. Ảnh không khớp hoặc bị mờ. Vui lòng thử lại!`);
+          }
+
+          // 4. KIỂM TRA VATSIM API NHƯ CŨ
+          await processingMsg.edit(`✅ BOT xác nhận ảnh hợp lệ! Đang kéo dữ liệu từ hệ thống VATSIM...`);
+          const stats = await fetchVatsimStatsById(userCid);
+          
+          if (!stats) return processingMsg.edit(`❌ Không tìm thấy thông tin trên VATSIM cho CID **${userCid}**.`);
+          if (stats.rating === 0) return processingMsg.edit(`❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.`);
+
+          // 5. CẤP ROLE TRONG SERVER
+          const guild = await client.guilds.fetch(verifySession.guildId);
+          const member = await guild.members.fetch(message.author.id);
+          let success = false;
+          let finalReply = '';
+
+          if (verifySession.roleType === 'pilot') {
+              if (stats.pilot_hours > 10) {
+                  await member.roles.add(roles.vatsimPilotRoleId).catch(()=>{});
+                  success = true;
+                  finalReply = `🎉 **XÁC THỰC THÀNH CÔNG!**\nBạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã cấp Role **VATSIM Pilot** cho bạn trong Server!`;
+              } else {
+                  finalReply = `❌ Từ chối: Ảnh chính chủ, nhưng bạn mới có **${stats.pilot_hours.toFixed(1)}** giờ bay. Cần >10 giờ để nhận role Pilot.`;
+              }
+          } else {
+              if (stats.rating > 1) { 
+                  await member.roles.add(roles.vatsimAtcRoleId).catch(()=>{});
+                  success = true;
+                  finalReply = `🎉 **XÁC THỰC THÀNH CÔNG!**\nRating của bạn hợp lệ. Đã cấp Role **VATSIM ATC** cho bạn trong Server!`;
+              } else {
+                  finalReply = `❌ Từ chối: Ảnh chính chủ, nhưng Rating của bạn là OBS. Yêu cầu >= S1.`;
+              }
+          }
+
+          // 6. LƯU VÀO GOOGLE SHEETS ĐỂ KHÓA CHỐNG TRỘM
+          if (success) {
+              vatsimLinksCache[message.author.id] = userCid;
+              await saveVatsimLinksSheet(vatsimLinksCache).catch(e => console.log('Lỗi lưu sheet CID:', e));
+          }
+
+          pendingVerifyDMs.delete(message.author.id); // Dọn dẹp RAM
+          return processingMsg.edit(finalReply);
+
+      } catch (err) {
+          console.error("Lỗi xác thực DM:", err);
+          return processingMsg.edit("❌ Đã có lỗi xảy ra trong quá trình quét AI hoặc kéo dữ liệu. Vui lòng thử lại sau.");
+      }
+  }
 
   // ================= TÍNH NĂNG 3: ANTI SPAM @everyone / @here =================
   const isEveryoneOrHere = message.mentions.everyone || message.content.includes('@everyone') || message.content.includes('@here');
@@ -4900,29 +5010,34 @@ async function handleButton(interaction) {
     return;
   }
 
-  // Xử lý nút bấm Xác thực VATSIM
+  // Xử lý nút bấm Xin Role VATSIM
   if (customId === 'btn_verify_pilot' || customId === 'btn_verify_atc') {
-    const roleType = customId === 'btn_verify_pilot' ? 'pilot' : 'atc';
-    
-    // Tạo Popup (Modal) yêu cầu nhập CID
-    const modal = new ModalBuilder()
-        .setCustomId(`modal_verify_${roleType}`)
-        .setTitle(`Xác nhận VATSIM ${roleType.toUpperCase()}`);
+      const roleType = customId.split('_')[2]; // 'pilot' hoặc 'atc'
+      
+      await interaction.deferReply({ ephemeral: true });
 
-    modal.addComponents(
-        new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-                .setCustomId('cid_input')
-                .setLabel('Nhập VATSIM CID của bạn')
-                .setPlaceholder('VD: 1000000')
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true)
-                .setMinLength(5)
-                .setMaxLength(8)
-        )
-    );
-    await interaction.showModal(modal);
-    return;
+      try {
+          // Đưa user vào danh sách chờ nhận DM
+          pendingVerifyDMs.set(interaction.user.id, {
+              roleType: roleType,
+              guildId: interaction.guild.id,
+              expires: Date.now() + 5 * 60 * 1000 // Cho 5 phút để gửi ảnh
+          });
+
+          // Nhắn tin riêng
+          await interaction.user.send(
+              `👋 Chào bạn! Bạn đang yêu cầu xác thực role **VATSIM ${roleType.toUpperCase()}**.\n\n` +
+              `Để hoàn tất, hãy gửi cho mình **1 tin nhắn duy nhất** bao gồm:\n` +
+              `1️⃣ **Mã số CID** của bạn (gõ bằng chữ).\n` +
+              `2️⃣ **Đính kèm 1 tấm ảnh chụp màn hình** trang Profile VATSIM của bạn (Thấy rõ CID).\n\n` +
+              `*(Bot sẽ quét bức ảnh của bạn và đối chiếu. Bạn có 5 phút để gửi nhé!)*`
+          );
+
+          return interaction.editReply({ content: '✅ Bot đã nhắn tin riêng (DM) cho bạn để xác thực. Vui lòng kiểm tra mục tin nhắn trực tiếp!' });
+      } catch (err) {
+          pendingVerifyDMs.delete(interaction.user.id);
+          return interaction.editReply({ content: '❌ Bot không thể nhắn tin DM cho bạn. **Vui lòng vào Cài đặt Quyền riêng tư của Server và Bật "Cho phép tin nhắn trực tiếp"**, sau đó thử lại!' });
+      }
   }
 
   if (customId.startsWith('group_')) {
