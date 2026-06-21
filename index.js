@@ -4146,6 +4146,7 @@ client.on('messageCreate', async (message) => {
 
   // ================= TÍNH NĂNG TẠO QUOTE KHI REPLY + PING BOT =================
   if (isMentionedExplicitly && message.reference && message.content.toLowerCase().includes('quote')) {
+      let processingMsg = null;
       try {
           // Lấy tin nhắn gốc mà người dùng đang Reply
           const targetMessage = await message.channel.messages.fetch(message.reference.messageId);
@@ -4154,17 +4155,21 @@ client.on('messageCreate', async (message) => {
               return message.reply('❌ Tin nhắn bạn reply không có nội dung chữ để tạo quote!');
           }
 
-          const processingMsg = await message.reply('📸 Đang chụp ảnh trích dẫn, chờ xíu nha...');
+          processingMsg = await message.reply('📸 Đang chụp ảnh trích dẫn, chờ xíu nha...');
           
+          // Vẽ ảnh
           const buffer = await generateQuoteImage(targetMessage);
           const attachment = new AttachmentBuilder(buffer, { name: 'tk_quote.png' });
           
-          await processingMsg.edit({ content: '', files: [attachment] });
+          // Thay vì để content rỗng '', mình nhét 1 câu nhỏ vào để chống lỗi Discord API
+          await processingMsg.edit({ content: '✨ Tuyệt tác của bạn đây:', files: [attachment] });
       } catch (err) {
           console.error('Lỗi khi tạo quote từ reply:', err);
-          message.reply('❌ Lỗi khi vẽ ảnh quote!');
+          if (processingMsg) {
+              await processingMsg.edit('❌ Lỗi khi vẽ ảnh quote! (Có thể do mạng hoặc ảnh đại diện bị lỗi)').catch(()=>{});
+          }
       }
-      return; // Cực kỳ quan trọng: Làm xong Quote thì dừng lại, không cho AI Chat chen vào nhảy số nữa!
+      return; // Dừng lại ở đây, không gọi Gemini AI Chat nữa
   }
 
   // ================= TÍNH NĂNG 1: RÀNG BUỘC AI CHAT =================
@@ -7796,7 +7801,7 @@ async function handleSetupVatsimVerify(interaction) {
   await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
 }
 
-// ===================== QUOTE GENERATOR (CANVAS) =====================
+// ===================== QUOTE GENERATOR (CANVAS - SIÊU MƯỢT) =====================
 async function generateQuoteImage(targetMessage) {
     const canvas = createCanvas(1200, 630);
     const ctx = canvas.getContext('2d');
@@ -7805,13 +7810,19 @@ async function generateQuoteImage(targetMessage) {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 2. Tải và vẽ Avatar bên trái
+    // 2. Tải và vẽ Avatar (DÙNG FETCH TẢI BUFFER CHỐNG TREO CANVAS)
     try {
         const avatarUrl = targetMessage.author.displayAvatarURL({ extension: 'png', size: 1024 });
-        const avatar = await loadImage(avatarUrl);
+        
+        // Tải ảnh vật lý về trước để Canvas không bị đơ
+        const fetch = (await import('node-fetch')).default;
+        const res = await fetch(avatarUrl);
+        const arrayBuffer = await res.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const avatar = await loadImage(buffer);
         
         // Căn chỉnh ảnh avatar chiếm nửa bên trái màn hình
-        const scale = Math.max(canvas.height / avatar.height, (canvas.width * 0.6) / avatar.width);
+        const scale = Math.max(canvas.height / avatar.height, (canvas.width * 0.55) / avatar.width);
         const w = avatar.width * scale;
         const h = avatar.height * scale;
         ctx.drawImage(avatar, 0, (canvas.height - h) / 2, w, h);
@@ -7819,16 +7830,16 @@ async function generateQuoteImage(targetMessage) {
         console.error("Không tải được avatar cho quote:", e);
     }
 
-    // 3. Phủ dải Gradient đen từ trái sang phải để tạo hiệu ứng mờ dần (Fade to black)
+    // 3. Phủ dải Gradient đen từ trái sang phải
     const gradient = ctx.createLinearGradient(0, 0, canvas.width * 0.7, 0);
     gradient.addColorStop(0, 'rgba(0, 0, 0, 0.1)');
     gradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.8)');
-    gradient.addColorStop(0.6, 'rgba(0, 0, 0, 1)');
+    gradient.addColorStop(0.55, 'rgba(0, 0, 0, 1)');
     
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#000000';
-    ctx.fillRect(canvas.width * 0.6, 0, canvas.width * 0.4, canvas.height); // Nửa phải đen đặc
+    ctx.fillRect(canvas.width * 0.55, 0, canvas.width * 0.45, canvas.height); // Nửa phải đen đặc
 
     // 4. Thiết lập chữ và Word Wrap
     ctx.fillStyle = '#ffffff';
@@ -7852,13 +7863,13 @@ async function generateQuoteImage(targetMessage) {
             const testLine = line + words[n] + ' ';
             const metrics = context.measureText(testLine);
             if (metrics.width > maxWidth && n > 0) {
-                lines.push(line);
+                lines.push(line.trim());
                 line = words[n] + ' ';
             } else {
                 line = testLine;
             }
         }
-        lines.push(line);
+        lines.push(line.trim());
         
         // Căn giữa theo cụm văn bản
         let currentY = y - ((lines.length - 1) * lineHeight) / 2; 
@@ -7866,21 +7877,21 @@ async function generateQuoteImage(targetMessage) {
             context.fillText(lines[i], x, currentY);
             currentY += lineHeight;
         }
-        return currentY; 
+        return currentY + ((lines.length - 1) * lineHeight); // Trả về tọa độ Y cuối cùng
     }
 
     // Vẽ Nội dung tin nhắn
     ctx.font = 'italic 45px sans-serif'; 
-    let endY = wrapText(ctx, text, canvas.width * 0.7, canvas.height / 2 - 40, 500, 60);
+    let endY = wrapText(ctx, text, canvas.width * 0.75, canvas.height / 2 - 40, 500, 60);
 
     // Vẽ Tên hiển thị
     ctx.font = 'bold 35px sans-serif';
-    ctx.fillText(displayName, canvas.width * 0.7, endY + 30);
+    ctx.fillText(displayName, canvas.width * 0.75, endY + 20);
 
     // Vẽ Username
     ctx.font = '25px sans-serif';
     ctx.fillStyle = '#aaaaaa';
-    ctx.fillText(username, canvas.width * 0.7, endY + 70);
+    ctx.fillText(username, canvas.width * 0.75, endY + 60);
 
     // Watermark nhỏ góc phải dưới
     ctx.font = '18px sans-serif';
