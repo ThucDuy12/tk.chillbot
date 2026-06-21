@@ -5950,72 +5950,84 @@ function convertAtisToMetar(atisText, icao) {
 
 // 3. Crawler chính
 async function fetchATIS(icao) {
-  try {
-    const fetch = (await import('node-fetch')).default;
-    const url = `https://atis.guru/atis/${icao.toUpperCase()}`;
+  try {
+    const fetch = (await import('node-fetch')).default;
+    const url = `https://atis.guru/atis/${icao.toUpperCase()}`;
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache'
-      }
-    });
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache'
+      }
+    });
 
-    if (!response.ok) {
-      console.warn(`ATIS.guru fetch failed: ${response.status}`);
-      return null;
-    }
+    if (!response.ok) {
+      console.warn(`ATIS.guru fetch failed: ${response.status}`);
+      return null;
+    }
 
-    const html = await response.text();
-    const cheerio = require('cheerio');
-    const $ = cheerio.load(html);
+    const html = await response.text();
+    const cheerio = require('cheerio');
+    const $ = cheerio.load(html);
 
-    let fullText = $('body').text().replace(/\s+/g, ' ');
+    let fullText = $('body').text().replace(/\s+/g, ' ');
 
-    let arrival = null;
-    let departure = null;
-    let metar = null;
+    let arrival = null;
+    let departure = null;
+    let metar = null;
+    
+    // Khai báo 2 biến để hứng cái Ngày giờ tuyệt đối
+    let arrTimestamp = 0;
+    let depTimestamp = 0;
 
-    const arrMatch = fullText.match(/Arrival ATIS\s*(.*?)(?=Departure ATIS|METAR|VATSIM|$)/i);
-    if (arrMatch) {
-      arrival = arrMatch[1].replace(/^\s*\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\sUTC\s*/i, '').trim();
-      fullText = fullText.replace(arrMatch[0], ''); 
-    }
+    const arrMatch = fullText.match(/Arrival ATIS\s*(.*?)(?=Departure ATIS|METAR|VATSIM|$)/i);
+    if (arrMatch) {
+      // Bóc lấy cái "2026-06-20 05:12 UTC" trước khi xóa nó đi
+      const tMatch = arrMatch[1].match(/^\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\sUTC/i);
+      if (tMatch) arrTimestamp = new Date(tMatch[1] + 'Z').getTime(); // Thêm 'Z' để máy tính hiểu là giờ UTC
+      
+      arrival = arrMatch[1].replace(/^\s*\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\sUTC\s*/i, '').trim();
+      fullText = fullText.replace(arrMatch[0], ''); 
+    }
 
-    const depMatch = fullText.match(/Departure ATIS\s*(.*?)(?=Arrival ATIS|METAR|VATSIM|$)/i);
-    if (depMatch) {
-      departure = depMatch[1].replace(/^\s*\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\sUTC\s*/i, '').trim();
-      fullText = fullText.replace(depMatch[0], '');
-    }
+    const depMatch = fullText.match(/Departure ATIS\s*(.*?)(?=Arrival ATIS|METAR|VATSIM|$)/i);
+    if (depMatch) {
+      // Bóc lấy cái "2026-06-19 23:02 UTC" trước khi xóa nó đi
+      const tMatch = depMatch[1].match(/^\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\sUTC/i);
+      if (tMatch) depTimestamp = new Date(tMatch[1] + 'Z').getTime(); 
+      
+      departure = depMatch[1].replace(/^\s*\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\sUTC\s*/i, '').trim();
+      fullText = fullText.replace(depMatch[0], '');
+    }
 
-    // Fix lỗi quét dính chữ TAF: Dừng ngay khi quét thấy chữ TAF đầu tiên
-    const metarRegex = new RegExp(`\\b${icao}\\s+\\d{6}Z.*?(TAF|$)`, 'i');
-    const metarMatch = fullText.match(metarRegex);
-    
-    if (metarMatch) {
-      // Cắt bỏ chữ TAF (nếu lỡ dính vào) và sửa lại NOSIGTAF thành NOSIG
-      metar = metarMatch[0].replace(/TAF$/i, '').trim();
-      metar = metar.replace(/NOSIGTAF$/i, 'NOSIG');
-    } else {
-      // Nếu không có sẵn METAR -> Tự convert từ D-ATIS (nếu sân bay đó chỉ chạy text D-ATIS)
-      const rawAtisToConvert = arrival || departure;
-      if (rawAtisToConvert) {
-        metar = convertAtisToMetar(rawAtisToConvert, icao.toUpperCase());
-      }
-    }
+    // Fix lỗi quét dính chữ TAF
+    const metarRegex = new RegExp(`\\b${icao}\\s+\\d{6}Z.*?(TAF|$)`, 'i');
+    const metarMatch = fullText.match(metarRegex);
+    
+    if (metarMatch) {
+      metar = metarMatch[0].replace(/TAF$/i, '').trim();
+      metar = metar.replace(/NOSIGTAF$/i, 'NOSIG');
+    } else {
+      const rawAtisToConvert = arrival || departure;
+      if (rawAtisToConvert) {
+        metar = convertAtisToMetar(rawAtisToConvert, icao.toUpperCase());
+      }
+    }
 
-    return {
-      arrival: arrival && arrival.length > 10 ? arrival : null,
-      departure: departure && departure.length > 10 ? departure : null,
-      metar: metar && metar.length > 10 ? metar : null
-    };
-    
-  } catch (err) {
-    console.error(`Error fetching ATIS from guru for ${icao}:`, err.message);
-    return null;
-  }
+    return {
+      arrival: arrival && arrival.length > 10 ? arrival : null,
+      arrTimestamp: arrTimestamp, // Gửi kèm thời gian tuyệt đối của Arrival
+      departure: departure && departure.length > 10 ? departure : null,
+      depTimestamp: depTimestamp, // Gửi kèm thời gian tuyệt đối của Departure
+      metar: metar && metar.length > 10 ? metar : null
+    };
+    
+  } catch (err) {
+    console.error(`Error fetching ATIS from guru for ${icao}:`, err.message);
+    return null;
+  }
 }
 
 // ===================== HELPER: KÉO METAR TỪ CHECKWX =====================
@@ -6045,28 +6057,6 @@ async function handleMetar(interaction) {
   const icao = interaction.options.getString('icao').toUpperCase();
   await interaction.deferReply(); 
   
-  // Helper tính tuổi của bản tin ATIS (bằng phút)
-  function getAtisAgeMinutes(atisText) {
-    if (!atisText) return 0;
-    // Bắt chuỗi giờ chuẩn của VATSIM, VD: 1600Z, 0532Z
-    const match = atisText.match(/\b(\d{2})(\d{2})Z\b/i);
-    if (!match) return 0;
-    
-    const now = new Date();
-    const currentTotalMins = now.getUTCHours() * 60 + now.getUTCMinutes();
-    const atisTotalMins = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
-    
-    let age = currentTotalMins - atisTotalMins;
-    
-    // Xử lý trường hợp vắt qua ngày mới (ví dụ: Hiện tại 00:10Z, ATIS phát lúc 23:50Z)
-    if (age < -12 * 60) {
-      age += 24 * 60;
-    } else if (age < 0) {
-      age = 0; // Nếu bị âm ít (do ATC lỡ set giờ tương lai vài phút), coi như mới cứng (0 phút)
-    }
-    return age;
-  }
-
   try {
     // 1. Ưu tiên lấy từ ATIS.guru
     const atisData = await fetchATIS(icao);
@@ -6085,18 +6075,21 @@ async function handleMetar(interaction) {
     if (metarText) {
       replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`${metarText}\`\`\``;
     } else {
-      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`❌ Không tìm thấy METAR trên cả atis.guru lẫn CheckWX.\`\`\``;
+      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`❌ Không tìm thấy METAR.\`\`\``;
     }
     
-    // 4. Xử lý hiển thị D-ATIS (Tách riêng, Gộp chung, hoặc Ẩn đi)
+    // 4. Xử lý hiển thị D-ATIS
     if (hasAtis) {
       
       // =========================================================
-      // LUẬT KIỂM TRA THÔNG MINH (ANTI-GHOST ATIS TOÀN CẦU)
+      // LUẬT KIỂM TRA THÔNG MINH (TÍNH BẰNG NGÀY GIỜ TUYỆT ĐỐI)
       // =========================================================
       if (atisData.arrival && atisData.departure) {
-        const arrAge = getAtisAgeMinutes(atisData.arrival);
-        const depAge = getAtisAgeMinutes(atisData.departure);
+        const now = Date.now();
+        
+        // Tính số phút trôi qua kể từ lúc phát ATIS (Bao gồm cả Ngày/Tháng/Năm)
+        const arrAge = atisData.arrTimestamp ? (now - atisData.arrTimestamp) / 60000 : 0;
+        const depAge = atisData.depTimestamp ? (now - atisData.depTimestamp) / 60000 : 0;
 
         // Nếu chênh lệch tuổi thọ giữa 2 bản tin lớn hơn 90 phút
         if (Math.abs(arrAge - depAge) > 90) {
@@ -6108,12 +6101,12 @@ async function handleMetar(interaction) {
         }
       }
 
-      // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr (nội dung y hệt nhau)
+      // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr
       if (atisData.arrival && atisData.departure && atisData.arrival === atisData.departure) {
         const formatted = formatATISText(atisData.arrival);
         replyContent += `\n📻 **D-ATIS (${icao}):**\n\`\`\`${formatted}\`\`\``;
       } 
-      // Trường hợp 2: Tách biệt rõ ràng hoặc chỉ còn 1 cái sau khi chém rác
+      // Trường hợp 2: Tách biệt rõ ràng
       else {
         if (atisData.arrival) {
           const formattedArr = formatATISText(atisData.arrival);
@@ -6126,7 +6119,7 @@ async function handleMetar(interaction) {
         }
       }
     } else {
-      replyContent += `\n⚠️ Hiện tại không có dữ liệu D-ATIS cho ${icao} (hoặc atis.guru đang cập nhật). Pilot vui lòng tự đọc METAR ở trên nhé!`;
+      replyContent += `\n⚠️ Hiện tại không có dữ liệu D-ATIS cho ${icao}. Pilot vui lòng tự đọc METAR ở trên nhé!`;
     }
     
     await interaction.editReply({ content: replyContent });
