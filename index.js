@@ -4011,7 +4011,7 @@ client.on('messageCreate', async (message) => {
           return message.reply('❌ Vui lòng gõ mã CID của bạn kèm theo bức ảnh trong cùng một tin nhắn!');
       }
 
-      const processingMsg = await message.reply('⏳ Đang dùng AI (Gemini) để quét bức ảnh của bạn...');
+      const processingMsg = await message.reply('⏳ Đang quét bức ảnh của bạn...');
 
       try {
           // ========================================================
