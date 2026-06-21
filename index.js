@@ -3994,7 +3994,6 @@ client.on('messageCreate', async (message) => {
   if (!message.guild && pendingVerifyDMs.has(message.author.id)) {
       const verifySession = pendingVerifyDMs.get(message.author.id);
       
-      // Nếu quá 5 phút thì hủy
       if (Date.now() > verifySession.expires) {
           pendingVerifyDMs.delete(message.author.id);
           return message.reply('❌ Phiên xác thực của bạn đã hết hạn (quá 5 phút). Vui lòng quay lại Server bấm nút lại từ đầu.');
@@ -4004,57 +4003,69 @@ client.on('messageCreate', async (message) => {
           return message.reply('❌ Bạn chưa đính kèm ảnh chụp màn hình profile VATSIM!');
       }
 
-      // Lấy CID user gõ
-      const cidStr = message.content.replace(/[^0-9]/g, '');
-      const userCid = parseInt(cidStr);
-
-      if (isNaN(userCid) || cidStr.length < 5) {
-          return message.reply('❌ Vui lòng gõ mã CID của bạn kèm theo bức ảnh trong cùng một tin nhắn!');
-      }
-
-      const processingMsg = await message.reply('⏳ Đang quét bức ảnh của bạn...');
+      const processingMsg = await message.reply('⏳ Đang yêu cầu AI quét ảnh của bạn. Xin vui lòng chờ...');
 
       try {
-          // ========================================================
-          // 1. CHỐNG TRỘM: Tải lại Sổ đỏ từ Google Sheets theo thời gian thực
-          // Lệnh này ép bot phải ngó lên Google Sheets xem Admin có xóa ai không
-          // ========================================================
-          const currentVatsimLinks = await loadVatsimLinksSheet();
-
-          if (currentVatsimLinks[message.author.id] && currentVatsimLinks[message.author.id] !== userCid) {
-              return processingMsg.edit(`❌ Bạn đã liên kết với CID **${currentVatsimLinks[message.author.id]}** rồi. Mỗi tài khoản Discord chỉ được 1 CID!`);
-          }
-          if (Object.values(currentVatsimLinks).includes(userCid) && currentVatsimLinks[message.author.id] !== userCid) {
-              return processingMsg.edit(`❌ CID **${userCid}** đã được một người khác trong Server sử dụng. Nếu bạn bị giả mạo, hãy báo Admin.`);
-          }
-
-          // 2. Tải ảnh và kêu GEMINI đọc chữ trong ảnh (OCR)
           const attachment = message.attachments.first();
           if (!attachment.contentType.startsWith('image/')) return processingMsg.edit('❌ File đính kèm không phải là hình ảnh.');
 
           const imgBuffer = await downloadBuffer(attachment.url);
           const base64Image = imgBuffer.toString('base64');
 
-          const prompt = "Đây là ảnh chụp màn hình hồ sơ VATSIM. Hãy tìm mã số CID (gồm 6 hoặc 7 chữ số) trong bức ảnh này. Chỉ trả lời lại bằng các con số bạn tìm thấy, không nói gì thêm. Nếu không thấy số nào, hãy trả lời là NOT_FOUND.";
+          // =========================================================================
+          // CÂU LỆNH THẦN CHÚ ÉP GEMINI LÀM CẢNH SÁT KIỂM DUYỆT ẢNH FAKE
+          // =========================================================================
+          const prompt = "Bạn là một hệ thống kiểm duyệt chống giả mạo. Bức ảnh này PHẢI LÀ giao diện chuẩn của trang cá nhân VATSIM (my.vatsim.net). " +
+                         "Dấu hiệu hợp lệ: Bố cục có hình đại diện, có chữ 'VATSIM ID', 'Rating', 'Region', 'Division'. " +
+                         "Nếu hình ảnh có dấu hiệu KHÔNG PHẢI giao diện web VATSIM, hoặc là ảnh chế, chỉ gửi text, gửi hình phong cảnh, hãy trả về đúng một chữ: FAKE. " +
+                         "Nếu bức ảnh đúng là giao diện hợp lệ, hãy trích xuất mã số VATSIM ID (CID - gồm 6 hoặc 7 chữ số) và trả về ĐÚNG MỘT DÒNG chứa mã số đó.";
+                         
           const imagePart = { inlineData: { data: base64Image, mimeType: attachment.contentType } };
 
           const aiResult = await geminiModel.generateContent([prompt, imagePart]);
           const aiExtractedText = aiResult.response.text().trim();
-          const aiCid = parseInt(aiExtractedText.replace(/[^0-9]/g, ''));
 
-          // 3. ĐỐI CHIẾU ẢNH VÀ CHỮ
-          if (isNaN(aiCid) || aiCid !== userCid) {
-              return processingMsg.edit(`❌ **Xác thực thất bại!**\nBot quét được CID trong ảnh là: \`${aiExtractedText}\` nhưng bạn lại nhập là \`${userCid}\`. Ảnh không khớp hoặc bị mờ. Vui lòng thử lại!`);
+          // Kiểm tra xem AI có chê ảnh fake không
+          if (aiExtractedText.includes('FAKE') || aiExtractedText.includes('NOT_FOUND')) {
+              return processingMsg.edit(`❌ **BOT TỪ CHỐI XÁC THỰC!**\nBức ảnh này không giống giao diện chuẩn của trang my.vatsim.net hoặc cắt ghép quá sơ sài. Vui lòng chụp full màn hình rõ nét!`);
           }
 
-          // 4. KIỂM TRA VATSIM API NHƯ CŨ
-          await processingMsg.edit(`✅ Bot xác nhận ảnh hợp lệ! Đang kéo dữ liệu từ hệ thống VATSIM...`);
-          const stats = await fetchVatsimStatsById(userCid);
+          // Rút mã CID từ kết quả của AI
+          const aiCid = parseInt(aiExtractedText.replace(/[^0-9]/g, ''));
+          if (isNaN(aiCid) || aiCid < 10000) {
+              return processingMsg.edit(`❌ **Xác thực thất bại!**\nBOT không thể tìm thấy mã số CID hợp lệ trong bức ảnh này. Vui lòng chụp lại rõ ràng hơn.`);
+          }
+
+          await processingMsg.edit(`🔍 BOT đã quét được CID: **${aiCid}**. Đang kiểm tra an ninh Sổ Đỏ...`);
+
+          // ========================================================
+          // CHỐNG TRỘM: KIỂM TRA SỔ ĐỎ
+          // ========================================================
+          const currentVatsimLinks = await loadVatsimLinksSheet();
           
-          if (!stats) return processingMsg.edit(`❌ Không tìm thấy thông tin trên VATSIM cho CID **${userCid}**.`);
+          // Helper móc CID an toàn (Vì giờ data nó lưu nguyên cục object {cid, username, imageurl})
+          const getCid = (val) => typeof val === 'object' ? val.cid : val;
+          const existingData = currentVatsimLinks[message.author.id];
+          const existingCid = existingData ? getCid(existingData) : null;
+
+          if (existingCid && existingCid !== aiCid) {
+              return processingMsg.edit(`❌ Cảnh báo! Bạn đã từng liên kết với CID **${existingCid}** rồi. Mỗi tài khoản Discord chỉ được giữ 1 CID duy nhất!`);
+          }
+
+          const isCidTaken = Object.values(currentVatsimLinks).some(val => getCid(val) === aiCid);
+          if (isCidTaken && existingCid !== aiCid) {
+              return processingMsg.edit(`❌ CID **${aiCid}** đã được một người khác trong Server liên kết trước đó. Nếu bạn bị giả mạo, hãy báo Admin.`);
+          }
+
+          // ========================================================
+          // KÉO DỮ LIỆU VATSIM API VÀ CẤP ROLE
+          // ========================================================
+          await processingMsg.edit(`✅ An ninh thông qua! Đang đối chiếu máy chủ VATSIM...`);
+          const stats = await fetchVatsimStatsById(aiCid);
+          
+          if (!stats) return processingMsg.edit(`❌ CID **${aiCid}** không tồn tại trên hệ thống dữ liệu VATSIM.`);
           if (stats.rating === 0) return processingMsg.edit(`❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.`);
 
-          // 5. CẤP ROLE TRONG SERVER
           const guild = await client.guilds.fetch(verifySession.guildId);
           const member = await guild.members.fetch(message.author.id);
           let success = false;
@@ -4064,7 +4075,7 @@ client.on('messageCreate', async (message) => {
               if (stats.pilot_hours > 10) {
                   await member.roles.add(roles.vatsimPilotRoleId).catch(()=>{});
                   success = true;
-                  finalReply = `🎉 **XÁC THỰC THÀNH CÔNG!**\nBạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã cấp Role **VATSIM Pilot** cho bạn trong Server!`;
+                  finalReply = `🎉 **XÁC THỰC THÀNH CÔNG!**\nBạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã tự động cấp Role **VATSIM Pilot** cho bạn trong Server!`;
               } else {
                   finalReply = `❌ Từ chối: Ảnh chính chủ, nhưng bạn mới có **${stats.pilot_hours.toFixed(1)}** giờ bay. Cần >10 giờ để nhận role Pilot.`;
               }
@@ -4072,16 +4083,19 @@ client.on('messageCreate', async (message) => {
               if (stats.rating > 1) { 
                   await member.roles.add(roles.vatsimAtcRoleId).catch(()=>{});
                   success = true;
-                  finalReply = `🎉 **XÁC THỰC THÀNH CÔNG!**\nRating của bạn hợp lệ. Đã cấp Role **VATSIM ATC** cho bạn trong Server!`;
+                  finalReply = `🎉 **XÁC THỰC THÀNH CÔNG!**\nRating của bạn hợp lệ. Đã tự động cấp Role **VATSIM ATC** cho bạn trong Server!`;
               } else {
                   finalReply = `❌ Từ chối: Ảnh chính chủ, nhưng Rating của bạn là OBS. Yêu cầu >= S1.`;
               }
           }
 
-          // 6. LƯU VÀO GOOGLE SHEETS ĐỂ KHÓA CHỐNG TRỘM
+          // LƯU ĐẦY ĐỦ THÔNG TIN VÀO SỔ ĐỎ GOOGLE SHEETS
           if (success) {
-              // Cập nhật lại bản mới nhất rồi lưu ngược lên Google Sheets
-              currentVatsimLinks[message.author.id] = userCid;
+              currentVatsimLinks[message.author.id] = {
+                  cid: aiCid,
+                  username: message.author.username,
+                  imageUrl: attachment.url
+              };
               await saveVatsimLinksSheet(currentVatsimLinks).catch(e => console.log('Lỗi lưu sheet CID:', e));
           }
 
@@ -5027,13 +5041,14 @@ async function handleButton(interaction) {
               expires: Date.now() + 5 * 60 * 1000 // Cho 5 phút để gửi ảnh
           });
 
-          // Nhắn tin riêng
+          // Nhắn tin riêng: CHỈ ĐÒI ẢNH!
           await interaction.user.send(
               `👋 Chào bạn! Bạn đang yêu cầu xác thực role **VATSIM ${roleType.toUpperCase()}**.\n\n` +
-              `Để hoàn tất, hãy gửi cho mình **1 tin nhắn duy nhất** bao gồm:\n` +
-              `1️⃣ **Mã số CID** của bạn (gõ bằng chữ).\n` +
-              `2️⃣ **Đính kèm 1 tấm ảnh chụp màn hình** trang Profile VATSIM của bạn (Thấy rõ CID).\n\n` +
-              `*(Bot sẽ quét bức ảnh của bạn và đối chiếu. Bạn có 5 phút để gửi nhé!)*`
+              `Để hoàn tất, hãy gửi cho mình **1 tấm ảnh chụp màn hình** trang Profile VATSIM chính thức (my.vatsim.net).\n` +
+              `⚠️ **LƯU Ý QUAN TRỌNG:**\n` +
+              `- Ảnh phải thể hiện rõ giao diện trang web, có chữ VATSIM ID, Tên, Rating...\n` +
+              `- KHÔNG cần gõ mã số, hệ thống AI sẽ tự động soi ảnh của bạn.\n\n` +
+              `*(Bạn có 5 phút để gửi ảnh, hãy thả ảnh vào đây nhé!)*`
           );
 
           return interaction.editReply({ content: '✅ Bot đã nhắn tin riêng (DM) cho bạn để xác thực. Vui lòng kiểm tra mục tin nhắn trực tiếp!' });
