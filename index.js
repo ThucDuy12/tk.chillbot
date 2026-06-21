@@ -4089,12 +4089,41 @@ client.on('messageCreate', async (message) => {
               }
           }
 
-          // LƯU ĐẦY ĐỦ THÔNG TIN VÀO SỔ ĐỎ GOOGLE SHEETS
+          // 6. UPLOAD ẢNH LÊN IMGBB LẤY LINK VĨNH VIỄN
+          // ========================================================
+          await processingMsg.edit(`✅ Đã cấp Role thành công! Đang lưu hồ sơ ảnh vĩnh viễn...`);
+          
+          let permanentImageUrl = attachment.url; // Mặc định là link Discord (phòng hờ ImgBB sập)
+          try {
+              if (process.env.IMGBB_API_KEY) {
+                  // base64Image là cái biến mình đã tải sẵn ở bước 2 cho AI đọc đó, giờ xài lại luôn
+                  const params = new URLSearchParams();
+                  params.append('image', base64Image);
+                  
+                  const imgbbRes = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
+                      method: 'POST',
+                      body: params
+                  });
+                  
+                  const imgbbData = await imgbbRes.json();
+                  if (imgbbData && imgbbData.data && imgbbData.data.url) {
+                      // Thay link Discord tự hủy bằng link ImgBB vĩnh viễn
+                      permanentImageUrl = imgbbData.data.url; 
+                  }
+              }
+          } catch (imgErr) {
+              console.error('Lỗi up ảnh lên ImgBB:', imgErr);
+          }
+
+          // ========================================================
+          // 7. LƯU VÀO GOOGLE SHEETS ĐỂ KHÓA CHỐNG TRỘM
+          // ========================================================
           if (success) {
               currentVatsimLinks[message.author.id] = {
                   cid: aiCid,
                   username: message.author.username,
-                  imageUrl: attachment.url
+                  // Dùng công thức =IMAGE() để Google Sheets tự hiển thị ảnh ra ô tính
+                  imageUrl: `=IMAGE("${permanentImageUrl}")` 
               };
               await saveVatsimLinksSheet(currentVatsimLinks).catch(e => console.log('Lỗi lưu sheet CID:', e));
           }
@@ -7761,32 +7790,4 @@ async function handleSetupVatsimVerify(interaction) {
 
   await interaction.channel.send({ embeds: [embed], components: [row] });
   await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
-}
-
-
-// ===================== LOGIN =====================
-client.login(TOKEN);
-
-// === WEB SERVER & PING CHÉO ===
-const port = process.env.PORT || 3000;
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot 1 is alive!');
-}).listen(port, () => {
-    console.log(`HTTP server running on port ${port}`);
-});
-
-const BOT2_URL = process.env.BOT2_URL; 
-
-if (BOT2_URL) {
-    setInterval(async () => {
-        try {
-            const response = await fetch(BOT2_URL);
-            console.log(`[Ping Chéo] Đã chọc Bot 2, Status: ${response.status}`);
-        } catch (error) {
-            console.error(`[Ping Chéo] Lỗi khi chọc Bot 2:`, error.message);
-        }
-    }, 14 * 60 * 1000);
-} else {
-    console.log("⚠️ Chưa cài BOT2_URL, tính năng Ping chéo đang tắt.");
 }
