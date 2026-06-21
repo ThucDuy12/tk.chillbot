@@ -10,6 +10,7 @@ const PILOT_SHEET_PREFIX = 'PILOT_';
 const PENDING_USERS_SHEET_NAME = 'PendingUsers'; // Tên sheet cho Pending Users
 const SIMBRIEF_USERS_SHEET_NAME = 'SimbriefUsers';
 const PROFILES_SHEET_NAME = 'Profiles';
+const VATSIM_LINKS_SHEET_NAME = 'VatsimLinks'; // Sổ đỏ chống trộm CID
 
 let sheetsClient = null;
 
@@ -666,6 +667,102 @@ async function loadProfilesSheet() {
   return data;
 }
 
+// ========== TẠO SHEET VATSIM LINKS ==========
+async function createVatsimLinksSheet() {
+  const exists = await sheetExists(VATSIM_LINKS_SHEET_NAME);
+  if (exists) return VATSIM_LINKS_SHEET_NAME;
+
+  const sheets = await initGoogleSheets();
+  const headers = ['DiscordId', 'CID'];
+
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: VATSIM_LINKS_SHEET_NAME } } }],
+      },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${VATSIM_LINKS_SHEET_NAME}!A1:B1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [headers] },
+    });
+    console.log(`✅ Created sheet: ${VATSIM_LINKS_SHEET_NAME}`);
+    return VATSIM_LINKS_SHEET_NAME;
+  } catch (err) {
+    console.error('Error creating VatsimLinks sheet:', err);
+    throw err;
+  }
+}
+
+// ========== ĐỌC DỮ LIỆU VATSIM LINKS ==========
+async function loadVatsimLinksSheet() {
+  const exists = await sheetExists(VATSIM_LINKS_SHEET_NAME);
+  if (!exists) {
+    await createVatsimLinksSheet();
+    return {};
+  }
+
+  const sheets = await initGoogleSheets();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${VATSIM_LINKS_SHEET_NAME}!A2:B`,
+  });
+  
+  const rows = response.data.values || [];
+  const data = {};
+
+  for (const row of rows) {
+    const [discordId, cid] = row;
+    if (discordId && cid) {
+      data[discordId] = parseInt(cid);
+    }
+  }
+  return data;
+}
+
+// ========== LƯU DỮ LIỆU VATSIM LINKS ==========
+async function saveVatsimLinksSheet(data) {
+  const sheets = await initGoogleSheets();
+  const sheetExistsFlag = await sheetExists(VATSIM_LINKS_SHEET_NAME);
+  if (!sheetExistsFlag) await createVatsimLinksSheet();
+
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+    fields: 'sheets.properties',
+  });
+  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === VATSIM_LINKS_SHEET_NAME);
+  const sheetId = sheet.properties.sheetId;
+
+  // Xóa dữ liệu cũ
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SPREADSHEET_ID,
+    requestBody: {
+      requests: [{
+          deleteRange: {
+            range: { sheetId, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 2 },
+            shiftDimension: 'ROWS',
+          },
+      }],
+    },
+  });
+
+  const rows = [];
+  for (const [discordId, cid] of Object.entries(data)) {
+    rows.push([discordId, cid]);
+  }
+
+  if (rows.length === 0) return;
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${VATSIM_LINKS_SHEET_NAME}!A2`,
+    valueInputOption: 'RAW',
+    requestBody: { values: rows },
+  });
+}
+
 // ========== EXPORTS ==========
 module.exports = {
   initGoogleSheets,
@@ -681,5 +778,7 @@ module.exports = {
   loadSimbriefUsersSheet,
   saveSimbriefUsersSheet,
   loadProfilesSheet,   
-  saveProfilesSheet
+  saveProfilesSheet,
+  loadVatsimLinksSheet,
+  saveVatsimLinksSheet
 };
