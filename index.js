@@ -6075,14 +6075,24 @@ async function handleMetar(interaction) {
     if (metarText) {
       replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`${metarText}\`\`\``;
     } else {
-      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`❌ Không tìm thấy METAR.\`\`\``;
+      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`❌ Không tìm thấy METAR trên cả atis.guru lẫn CheckWX.\`\`\``;
     }
     
     // 4. Xử lý hiển thị D-ATIS
     if (hasAtis) {
       
       // =========================================================
+      // LUẬT ĐẶC CÁCH VCLvACC (VIỆT NAM, CAMPUCHIA, LÀO)
+      // Các sân bay VV, VD, VL thường chỉ dùng chung Arrival ATIS
+      // -> Chém luôn Departure ATIS để tránh rác!
+      // =========================================================
+      if (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL')) {
+        atisData.departure = null;
+      }
+
+      // =========================================================
       // LUẬT KIỂM TRA THÔNG MINH (TÍNH BẰNG NGÀY GIỜ TUYỆT ĐỐI)
+      // Dành cho các sân bay quốc tế khác ngoài VCL
       // =========================================================
       if (atisData.arrival && atisData.departure) {
         const now = Date.now();
@@ -6104,7 +6114,7 @@ async function handleMetar(interaction) {
       // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr
       if (atisData.arrival && atisData.departure && atisData.arrival === atisData.departure) {
         const formatted = formatATISText(atisData.arrival);
-        replyContent += `\n📻 **D-ATIS (${icao}):**\n\`\`\`${formatted}\`\`\``;
+        replyContent += `\n📻 **D-ATIS(${icao}):**\n\`\`\`${formatted}\`\`\``;
       } 
       // Trường hợp 2: Tách biệt rõ ràng
       else {
