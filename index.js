@@ -5760,11 +5760,55 @@ client.on('messageDelete', async (message) => {
       0xe67e22
     );
 
-    // Chỉ lưu Tên file và Link gốc, bỏ qua việc tải ảnh vật lý để cứu tốc độ
+    // ==============================================================
+    // TÍNH NĂNG CỨU HỘ ẢNH BỊ XÓA (UPLOAD LÊN IMGBB LẤY LINK VĨNH VIỄN)
+    // ==============================================================
     if (message.attachments?.size > 0) {
-      const attachmentsText = [...message.attachments.values()].map(a => `[${a.name}](${a.url})`).join('\n');
-      embed.addFields({ name: '📎 Tệp đính kèm (Link có thể đã hỏng do Discord xóa)', value: attachmentsText.substring(0, 1024), inline: false });
+      const attachmentLinks = [];
+      let firstPermanentImg = null;
+      
+      for (const attachment of message.attachments.values()) {
+        let finalUrl = attachment.url; // Mặc định là link Discord (sẽ hỏng sau vài phút)
+        
+        // Chỉ bế lên ImgBB nếu file đó là Hình Ảnh và Bot có API Key ImgBB
+        if (attachment.contentType && attachment.contentType.startsWith('image/') && process.env.IMGBB_API_KEY) {
+            try {
+                // Tải ảnh tốc độ cao từ Discord
+                const imgBuffer = await downloadBuffer(attachment.url);
+                const base64Image = imgBuffer.toString('base64');
+                
+                const params = new URLSearchParams();
+                params.append('image', base64Image);
+                
+                // Đẩy sang ImgBB
+                const fetch = require('node-fetch');
+                const imgbbRes = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
+                    method: 'POST',
+                    body: params
+                });
+                
+                const imgbbData = await imgbbRes.json();
+                if (imgbbData && imgbbData.data && imgbbData.data.url) {
+                    finalUrl = imgbbData.data.url; // Đổi link chết thành link vĩnh cửu!
+                    if (!firstPermanentImg) firstPermanentImg = finalUrl;
+                }
+            } catch (err) {
+                console.error('Lỗi cứu hộ ảnh Delete Log:', err.message);
+            }
+        }
+        
+        attachmentLinks.push(`[${attachment.name}](${finalUrl})`);
+      }
+      
+      const attachmentsText = attachmentLinks.join('\n');
+      embed.addFields({ name: '📎 Tệp đính kèm (Đã backup vĩnh viễn)', value: attachmentsText.substring(0, 1024), inline: false });
+      
+      // Bonus: Treo thẳng cái ảnh bị xóa bự chà bá lên Log cho Admin dễ soi
+      if (firstPermanentImg) {
+          embed.setImage(firstPermanentImg);
+      }
     }
+    // ==============================================================
 
     // Tra cứu siêu tốc Audit Log (chỉ lấy 1 dòng gần nhất)
     try {
