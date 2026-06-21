@@ -1,848 +1,7821 @@
-const { google } = require('googleapis');
+require('dotenv').config();
+const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const { Worker } = require('worker_threads');
+const cheerio = require('cheerio');
+const { 
+  initGoogleSheets, loadControllerLeaderboard, loadPilotLeaderboard, 
+  saveControllerLeaderboard, savePilotLeaderboard, loadPendingUsersSheet, 
+  savePendingUsersSheet, loadSimbriefUsersSheet, saveSimbriefUsersSheet,
+  loadProfilesSheet, saveProfilesSheet,
+  // Thêm 2 cái này vào:
+  loadVatsimLinksSheet, saveVatsimLinksSheet 
+} = require('./googleSheets');
+const { createCanvas, loadImage, GlobalFonts } = require('canvas');
+const fetch = require('node-fetch'); // Thêm nếu chưa có
+const nodeFetch = require('node-fetch');
 
-// ========== CONFIG ==========
-const CREDENTIALS_PATH = path.join(__dirname, 'gen-lang-client-0170849728-d9d0d8741c5f.json');
-const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
+// Thêm vào khu vực khai báo biến ở đầu file
+const temporarySearchResults = new Map();
 
-const CONTROLLER_SHEET_PREFIX = 'ATC_';
-const PILOT_SHEET_PREFIX = 'PILOT_';
-const PENDING_USERS_SHEET_NAME = 'PendingUsers'; // Tên sheet cho Pending Users
-const SIMBRIEF_USERS_SHEET_NAME = 'SimbriefUsers';
-const PROFILES_SHEET_NAME = 'Profiles';
-const VATSIM_LINKS_SHEET_NAME = 'VatsimLinks'; // Sổ đỏ chống trộm CID
+const https = require('https');
+const deletedImageCache = new Map();
 
-let sheetsClient = null;
+const db = require('./database');
 
-// ========== KHỞI TẠO CLIENT ==========
-async function initGoogleSheets() {
-  if (sheetsClient) return sheetsClient;
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
+const play = require('play-dl');
 
-  if (!SPREADSHEET_ID) {
-    throw new Error('Missing GOOGLE_SHEET_ID in environment');
-  }
+// Kho chứa danh sách phát nhạc của các server
+const musicQueues = new Map();
 
-  try {
-    const auth = new google.auth.GoogleAuth({
-      keyFile: CREDENTIALS_PATH,
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-    const authClient = await auth.getClient();
-    sheetsClient = google.sheets({ version: 'v4', auth: authClient });
-    console.log('✅ Google Sheets client initialized');
-    return sheetsClient;
-  } catch (err) {
-    console.error('❌ Failed to init Google Sheets:', err.message);
-    throw err;
-  }
-}
-
-// ========== TIỆN ÍCH ==========
-function getSheetName(prefix, month, year) {
-  return `${prefix}${year}_${month.toString().padStart(2, '0')}`;
-}
-
-async function sheetExists(sheetName) {
-  const sheets = await initGoogleSheets();
-  try {
-    const response = await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID,
-      fields: 'sheets.properties',
-    });
-    return response.data.sheets.some(s => s.properties.title === sheetName);
-  } catch (err) {
-    console.error('Error checking sheet existence:', err);
-    return false;
-  }
-}
-
-// ========== TẠO SHEET CONTROLLER ==========
-async function createControllerSheet(month, year) {
-  const sheetName = getSheetName(CONTROLLER_SHEET_PREFIX, month, year);
-  const exists = await sheetExists(sheetName);
-  if (exists) return sheetName;
-
-  const sheets = await initGoogleSheets();
-  const headers = [
-    'Category', 'CID', 'Name', 'Callsign', 'Seconds',
-    'LastUpdate (timestamp)', 'LastUpdate (ISO)', 'Callsign History (JSON)'
-  ];
-
-  try {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [{ addSheet: { properties: { title: sheetName } } }],
-      },
-    });
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A1:H1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [headers] },
-    });
-    console.log(`✅ Created controller sheet: ${sheetName}`);
-    return sheetName;
-  } catch (err) {
-    console.error('Error creating controller sheet:', err);
-    throw err;
-  }
-}
-
-// ========== TẠO SHEET PILOT ==========
-async function createPilotSheet(month, year) {
-  const sheetName = getSheetName(PILOT_SHEET_PREFIX, month, year);
-  const exists = await sheetExists(sheetName);
-  if (exists) return sheetName;
-
-  const sheets = await initGoogleSheets();
-  const headers = [
-    'CID', 'Name', 'Callsign', 'Seconds', 'Flights',
-    'LastUpdate (timestamp)', 'LastUpdate (ISO)',
-    'LastDeparture', 'LastArrival', 'LastAircraft'
-  ];
-
-  try {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [{ addSheet: { properties: { title: sheetName } } }],
-      },
-    });
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${sheetName}!A1:J1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [headers] },
-    });
-    console.log(`✅ Created pilot sheet: ${sheetName}`);
-    return sheetName;
-  } catch (err) {
-    console.error('Error creating pilot sheet:', err);
-    throw err;
-  }
-}
-
-// ========== TẠO SHEET PENDING USERS ==========
-async function createPendingUsersSheet() {
-  const exists = await sheetExists(PENDING_USERS_SHEET_NAME);
-  if (exists) return PENDING_USERS_SHEET_NAME;
-
-  const sheets = await initGoogleSheets();
-  const headers = ['UserId', 'JoinDate', 'Notified5Days', 'Notified7Days', 'Ngày Gia Nhập'];
-
-  try {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [{ addSheet: { properties: { title: PENDING_USERS_SHEET_NAME } } }],
-      },
-    });
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${PENDING_USERS_SHEET_NAME}!A1:D1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [headers] },
-    });
-    console.log(`✅ Created sheet: ${PENDING_USERS_SHEET_NAME}`);
-    return PENDING_USERS_SHEET_NAME;
-  } catch (err) {
-    console.error('Error creating PendingUsers sheet:', err);
-    throw err;
-  }
-}
-
-// ========== LƯU CONTROLLER ==========
-async function saveControllerLeaderboard(month, year, stats) {
-  const sheetName = getSheetName(CONTROLLER_SHEET_PREFIX, month, year);
-  const sheets = await initGoogleSheets();
-
-  const sheetExistsFlag = await sheetExists(sheetName);
-  if (!sheetExistsFlag) {
-    await createControllerSheet(month, year);
-  }
-
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: SPREADSHEET_ID,
-    fields: 'sheets.properties',
+// Cỗ máy tải file vật lý bằng HTTPS chuẩn của Node.js (Chống mọi lỗi thư viện)
+function downloadBuffer(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      if (res.statusCode === 200) {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+      } else {
+        reject(new Error(`Mã lỗi: ${res.statusCode}`));
+      }
+    }).on('error', reject);
   });
-  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === sheetName);
-  if (!sheet) throw new Error(`Sheet ${sheetName} not found`);
-  const sheetId = sheet.properties.sheetId;
+}
 
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [
-        {
-          deleteRange: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: 5000,
-              startColumnIndex: 0,
-              endColumnIndex: 8,
-            },
-            shiftDimension: 'ROWS',
-          },
-        },
-      ],
-    },
-  });
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  StringSelectMenuBuilder,
+  ChannelType,
+  PermissionsBitField,
+  AttachmentBuilder,
+  Partials,                        
+  PermissionFlagsBits
+} = require('discord.js');
 
-  const rows = [];
-  for (const [category, controllers] of Object.entries(stats)) {
-    for (const [cid, data] of Object.entries(controllers)) {
-      rows.push([
-        category,
-        cid,
-        data.name || '',
-        data.callsign || '',
-        data.seconds || 0,
-        data.lastUpdate || 0,
-        data.lastUpdate ? new Date(data.lastUpdate).toISOString() : '',
-        JSON.stringify({ callsignHistory: [data.callsign] }),
-      ]);
+const { SlashCommandBuilder } = require('@discordjs/builders');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+// ===================== CONFIG =====================
+const TOKEN = process.env.DISCORD_TOKEN;
+
+const VATSIM_CHANNEL_ID = process.env.VATSIM_CHANNEL_ID || '1412853057968017469';
+const REPENT_CHANNEL_ID = process.env.REPENT_CHANNEL_ID || '1413556917707472896';
+const GROUP_FLIGHT_CHANNEL_ID = process.env.GROUP_FLIGHT_CHANNEL_ID || '1366417558395289640';
+const AI_CHANNEL_ID = process.env.AI_CHANNEL_ID || '1431645766795001970';
+const TRIGGER_VOICE_CHANNEL_ID = process.env.TRIGGER_VOICE_CHANNEL_ID || '1440000000000000001';
+const ROLE_APPROVAL_CHANNEL_ID = process.env.ROLE_APPROVAL_CHANNEL_ID;
+const LEADERBOARD_CHANNEL_ID = process.env.LEADERBOARD_CHANNEL_ID || '1458058709677899951';
+
+const BOT_ANNOUNCEMENTS_CHANNEL_ID = process.env.BOT_ANNOUNCEMENTS_CHANNEL_ID || '1510136210683723927';
+const ATC_NOTI_ROLE_ID = process.env.ATC_NOTI_ROLE_ID || '1510148740634382517';
+
+const GUILD_ID = process.env.GUILD_ID || '1365693391668777051';
+const OWNER_ID = process.env.OWNER_ID;
+
+const CHECKWX_API_KEY = '25bf6075ad24413c86d8903b59884a5c'
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+// Summarize caps
+const SUMMARY_MAX_MESSAGES = parseInt(process.env.SUMMARY_MAX_MESSAGES || '600', 10);
+const SUMMARY_MAX_TRANSCRIPT_CHARS = parseInt(process.env.SUMMARY_MAX_TRANSCRIPT_CHARS || '60000', 10);
+
+// Chat caps
+const GEMINI_MAX_HISTORY_ITEMS = parseInt(process.env.GEMINI_MAX_HISTORY_ITEMS || '20', 10);
+const GEMINI_MAX_USER_TEXT_CHARS = parseInt(process.env.GEMINI_MAX_USER_TEXT_CHARS || '1800', 10);
+
+// Thay ID channel này bằng ID channel Dashboard ACDM của bạn
+const ACDM_CHANNEL_ID = process.env.ACDM_CHANNEL_ID || '1503763584105058434'; 
+
+// Thay bằng ID thực tế của 3 kênh bạn vừa tạo
+const STATS_TOTAL_ID = process.env.STATS_TOTAL_ID || '1513738193986388140';
+const STATS_HUMAN_ID = process.env.STATS_HUMAN_ID || '1513738397938618508';
+const STATS_BOT_ID = process.env.STATS_BOT_ID || '1513738533188272218';
+
+// ===================== VATSIM VERIFY DATA =====================
+const pendingVerifyDMs = new Map(); // Lưu trạng thái user đang nhắn DM
+let vatsimLinksCache = {}; // Cache của sổ đỏ CID
+
+// ===================== VATSEA CONFIG =====================
+const STATSIM_API_KEY = process.env.STATSIM_API_KEY || '564eNsuJE8wTQw1hAZKGwHicOyVbmucoe3tZujdd';
+const VATSEA_CHANNEL_ID = process.env.VATSEA_CHANNEL_ID || '1478382913455259781';
+
+const VATSEA_MSG_FILE = path.join(__dirname, 'vatsea_leaderboard_msg.json');
+let vatseaMessageStore = fs.existsSync(VATSEA_MSG_FILE) ? JSON.parse(fs.readFileSync(VATSEA_MSG_FILE, 'utf8')) : {};
+
+const POSITIONS_TO_RANK = {
+  "Center": ["VVHM_CTR", "VTBB_CTR", "WSJC_CTR", "HKG_CTR", "WMFC_CTR", "WIIF_CTR", "WAAF_CTR", "MNL_CTR"],
+  "Approach": ["VVTS_APP", "VTBS_APP", "WSSS_APP", "VHHH_APP", "WMKK_APP", "WIII_APP", "WADD_APP", "RPLL_APP"],
+  "Tower": ["VVTS_TWR", "VTBS_TWR", "WSSS_TWR", "VHHH_TWR", "WMKK_TWR", "WIII_TWR", "WADD_TWR", "RPLL_TWR"],
+  "Ground": ["VVTS_GND", "VTBS_GND", "WSSS_GND", "VHHH_GND", "WMKK_GND", "WIII_GND", "WADD_GND", "RPLL_GND"]
+};
+const STATSIM_API_URL = "http://api.statsim.net/api/Atcsessions/Dates";
+const EXCLUDED_IDS = new Set(['M', 'I', 'X', 'Y', 'Z']);
+
+// ===================== MARKETPLACE CONFIG =====================
+const MARKETPLACE_CHANNEL_ID = process.env.MARKETPLACE_CHANNEL_ID || '1461357458252365984';
+const ADMIN_CHANNEL_ID = process.env.ADMIN_CHANNEL_ID || '1448258683627638895';
+
+let simbriefUsersData = {};
+
+// ===================== PENDING USERS DATA =====================
+// Khởi tạo biến rỗng, dữ liệu sẽ được kéo từ Sheet về lúc bot ready
+let pendingUsersData = {};
+
+// Sửa lại hàm save thành dạng gọi API của Google Sheet
+async function savePendingUsers() {
+  try {
+    if (typeof savePendingUsersSheet === 'function') {
+      // Lưu ý: Nếu hàm savePendingUsersSheet của bạn cần truyền tham số 'doc' (như ví dụ trên), 
+      // bạn cần điều chỉnh cho phù hợp với cấu trúc googleSheets.js của bạn. 
+      // Giả sử module googleSheets của bạn đã tự quản lý 'doc' thì chỉ cần gọi:
+      await savePendingUsersSheet(pendingUsersData);
     }
+  } catch (error) {
+    console.error('❌ Lỗi đẩy dữ liệu Pending Users lên Google Sheets:', error);
   }
-
-  if (rows.length === 0) return;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A2`,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  });
-
-  console.log(`✅ Saved ${rows.length} controller records to sheet ${sheetName}`);
 }
 
-// ========== LƯU PILOT ==========
-async function savePilotLeaderboard(month, year, pilots) {
-  const sheetName = getSheetName(PILOT_SHEET_PREFIX, month, year);
-  const sheets = await initGoogleSheets();
 
-  const sheetExistsFlag = await sheetExists(sheetName);
-  if (!sheetExistsFlag) {
-    await createPilotSheet(month, year);
-  }
+// Bộ nhớ tạm để lưu ảnh khi user mở Form (Modal)
+const userSellImages = new Map();
 
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: SPREADSHEET_ID,
-    fields: 'sheets.properties',
-  });
-  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === sheetName);
-  if (!sheet) throw new Error(`Sheet ${sheetName} not found`);
-  const sheetId = sheet.properties.sheetId;
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [
-        {
-          deleteRange: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: 5000,
-              startColumnIndex: 0,
-              endColumnIndex: 10,
-            },
-            shiftDimension: 'ROWS',
-          },
-        },
-      ],
-    },
-  });
-
-  const rows = [];
-  for (const [cid, data] of Object.entries(pilots)) {
-    rows.push([
-      cid,
-      data.name || '',
-      data.callsign || '',
-      data.seconds || 0,
-      data.flights || 1,
-      data.lastUpdate || 0,
-      data.lastUpdate ? new Date(data.lastUpdate).toISOString() : '',
-      data.lastDeparture || '',
-      data.lastArrival || '',
-      data.lastAircraft || '',
-    ]);
-  }
-
-  if (rows.length === 0) return;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A2`,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  });
-
-  console.log(`✅ Saved ${rows.length} pilot records to sheet ${sheetName}`);
+if (!TOKEN) {
+  console.error('Missing DISCORD_TOKEN in environment.');
+  process.exit(1);
 }
 
-// ========== LƯU PENDING USERS ==========
-async function savePendingUsersSheet(data) {
-  const sheets = await initGoogleSheets();
+if (!OWNER_ID) {
+  console.error('Missing OWNER_ID in environment.');
+  process.exit(1);
+}
 
-  const sheetExistsFlag = await sheetExists(PENDING_USERS_SHEET_NAME);
-  if (!sheetExistsFlag) {
-    await createPendingUsersSheet();
-  }
+if (!CHECKWX_API_KEY) {
+  console.error('Missing CHECKWX_API_KEY in environment.');
+  process.exit(1);
+}
 
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: SPREADSHEET_ID,
-    fields: 'sheets.properties',
-  });
-  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === PENDING_USERS_SHEET_NAME);
-  if (!sheet) throw new Error(`Sheet ${PENDING_USERS_SHEET_NAME} not found`);
-  const sheetId = sheet.properties.sheetId;
+if (!ROLE_APPROVAL_CHANNEL_ID) {
+  console.error('Missing ROLE_APPROVAL_CHANNEL_ID in environment.');
+  process.exit(1);
+}
 
-  // Xóa dữ liệu cũ
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [
-        {
-          deleteRange: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: 5000,
-              startColumnIndex: 0,
-              endColumnIndex: 5,
-            },
-            shiftDimension: 'ROWS',
-          },
-        },
-      ],
-    },
-  });
+if (!GEMINI_API_KEY) {
+  console.error('Missing GEMINI_API_KEY in environment.');
+  process.exit(1);
+}
 
-  const rows = [];
-  for (const [userId, info] of Object.entries(data)) {
-    // Ép kiểu format ngày giờ Việt Nam
-    const readableDate = new Date(info.joinDate || Date.now()).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+if (!TRIGGER_VOICE_CHANNEL_ID) {
+  console.error('Missing TRIGGER_VOICE_CHANNEL_ID in environment.');
+}
+
+if (!LEADERBOARD_CHANNEL_ID) {
+  console.error('Missing LEADERBOARD_CHANNEL_ID in environment.');
+}
+
+// ===================== Gemini setup =====================
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+
+const geminiModel = genAI.getGenerativeModel({
+  model: 'gemini-2.5-flash',
+  safetySettings: [
+    { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+  ],
+});
+
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+if (!LOG_CHANNEL_ID) {
+  console.warn('⚠️ Missing LOG_CHANNEL_ID in environment. Logging will be disabled.');
+}
+
+// ===================== LOGGING HELPER =====================
+async function sendLog(embed, options = {}) {
+  if (!LOG_CHANNEL_ID) return;
+  
+  try {
+    const channel = await client.channels.fetch(LOG_CHANNEL_ID);
+    if (!channel || !channel.isTextBased()) return;
+    
+    await channel.send({ embeds: [embed], ...options });
+  } catch (err) {
+    console.error('Failed to send log:', err.message);
+  }
+}
+
+function createLogEmbed(title, description, color = 0x2b2d31, fields = []) {
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(description)
+    .setColor(color)
+    .setTimestamp()
+    .setFooter({ text: `Event ID: ${Date.now()}`, iconURL: client.user?.displayAvatarURL() });
+  
+  if (fields.length) embed.addFields(fields);
+  return embed;
+}
+
+function getUserIdentifier(user) {
+  if (!user) return 'Unknown User';
+  
+  // Lấy tên thật (globalName) hoặc tên đăng nhập (username)
+  const name = user.globalName || user.username || 'Unknown';
+  
+  // Kết hợp Text và Ping. VD: Louis Ly (<@12345...>)
+  return `**${name}** (<@${user.id}>)`; 
+}
+
+function getChannelIdentifier(channel) {
+  if (!channel) return 'Unknown Channel';
+  return `${channel.name} (${channel.id})`;
+}
+
+// ===================== FILES =====================
+const ROLES_FILE = path.join(__dirname, 'roles.json');
+const BANS_FILE = path.join(__dirname, 'bans.json');
+const VATSIM_MSG_FILE = path.join(__dirname, 'vatsim_message.json');
+const PROFILES_FILE = path.join(__dirname, 'profiles.json');
+const LEADERBOARD_FILE = path.join(__dirname, 'leaderboard.json');
+const LEADERBOARD_MSG_FILE = path.join(__dirname, 'leaderboard_message.json');
+const PILOT_LEADERBOARD_FILE = path.join(__dirname, 'pilot_leaderboard.json');
+const PILOT_LEADERBOARD_MSG_FILE = path.join(__dirname, 'pilot_leaderboard_message.json');
+const AWARD_SENT_FILE = path.join(__dirname, 'award_sent.json');
+const AWARD_CHANNEL_ID = process.env.BOT_ANNOUNCEMENTS_CHANNEL_ID || '1510136210683723927';
+const REACTION_ROLES_FILE = path.join(__dirname, 'reaction_roles.json');
+const ROUTES_FILE = path.join(__dirname, 'routes.json');
+let routesData = fs.existsSync(ROUTES_FILE) ? JSON.parse(fs.readFileSync(ROUTES_FILE, 'utf8')) : {};
+// ===================== DATA =====================
+let roles = {
+  basicMemberRoleId: '1375110178868826142',
+  verifiedMemberRoleId: '1430517630116036669',
+  devRoleId: '1366433221687906304',
+  adminRoleId: '1365960976016347136',
+  banRoleId: '1408787259322273913',
+  pendingRoleId: '1511014904142762104',
+  eventParticipantRoleId: '1512863333512908946', // Thêm role cho event participants
+  otherRoles: [
+    { name: 'MSFS 2020/2024', id: '1365961239770959872' },
+    { name: 'FSX/P3D', id: '1365961302887108669' },
+    { name: 'X-Plane 11/12', id: '1365961407551766538' },
+    { name: 'Pending', id: '1511014904142762104' },
+  ],
+  vatsimPilotRoleId: process.env.VATSIM_PILOT_ROLE_ID || '1517724342270558218',
+  vatsimAtcRoleId: process.env.VATSIM_ATC_ROLE_ID || '1393133850640781383',
+};
+let awardSent = fs.existsSync(AWARD_SENT_FILE) ? 
+  JSON.parse(fs.readFileSync(AWARD_SENT_FILE, 'utf8')) : 
+  { lastMonth: null, lastYear: null };
+
+if (fs.existsSync(ROLES_FILE)) roles = JSON.parse(fs.readFileSync(ROLES_FILE, 'utf8'));
+
+let bans = fs.existsSync(BANS_FILE) ? JSON.parse(fs.readFileSync(BANS_FILE, 'utf8')) : { users: {} };
+let vatsimMessageStore = fs.existsSync(VATSIM_MSG_FILE) ? JSON.parse(fs.readFileSync(VATSIM_MSG_FILE, 'utf8')) : {};
+let profiles = {};
+let leaderboardMessageStore = fs.existsSync(LEADERBOARD_MSG_FILE) ? JSON.parse(fs.readFileSync(LEADERBOARD_MSG_FILE, 'utf8')) : {};
+let pilotLeaderboardMessageStore = fs.existsSync(PILOT_LEADERBOARD_MSG_FILE) ? JSON.parse(fs.readFileSync(PILOT_LEADERBOARD_MSG_FILE, 'utf8')) : {};
+
+let leaderboardData = { month: null, year: null, stats: {} };
+let pilotLeaderboardData = { month: null, year: null, pilots: {} };
+let isLeaderboardLoaded = false;
+let scheduledAnnouncements = [];
+const pendingAnnouncements = new Map(); // Bộ nhớ tạm để lưu tin nhắn chờ user bấm nút Okay/Reject
+
+
+
+let reactionRoleData = fs.existsSync(REACTION_ROLES_FILE) 
+  ? JSON.parse(fs.readFileSync(REACTION_ROLES_FILE, 'utf8')) 
+  : { atcNotiMsgId: null, channelId: null };
+
+async function loadAllLeaderboards() {
+  const now = new Date();
+  const currentMonth = now.getUTCMonth() + 1;
+  const currentYear = now.getUTCFullYear();
+  
+  try {
+    const atcData = await loadControllerLeaderboard(currentMonth, currentYear);
+    const pilotData = await loadPilotLeaderboard(currentMonth, currentYear);
+    
+    // Chỉ cập nhật nếu hàm trả về dữ liệu hợp lệ
+    if (atcData) leaderboardData = atcData;
+    if (pilotData) pilotLeaderboardData = pilotData;
+    
+    // Khởi tạo nếu thật sự là sheet mới (nhưng phải đảm bảo API không lỗi)
+    if (!leaderboardData.stats) {
+      leaderboardData = {
+        month: currentMonth,
+        year: currentYear,
+        stats: { Center: {}, Approach: {}, Tower: {}, Ground: {}, Other: {} }
+      };
+    }
+    if (!pilotLeaderboardData.pilots) {
+      pilotLeaderboardData = {
+        month: currentMonth,
+        year: currentYear,
+        pilots: {}
+      };
+    }
+    
+    // Đánh dấu là đã tải thành công
+    isLeaderboardLoaded = true;
+    console.log("✅ Dữ liệu Leaderboard đã tải thành công từ Google Sheets.");
+  } catch (error) {
+    console.error("❌ LỖI NGHIÊM TRỌNG: Không thể tải Leaderboard từ Google Sheets:", error);
+    // KHÔNG set isLeaderboardLoaded = true để khóa luồng lưu đè
+  }
+}
+
+// ===================== CLIENT =====================
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.GuildScheduledEvents,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessageReactions, // THÊM DÒNG NÀY
+  ],
+  partials: [
+    Partials.Message,
+    Partials.Channel,
+    Partials.GuildMember,
+    Partials.MessageReaction, // THÊM DÒNG NÀY
+    Partials.User,            // THÊM DÒNG NÀY
+  ],
+});
+
+// store active group-flight events
+let events = new Map();
+
+// store pending role requests
+let pendingRequests = new Map();
+
+// Histories for conversations
+const normalHistories = new Map();
+const swearHistories = new Map();
+
+// Prevent spam/concurrent requests
+const geminiInFlight = new Map();
+
+// Store created voice channels
+const createdVoiceChannels = new Set();
+
+// Store online controllers for leaderboard tracking
+let onlineControllers = new Map();
+let activeVclAtc = new Map(); // Lưu trữ ATC đang online ở VV, VD, VL để check thông báo
+let isFirstVatsimFetch = true; // Cờ chặn thông báo spam lúc bot vừa restart
+let lastLeaderboardUpdate = Date.now();
+
+// Store online pilots for leaderboard tracking
+let onlinePilots = new Map();
+let lastPilotLeaderboardUpdate = Date.now();
+
+// Store user event participation (userId -> eventIds)
+const userEventParticipation = new Map();
+
+// ===================== VATSIM Worker =====================
+const vatsimWorker = new Worker(path.join(__dirname, 'vatsimWorker.js'));
+
+vatsimWorker.on('message', async (data) => {
+  if (data.error) return console.error('VATSIM worker error:', data.error);
+
+  try {
+    const embed = new EmbedBuilder()
+      .setTitle('🌐 VATSIM Online Update')
+      .setColor(0x2ecc71)
+      .setTimestamp();
+
+    const controllers = data.controllers || [];
+    const pilots = data.pilots || [];
+    // Helper: Rút gọn Aircraft Type (VD: H/B77W/L -> B77W | A320/M-SDE... -> A320)
+    function getShortAircraft(acftStr) {
+      if (!acftStr) return 'N/A';
+      // Xóa tiền tố hạng cân (H/, M/, L/, J/) nếu có
+      let cleanStr = acftStr.replace(/^[HMLJ]\//i, '');
+      // Lấy phần đầu tiên trước dấu '/'
+      return cleanStr.split('/')[0];
+    }
+
+    // Helper: Format thời gian chuyến bay HIỆN TẠI
+    function getOnlineTime(logonTimeStr) {
+      if (!logonTimeStr) return 'N/A';
+      const logon = new Date(logonTimeStr).getTime();
+      const diffMs = Date.now() - logon;
+      if (diffMs < 0) return '0h 0m';
+      const hours = Math.floor(diffMs / 3600000);
+      const minutes = Math.floor((diffMs % 3600000) / 60000);
+      return `${hours}h ${minutes}m`;
+    }
+
+    // Helper: Lấy Rating của ATC
+    const vatsimRatings = {
+      0: 'Susp', 1: 'OBS', 2: 'S1', 3: 'S2', 4: 'S3', 5: 'C1', 6: 'C2', 7: 'C3', 8: 'I1', 9: 'I2', 10: 'I3', 11: 'SUP', 12: 'ADM'
+    };
+    function getRatingStr(rating) {
+      if (typeof rating === 'number') return vatsimRatings[rating] || `R${rating}`;
+      return rating || 'N/A';
+    }
+
+    // --- TÍNH NĂNG THÔNG BÁO ATC ONLINE/OFFLINE ---
+    try {
+      const annChannel = client.channels.cache.get(BOT_ANNOUNCEMENTS_CHANNEL_ID);
+      if (annChannel) {
+        const currentVclAtc = new Map();
+        
+        // Lọc tất cả ATC theo tiêu chuẩn khắt khe:
+        // 1. Bắt đầu bằng VV, VD, VL, hoặc VCL
+        // 2. Phải có dấu gạch dưới '_' (VD: VVTS_TWR) để tránh dính pilot (như VLG8436)
+        // 3. Không chứa chữ OBS trong callsign và Rating phải khác OBS (rating > 1)
+        controllers.forEach(c => {
+          if (!c.callsign) return;
+          const cs = c.callsign.toUpperCase();
+          
+          const isVclRegion = cs.startsWith('VV') || cs.startsWith('VD') || cs.startsWith('VL') || cs.startsWith('VCL');
+          const hasUnderscore = cs.includes('_');
+          const isNotObserver = !cs.includes('OBS') && c.rating > 1;
+
+          // THÊM: Kiểm tra xem ATC đã set tần số thật chưa (khác 199.998)
+          const isFreqSet = c.frequency && c.frequency != '199.998' && c.frequency != 199.998;
+
+          // Chỉ ghi nhận ATC online và cho gửi thông báo khi họ ĐÃ SET tần số
+          if (isVclRegion && hasUnderscore && isNotObserver && isFreqSet) {
+            currentVclAtc.set(cs, c);
+          }
+        });
+
+        // 1. Kiểm tra ATC mới Online
+        for (const [cs, c] of currentVclAtc) {
+          // Chỉ thông báo nếu không phải lần quét đầu tiên sau khi bật bot
+          if (!activeVclAtc.has(cs) && !isFirstVatsimFetch) {
+            const logonUnix = Math.floor(new Date(c.logon_time).getTime() / 1000); // Đổi ra Unix timestamp
+
+            const embed = new EmbedBuilder()
+              .setTitle('📡 ATC Online')
+              .setDescription(`**${cs}** (${c.name || 'N/A'}) đang online!\n📶 Tần số: **${c.frequency || 'N/A'}**\n🎖️ Rating: **${getRatingStr(c.rating)}**\n⏰ Online lúc: <t:${logonUnix}:T> (<t:${logonUnix}:R>)`)
+              .setColor(0x00FF00)
+              .setTimestamp();
+            
+            // Chỉ gửi Embed, KHÔNG tag role
+            annChannel.send({ embeds: [embed] });
+          }
+        }
+
+        // 2. Kiểm tra ATC mới Offline
+        for (const [cs, c] of activeVclAtc) {
+          // Chỉ thông báo nếu không phải lần quét đầu tiên
+          if (!currentVclAtc.has(cs) && !isFirstVatsimFetch) {
+            const duration = getOnlineTime(c.logon_time); 
+
+            const embed = new EmbedBuilder()
+              .setTitle('🔌 ATC Offline')
+              .setDescription(`**${cs}** (${c.name || 'N/A'}) đã offline.\n⏱️ Tổng thời gian online: **${duration}**`)
+              .setColor(0xFF0000)
+              .setTimestamp();
+            
+            // Offline không cần ping role
+            annChannel.send({ embeds: [embed] });
+          }
+        }
+
+        // 3. Cập nhật lại danh sách ATC hiện tại và tắt cờ
+        activeVclAtc = currentVclAtc;
+        isFirstVatsimFetch = false; // Lần quét sau sẽ bắt đầu gửi thông báo bình thường
+      }
+    } catch (err) {
+      console.error('Lỗi tính năng thông báo ATC:', err);
+    }
+    // --- KẾT THÚC THÔNG BÁO ATC ---
+
+    // --- KẾT THÚC THÔNG BÁO ATC ---
+
+    // Cấu hình chia nhỏ danh sách (tránh đụng trần giới hạn Discord)
+    const maxItemsPerField = 6; // Hiển thị 10 người mỗi field
+    const maxFieldsPerEmbed = 4; // Tối đa 20 fields (200 người) mỗi Embed để tin nhắn không quá dài
+    const embeds = [];
+
+    // Xây dựng mảng nội dung cho ATC
+    const ctrlLines = controllers.map(c => {
+      const name = c.name || `CID: ${c.cid}`;
+      
+      // Đổi hiển thị trong danh sách tổng để đẹp hơn
+      let freq = c.frequency || 'N/A';
+      if (freq == '199.998' || freq == 199.998) {
+         freq = 'Đang thiết lập...';
+      }
+      
+      const rating = getRatingStr(c.rating);
+      return `📻 **${c.callsign}** | ${name} | 🎖️ ${rating} | 📶 ${freq}`;
+    });
+
+    // Xây dựng mảng nội dung cho Pilot (Kết hợp ACDM dpark + Định vị tọa độ)
+    const pilotLines = pilots.map(p => {
+      const name = p.name ? p.name : `CID: ${p.cid}`;
+      const dep = p.flight_plan?.departure || 'N/A';
+      const arr = p.flight_plan?.arrival || 'N/A';
+      const acft = getShortAircraft(p.flight_plan?.aircraft);
+      const onlineTime = getOnlineTime(p.logon_time);
+      
+      let standText = '';
+      const callsignUpper = (p.callsign || '').toUpperCase();
+
+      // 1. ƯU TIÊN: Kiểm tra xem tàu này có dữ liệu bãi đậu trên hệ thống ACDM không
+      const acdmFlight = acdmData.get(callsignUpper);
+      if (acdmFlight && acdmFlight.dpark && acdmFlight.dpark !== 'N/A' && acdmFlight.dpark !== '----') {
+          standText = `\n   └ 🅿️ Stand: **${acdmFlight.dpark}**`;
+      } 
+      // 2. PHƯƠNG ÁN PHÒNG HỜ: Nếu ACDM không có (hoặc trống), dùng định vị tọa độ từ worker gửi về
+      else if (p.current_stand) {
+          standText = `\n   └ 🅿️ Stand: **${p.current_stand}**`;
+      }
+      
+      return `✈️ **${p.callsign}** | ${name} | ${dep} ➔ ${arr} | 🛩️ ${acft} | ⏱️ ${onlineTime}${standText}`;
+    });
+
+    // Hàm chia nhỏ mảng (Chunking)
+    function chunkArray(arr, size) {
+      const res = [];
+      for (let i = 0; i < arr.length; i += size) res.push(arr.slice(i, i + size));
+      return res;
+    }
+
+    const ctrlChunks = chunkArray(ctrlLines, maxItemsPerField);
+    const pilotChunks = chunkArray(pilotLines, maxItemsPerField);
+
+    let currentEmbed = new EmbedBuilder()
+      .setTitle('🌐 VATSIM Online Update')
+      .setColor(0x2ecc71)
+      .setTimestamp();
+    embeds.push(currentEmbed);
+
+    // Xử lý chèn ATC vào Embed
+    if (ctrlChunks.length === 0) {
+      currentEmbed.addFields({ name: `📡 ATC Online (0)`, value: 'Không có ATC nào online', inline: false });
+    } else {
+      ctrlChunks.forEach((chunk, index) => {
+        // Tràn dung lượng 1 Embed -> Tạo Embed mới
+        if (currentEmbed.data.fields && currentEmbed.data.fields.length >= maxFieldsPerEmbed) {
+          currentEmbed = new EmbedBuilder().setColor(0x2ecc71);
+          embeds.push(currentEmbed);
+        }
+        const name = index === 0 ? `📡 ATC Online (${controllers.length})` : `📡 ATC Online`;
+        currentEmbed.addFields({ name, value: chunk.join('\n'), inline: false });
+      });
+    }
+
+    // Xử lý chèn Pilot vào Embed
+    if (pilotChunks.length === 0) {
+      if (currentEmbed.data.fields && currentEmbed.data.fields.length >= maxFieldsPerEmbed) {
+          currentEmbed = new EmbedBuilder().setColor(0x2ecc71);
+          embeds.push(currentEmbed);
+      }
+      currentEmbed.addFields({ name: `🛫 Pilots Online (0)`, value: 'Không có Pilot nào online', inline: false });
+    } else {
+      pilotChunks.forEach((chunk, index) => {
+        // Tràn dung lượng 1 Embed -> Tạo Embed mới
+        if (currentEmbed.data.fields && currentEmbed.data.fields.length >= maxFieldsPerEmbed) {
+          currentEmbed = new EmbedBuilder().setColor(0x2ecc71);
+          embeds.push(currentEmbed);
+        }
+        const name = index === 0 ? `🛫 Pilots Online (${pilots.length})` : `🛫 Pilots Online`;
+        currentEmbed.addFields({ name, value: chunk.join('\n'), inline: false });
+      });
+    }
+
+    // Đóng gói: Discord cho phép 10 Embeds/tin nhắn. Mình gom 5 Embeds/tin nhắn cho an toàn và đẹp.
+    const messagesPayload = [];
+    for (let i = 0; i < embeds.length; i++) {
+      messagesPayload.push({ embeds: [embeds[i]] }); 
+    }
+
+    // Lấy ID tin nhắn đã lưu (Hỗ trợ cấu trúc mảng mới để lưu nhiều tin nhắn)
+    let storedIds = vatsimMessageStore.messageIds || [];
+    if (!vatsimMessageStore.messageIds && vatsimMessageStore.messageId) {
+        storedIds = [vatsimMessageStore.messageId]; // Convert file JSON cũ tự động
+    }
+    const channelId = vatsimMessageStore.channelId || VATSIM_CHANNEL_ID;
+    const newStoredIds = [];
+
+    // Cập nhật, Thêm hoặc Xóa tin nhắn linh hoạt
+    try {
+      const channel = await client.channels.fetch(channelId);
+
+      for (let i = 0; i < messagesPayload.length; i++) {
+        if (i < storedIds.length) {
+          // 1. Nếu tin nhắn đã tồn tại -> Edit lại
+          try {
+            const msg = await channel.messages.fetch(storedIds[i]);
+            await msg.edit(messagesPayload[i]);
+            newStoredIds.push(msg.id);
+          } catch (e) {
+            // Lỡ ai tay nhanh xóa mất -> Gửi lại cái mới
+            const sent = await channel.send(messagesPayload[i]);
+            newStoredIds.push(sent.id);
+          }
+        } else {
+          // 2. Cần thêm dung lượng -> Send tin nhắn mới nối tiếp
+          const sent = await channel.send(messagesPayload[i]);
+          newStoredIds.push(sent.id);
+        }
+      }
+
+      // 3. Nếu số lượng bay giảm xuống, xóa đi mấy cái tin nhắn trắng thừa mứa ở dưới
+      for (let i = messagesPayload.length; i < storedIds.length; i++) {
+        try {
+          const msg = await channel.messages.fetch(storedIds[i]);
+          await msg.delete();
+        } catch(e) {}
+      }
+
+      // Bốc thẳng lên MongoDB để không bao giờ bị Render xóa
+      vatsimMessageStore = { messageIds: newStoredIds, channelId: channel.id };
+      await db.saveBotConfig('vatsim_messages', vatsimMessageStore);
+
+    } catch (err) {
+      console.warn('Lỗi khi update/send multi VATSIM messages:', err.message || err);
+    }
+
+    // Ghi nhận dữ liệu Leaderboard
+    await trackControllers(controllers);
+    await trackPilots(pilots); // <-- Đảm bảo dòng này còn tồn tại
     
-    rows.push([
-      userId,
-      info.joinDate || 0,
-      info.notified5Days ? 'true' : 'false',
-      info.notified7Days ? 'true' : 'false',
-      readableDate // In thêm cột thứ 5 ra Sheet
-    ]);
+  } catch (err) { // <-- ĐÂY LÀ PHẦN BỊ THIẾU GÂY RA LỖI 1472
+    console.error('Error processing VATSIM data:', err);
   }
+});
 
-  if (rows.length === 0) return;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${PENDING_USERS_SHEET_NAME}!A2`,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  });
-
-  console.log(`✅ Saved ${rows.length} pending users to sheet ${PENDING_USERS_SHEET_NAME}`);
+// ===================== EVENT ROLE MANAGEMENT =====================
+async function ensureEventRoleExists() {
+  // Trả về trực tiếp role cố định, cấm bot tự ý đẻ thêm role rác
+  if (!roles.eventParticipantRoleId) {
+    console.error('Chưa cài đặt ID cho eventParticipantRoleId trong code!');
+    return null;
+  }
+  return roles.eventParticipantRoleId;
 }
 
-// ========== ĐỌC CONTROLLER TỪ SHEET ==========
-async function loadControllerLeaderboard(month, year) {
-  const sheetName = getSheetName(CONTROLLER_SHEET_PREFIX, month, year);
-  const exists = await sheetExists(sheetName);
-  if (!exists) {
-    return { month, year, stats: { Center: {}, Approach: {}, Tower: {}, Ground: {}, Other: {} } };
-  }
-
-  const sheets = await initGoogleSheets();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A2:H`,
-  });
-  const rows = response.data.values || [];
-  const stats = { Center: {}, Approach: {}, Tower: {}, Ground: {}, Other: {} };
-
-  for (const row of rows) {
-    const [category, cid, name, callsign, secondsStr, lastUpdateStr] = row;
-    if (!category || !cid) continue;
-    const seconds = parseInt(secondsStr, 10) || 0;
-    const lastUpdate = parseInt(lastUpdateStr, 10) || 0;
-    if (!stats[category]) stats[category] = {};
-    stats[category][cid] = {
-      name: name || '',
-      callsign: callsign || '',
-      seconds,
-      lastUpdate,
-    };
-  }
-  return { month, year, stats };
+async function addUserToEvent(userId, eventId) {
+  try {
+    if (!userEventParticipation.has(userId)) {
+      userEventParticipation.set(userId, new Set());
+    }
+    
+    const userEvents = userEventParticipation.get(userId);
+    userEvents.add(eventId);
+    
+    // Gán role cho user
+    const roleId = await ensureEventRoleExists();
+    if (!roleId) return;
+    
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const member = await guild.members.fetch(userId).catch(() => null);
+    
+    if (member) {
+      await member.roles.add(roleId);
+      console.log(`Added event role to ${member.user.tag} (participating in ${userEvents.size} events)`);
+    }
+  } catch (err) {
+    console.error('Error adding user to event:', err);
+  }
 }
 
-// ========== ĐỌC PILOT TỪ SHEET ==========
-async function loadPilotLeaderboard(month, year) {
-  const sheetName = getSheetName(PILOT_SHEET_PREFIX, month, year);
-  const exists = await sheetExists(sheetName);
-  if (!exists) {
-    return { month, year, pilots: {} };
-  }
-
-  const sheets = await initGoogleSheets();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A2:J`,
-  });
-  const rows = response.data.values || [];
-  const pilots = {};
-
-  for (const row of rows) {
-    const [cid, name, callsign, secondsStr, flightsStr, lastUpdateStr, , lastDeparture, lastArrival, lastAircraft] = row;
-    if (!cid) continue;
-    pilots[cid] = {
-      name: name || '',
-      callsign: callsign || '',
-      seconds: parseInt(secondsStr, 10) || 0,
-      flights: parseInt(flightsStr, 10) || 1,
-      lastUpdate: parseInt(lastUpdateStr, 10) || 0,
-      lastDeparture: lastDeparture || '',
-      lastArrival: lastArrival || '',
-      lastAircraft: lastAircraft || '',
-    };
-  }
-  return { month, year, pilots };
+async function removeUserFromEvent(userId, eventId) {
+  try {
+    if (!userEventParticipation.has(userId)) return;
+    
+    const userEvents = userEventParticipation.get(userId);
+    userEvents.delete(eventId);
+    
+    // Nếu user không còn tham gia sự kiện nào, xóa role
+    if (userEvents.size === 0) {
+      userEventParticipation.delete(userId);
+      
+      const roleId = await ensureEventRoleExists();
+      if (!roleId) return;
+      
+      const guild = await client.guilds.fetch(GUILD_ID);
+      const member = await guild.members.fetch(userId).catch(() => null);
+      
+      if (member) {
+        await member.roles.remove(roleId);
+        console.log(`Removed event role from ${member.user.tag} (no events)`);
+      }
+    }
+  } catch (err) {
+    console.error('Error removing user from event:', err);
+  }
 }
 
-// ========== ĐỌC PENDING USERS TỪ SHEET ==========
-async function loadPendingUsersSheet() {
-  const exists = await sheetExists(PENDING_USERS_SHEET_NAME);
-  if (!exists) {
-    // Ép nó phải tạo sheet LUÔN VÀ NGAY nếu chưa có, thay vì bỏ qua
-    console.log('⚠️ Sheet PendingUsers chưa tồn tại, đang tiến hành tạo mới...');
-    await createPendingUsersSheet();
-    return {};
+async function removeAllUsersFromEvent(eventId) {
+  try {
+    // Tìm tất cả users tham gia event này
+    for (const [userId, userEvents] of userEventParticipation.entries()) {
+      if (userEvents.has(eventId)) {
+        await removeUserFromEvent(userId, eventId);
+      }
+    }
+  } catch (err) {
+    console.error('Error removing all users from event:', err);
+  }
+}
+
+// ===================== DISCORD EVENT HANDLERS =====================
+client.on('guildScheduledEventUserAdd', async (scheduledEvent, user) => {
+  try {
+    console.log(`User ${user.tag} interested in Discord event: ${scheduledEvent.name}`);
+    
+    // Thêm user vào sự kiện
+    await addUserToEvent(user.id, scheduledEvent.id);
+  } catch (err) {
+    console.error('Error in guildScheduledEventUserAdd:', err);
+  }
+});
+
+client.on('guildScheduledEventUserRemove', async (scheduledEvent, user) => {
+  try {
+    console.log(`User ${user.tag} no longer interested in Discord event: ${scheduledEvent.name}`);
+    
+    // Xóa user khỏi sự kiện
+    await removeUserFromEvent(user.id, scheduledEvent.id);
+  } catch (err) {
+    console.error('Error in guildScheduledEventUserRemove:', err);
+  }
+});
+
+// ===================== CONTROLLER LEADERBOARD FUNCTIONS =====================
+async function trackControllers(controllers) {
+  const now = Date.now();
+  const currentControllers = new Map();
+  
+  // Filter controllers for leaderboard (VVTS_, VVHM_, VCL_CTR, VVTS_F_APP)
+  const trackedControllers = controllers.filter(controller => {
+    if (!controller.callsign) return false;
+    const callsignUpper = controller.callsign.toUpperCase();
+    
+    // Kiểm tra các callsign cần track
+    return (
+      callsignUpper.startsWith('VVTS_') || 
+      callsignUpper.startsWith('VVHM_') ||
+      callsignUpper.includes('VCL_CTR') ||
+      callsignUpper.includes('VVTS_F_APP')
+    );
+  });
+  
+  // Add to current tracking
+  trackedControllers.forEach(controller => {
+    const cid = controller.cid;
+    currentControllers.set(cid, {
+      name: controller.name || `ID: ${cid}`,
+      callsign: controller.callsign,
+      category: getCategoryFromCallsign(controller.callsign),
+      lastSeen: now
+    });
+  });
+  
+  // Update leaderboard data for online controllers
+  await updateControllerLeaderboardForOnlineControllers(currentControllers, now);
+  
+  // Update current tracking
+  onlineControllers = currentControllers;
+}
+
+function getCategoryFromCallsign(callsign) {
+  const callsignUpper = callsign.toUpperCase();
+  
+  // VCL_CTR và VVHM_CTR là Control thuộc Center
+  if (callsignUpper.includes('VCL_CTR') || callsignUpper.includes('VVHM_CTR')) return 'Center';
+  
+  // VVTS_GND hoặc VVTS_DEL là Ground
+  if (callsignUpper.includes('VVTS_GND') || callsignUpper.includes('VVTS_DEL')) return 'Ground';
+  
+  // VVTS_TWR là Tower
+  if (callsignUpper.includes('VVTS_TWR')) return 'Tower';
+  
+  // VVTS_APP, VVTS_DEP, VVTS_F_APP là Approach
+  if (callsignUpper.includes('VVTS_APP') || 
+      callsignUpper.includes('VVTS_F_APP')) return 'Approach';
+  
+  return 'Other';
+}
+
+async function updateControllerLeaderboardForOnlineControllers(currentControllers, currentTime) {
+  if (!isLeaderboardLoaded) {
+    console.warn('⚠️ Bỏ qua update ATC Leaderboard vì dữ liệu gốc chưa tải xong (tránh lỗi xóa data).');
+    return;
+  }
+  try {
+    // Initialize leaderboard data if not exists
+    if (!leaderboardData.month || !leaderboardData.year || !leaderboardData.stats) {
+      const now = new Date();
+      leaderboardData = {
+        month: now.getUTCMonth() + 1,
+        year: now.getUTCFullYear(),
+        stats: {
+          Center: {},
+          Approach: {},
+          Tower: {},
+          Ground: {},
+          Other: {}
+        }
+      };
+    }
+    
+    // Check if month has changed
+    const nowDate = new Date();
+    const currentMonth = nowDate.getUTCMonth() + 1;
+    const currentYear = nowDate.getUTCFullYear();
+    
+    if (leaderboardData.month !== currentMonth || leaderboardData.year !== currentYear) {
+      console.log(`[Controller Leaderboard] Resetting for new month: ${currentMonth}/${currentYear}`);
+      leaderboardData = {
+        month: currentMonth,
+        year: currentYear,
+        stats: {
+          Center: {},
+          Approach: {},
+          Tower: {},
+          Ground: {},
+          Other: {}
+        }
+      };
+    }
+    
+    // Ensure all categories exist
+    const categories = ['Center', 'Approach', 'Tower', 'Ground', 'Other'];
+    categories.forEach(category => {
+      if (!leaderboardData.stats[category]) {
+        leaderboardData.stats[category] = {};
+      }
+    });
+    
+    // Tính thời gian thực tế đã trôi qua
+    const timeElapsed = lastLeaderboardUpdate ? Math.floor((currentTime - lastLeaderboardUpdate) / 1000) : 60;
+    
+    // Giới hạn thời gian tối đa giữa các lần cập nhật (5 phút)
+    const maxUpdateInterval = 300; // 5 phút
+    const updateSeconds = Math.min(timeElapsed, maxUpdateInterval);
+    
+    console.log(`[Controller Leaderboard] Updating with ${updateSeconds} seconds elapsed, ${currentControllers.size} controllers online`);
+    
+    // Cập nhật thời gian cho controllers đang online
+    currentControllers.forEach((controller, cid) => {
+      const category = controller.category;
+      
+      if (!leaderboardData.stats[category][cid]) {
+        // New controller
+        leaderboardData.stats[category][cid] = {
+          name: controller.name,
+          callsign: controller.callsign,
+          seconds: updateSeconds,
+          lastUpdate: currentTime
+        };
+      } else {
+        // Existing controller - cộng thêm thời gian
+        const existing = leaderboardData.stats[category][cid];
+        existing.seconds += updateSeconds;
+        existing.lastUpdate = currentTime;
+        existing.callsign = controller.callsign; // Cập nhật callsign mới nhất
+      }
+    });
+    
+    // Cập nhật thời gian lần cập nhật cuối
+    lastLeaderboardUpdate = currentTime;
+    
+    // Save to file
+    await saveControllerLeaderboard(leaderboardData.month, leaderboardData.year, leaderboardData.stats);
+    console.log(`[Controller Leaderboard] Saved data at ${new Date().toISOString()}`);
+    
+  } catch (err) {
+    console.error('Error updating controller leaderboard data:', err);
+  }
+}
+
+async function updateControllerLeaderboardEmbed() {
+  try {
+    // Ensure leaderboard data exists
+    if (!leaderboardData.month || !leaderboardData.year || !leaderboardData.stats) {
+      return;
+    }
+    
+    // Get current UTC time
+    const now = new Date();
+    const utcTime = now.toUTCString();
+    const utcTimeShort = utcTime.split(' ')[4]; // Get HH:MM:SS part
+    const utcHourMinute = utcTimeShort.split(':').slice(0, 2).join(':');
+    
+    // Format time from seconds to "Xh Ym"
+    function formatTime(seconds) {
+      if (!seconds || seconds === 0) return 'N/A';
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      return `${hours}h ${minutes}m`;
+    }
+    
+    // Create embed
+    const embed = new EmbedBuilder()
+      .setTitle('Member Iron Mic Awards Leaderboard')
+      .setDescription(`**VCLvACC Controllers**\n\nCập nhật lúc: ${utcHourMinute} UTC`)
+      .setColor(0xFFD700)
+      .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
+      .setFooter({ text: 'Tự động cập nhật mỗi giờ | Giờ hiển thị: UTC' })
+      .setTimestamp();
+    
+    // Add each category
+    const categories = ['Center', 'Approach', 'Tower', 'Ground'];
+    
+    categories.forEach(category => {
+      const members = leaderboardData.stats[category] || {};
+      const memberEntries = Object.entries(members);
+      
+      let fieldValue = '';
+      
+      if (memberEntries.length === 0) {
+        fieldValue = 'Không có dữ liệu';
+      } else {
+        // Sort by time (descending)
+        const sortedMembers = memberEntries.sort((a, b) => {
+          const timeA = a[1].seconds || 0;
+          const timeB = b[1].seconds || 0;
+          return timeB - timeA;
+        });
+        
+        // Limit to top 10
+        const displayMembers = sortedMembers.slice(0, 10);
+        
+        displayMembers.forEach(([id, data], index) => {
+          const displayName = data.name && data.name !== `ID: ${id}` ? 
+            `${data.name} (${id})` : data.name || id;
+          const formattedTime = formatTime(data.seconds);
+          const rankEmoji = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '•';
+          
+          // Thêm ghi chú về position đặc biệt
+          let callsignNote = '';
+          if (data.callsign) {
+            const callsignUpper = data.callsign.toUpperCase();
+            if (callsignUpper.includes('VCL_CTR')) callsignNote = ' (VCL CTR)';
+            else if (callsignUpper.includes('VVTS_F_APP')) callsignNote = ' (F_APP)';
+            else if (callsignUpper.includes('VVHM_CTR')) callsignNote = ' (VVHM CTR)';
+          }
+          
+          fieldValue += `${rankEmoji} ${displayName}${callsignNote} - ${formattedTime}\n`;
+        });
+      }
+      
+      // Thêm icon và mô tả cho từng category
+      let categoryName = category;
+      let categoryDescription = '';
+      
+      if (category === 'Center') {
+        categoryName = '🚀 Center';
+        categoryDescription = 'VCL_CTR • VVHM_CTR';
+      } else if (category === 'Approach') {
+        categoryName = '📡 Approach';
+        categoryDescription = 'VVTS_APP • VVTS_F_APP';
+      } else if (category === 'Tower') {
+        categoryName = '🏢 Tower';
+        categoryDescription = 'VVTS_TWR';
+      } else if (category === 'Ground') {
+        categoryName = '🛬 Ground';
+        categoryDescription = 'VVTS_GND • VVTS_DEL';
+      }
+      
+      embed.addFields({
+        name: `${categoryName} (${Object.keys(members).length})`,
+        value: categoryDescription + '\n' + (fieldValue || 'Không có dữ liệu'),
+        inline: false
+      });
+    });
+    
+    // Add total stats
+    const totalMembers = Object.values(leaderboardData.stats).reduce(
+      (sum, category) => sum + Object.keys(category).length, 0
+    );
+    const totalSeconds = Object.values(leaderboardData.stats).reduce((sum, category) => {
+      return sum + Object.values(category).reduce(
+        (catSum, member) => catSum + (member.seconds || 0), 0
+      );
+    }, 0);
+    const totalHours = (totalSeconds / 3600).toFixed(1);
+    
+    embed.addFields({
+      name: '📊 Thống kê',
+      value: `• **Tổng controller:** ${totalMembers}\n• **Tổng giờ:** ${totalHours}h\n• **Tháng:** ${leaderboardData.month}/${leaderboardData.year}`,
+      inline: false
+    });
+    
+    // Add online now info
+    const onlineCount = onlineControllers.size;
+    const centerCount = Array.from(onlineControllers.values()).filter(c => c.category === 'Center').length;
+    const approachCount = Array.from(onlineControllers.values()).filter(c => c.category === 'Approach').length;
+    const towerCount = Array.from(onlineControllers.values()).filter(c => c.category === 'Tower').length;
+    const groundCount = Array.from(onlineControllers.values()).filter(c => c.category === 'Ground').length;
+    const otherCount = Array.from(onlineControllers.values()).filter(c => c.category === 'Other').length;
+    
+    let onlineText = '';
+    if (onlineCount > 0) {
+      onlineText = `${onlineCount} controller${onlineCount > 1 ? 's' : ''} đang online:\n`;
+      if (centerCount > 0) onlineText += `• Center: ${centerCount} (VCL_CTR, VVHM_CTR)\n`;
+      if (approachCount > 0) onlineText += `• Approach: ${approachCount} (APP, DEP, F_APP)\n`;
+      if (towerCount > 0) onlineText += `• Tower: ${towerCount} (TWR)\n`;
+      if (groundCount > 0) onlineText += `• Ground: ${groundCount} (GND, DEL)\n`;
+      if (otherCount > 0) onlineText += `• Other: ${otherCount}`;
+    } else {
+      onlineText = 'Không có controller nào online tại VVTS/VVHM/VCL';
+    }
+    
+    embed.addFields({
+      name: '🟢 Đang online',
+      value: onlineText,
+      inline: false
+    });
+    
+    // ================== CẬP NHẬT HOẶC TẠO MỚI TIN NHẮN ATC ==================
+    let targetChannelId = leaderboardMessageStore.channelId || LEADERBOARD_CHANNEL_ID;
+    let msgToEdit = null;
+
+    try {
+      const channel = await client.channels.fetch(targetChannelId);
+
+      // 1. Thử lấy tin nhắn bằng ID trong JSON
+      if (leaderboardMessageStore.messageId) {
+        msgToEdit = await channel.messages.fetch(leaderboardMessageStore.messageId).catch(() => null);
+      }
+
+      // 2. Nếu không tìm thấy (JSON mất hoặc lỗi cache) -> Bật Radar tìm lại
+      if (!msgToEdit) {
+        const oldMsgId = await findOldMessageByTitle(targetChannelId, 'Member Iron Mic Awards Leaderboard');
+        if (oldMsgId) {
+          msgToEdit = await channel.messages.fetch(oldMsgId).catch(() => null);
+        }
+      }
+
+      // 3. Quyết định Edit đè lên hay Gửi tin mới
+      if (msgToEdit) {
+        await msgToEdit.edit({ embeds: [embed] });
+        leaderboardMessageStore = { messageId: msgToEdit.id, channelId: targetChannelId };
+        console.log(`✅ Controller Leaderboard updated at ${utcTime}`);
+      } else {
+        const sent = await channel.send({ embeds: [embed] });
+        leaderboardMessageStore = { messageId: sent.id, channelId: targetChannelId };
+        console.log(`✅ Controller Leaderboard created at ${utcTime}`);
+      }
+
+      // Lưu cứng dữ liệu
+      fs.writeFileSync(LEADERBOARD_MSG_FILE, JSON.stringify(leaderboardMessageStore, null, 2));
+
+    } catch (err) {
+      console.error('Lỗi khi cập nhật Controller Leaderboard:', err.message);
+    }
+  } catch (err) {
+    console.error('Error updating controller leaderboard embed:', err);
   }
+}
 
-  const sheets = await initGoogleSheets();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${PENDING_USERS_SHEET_NAME}!A2:D`,
-  });
-  
-  const rows = response.data.values || [];
-  const data = {};
+// ===================== PILOT LEADERBOARD FUNCTIONS =====================
+async function trackPilots(pilots) {
+  const now = Date.now();
+  const currentPilots = new Map();
+  
+  // Filter pilots in VCL region (departure or arrival starts with VV, VD, VL)
+  const vclPilots = pilots.filter(pilot => {
+    if (!pilot.flight_plan) return false;
+    
+    const dep = pilot.flight_plan.departure || '';
+    const arr = pilot.flight_plan.arrival || '';
+    
+    // Check if departure or arrival is in VCL region
+    const isVCLDeparture = dep.startsWith('VV') || dep.startsWith('VD') || dep.startsWith('VL');
+    const isVCLArrival = arr.startsWith('VV') || arr.startsWith('VD') || arr.startsWith('VL');
+    
+    return isVCLDeparture || isVCLArrival;
+  });
+  
+  // Add to current tracking
+  vclPilots.forEach(pilot => {
+    const cid = pilot.cid;
+    currentPilots.set(cid, {
+      name: pilot.name || `ID: ${cid}`,
+      callsign: pilot.callsign,
+      departure: pilot.flight_plan?.departure || 'N/A',
+      arrival: pilot.flight_plan?.arrival || 'N/A',
+      aircraft: pilot.flight_plan?.aircraft || 'N/A',
+      lastSeen: now
+    });
+  });
+  
+  // Update pilot leaderboard data
+  await updatePilotLeaderboard(currentPilots, now);
+  
+  // Update current tracking
+  onlinePilots = currentPilots;
+}
 
-  for (const row of rows) {
-    const [userId, joinDateStr, notified5DaysStr, notified7DaysStr] = row;
-    if (!userId) continue;
+async function updatePilotLeaderboard(currentPilots, currentTime) {
+  if (!isLeaderboardLoaded) {
+    console.warn('⚠️ Bỏ qua update Pilot Leaderboard vì dữ liệu gốc chưa tải xong (tránh lỗi xóa data).');
+    return;
+  }
+  try {
+    // Initialize pilot leaderboard data if not exists
+    if (!pilotLeaderboardData.month || !pilotLeaderboardData.year || !pilotLeaderboardData.pilots) {
+      const now = new Date();
+      pilotLeaderboardData = {
+        month: now.getUTCMonth() + 1,
+        year: now.getUTCFullYear(),
+        pilots: {}
+      };
+    }
+    
+    // Check if month has changed
+    const nowDate = new Date();
+    const currentMonth = nowDate.getUTCMonth() + 1;
+    const currentYear = nowDate.getUTCFullYear();
+    
+    if (pilotLeaderboardData.month !== currentMonth || pilotLeaderboardData.year !== currentYear) {
+      console.log(`[Pilot Leaderboard] Resetting for new month: ${currentMonth}/${currentYear}`);
+      pilotLeaderboardData = {
+        month: currentMonth,
+        year: currentYear,
+        pilots: {}
+      };
+    }
+    
+    // Tính thời gian thực tế đã trôi qua
+    const timeElapsed = lastPilotLeaderboardUpdate ? Math.floor((currentTime - lastPilotLeaderboardUpdate) / 1000) : 60;
+    
+    // Giới hạn thời gian tối đa giữa các lần cập nhật (5 phút)
+    const maxUpdateInterval = 300; // 5 phút
+    const updateSeconds = Math.min(timeElapsed, maxUpdateInterval);
+    
+    console.log(`[Pilot Leaderboard] Updating with ${updateSeconds} seconds elapsed, ${currentPilots.size} pilots in VCL region`);
+    
+    // Cập nhật thời gian cho pilots đang online
+    currentPilots.forEach((pilot, cid) => {
+      if (!pilotLeaderboardData.pilots[cid]) {
+        // New pilot
+        pilotLeaderboardData.pilots[cid] = {
+          name: pilot.name,
+          callsign: pilot.callsign,
+          seconds: updateSeconds,
+          flights: 1,
+          lastUpdate: currentTime,
+          lastDeparture: pilot.departure,
+          lastArrival: pilot.arrival,
+          lastAircraft: pilot.aircraft
+        };
+      } else {
+        // Existing pilot - cộng thêm thời gian
+        const existing = pilotLeaderboardData.pilots[cid];
+        existing.seconds += updateSeconds;
+        existing.lastUpdate = currentTime;
+        existing.callsign = pilot.callsign;
+        existing.lastDeparture = pilot.departure;
+        existing.lastArrival = pilot.arrival;
+        existing.lastAircraft = pilot.aircraft;
+        
+        // Nếu có thay đổi sân bay, tăng số chuyến bay
+        if (existing.lastDeparture !== pilot.departure || existing.lastArrival !== pilot.arrival) {
+          existing.flights += 1;
+        }
+      }
+    });
+    
+    // Cập nhật thời gian lần cập nhật cuối
+    lastPilotLeaderboardUpdate = currentTime;
+    
+    // Save to file
+    await savePilotLeaderboard(pilotLeaderboardData.month, pilotLeaderboardData.year, pilotLeaderboardData.pilots);
+    console.log(`[Pilot Leaderboard] Saved data at ${new Date().toISOString()}`);
+    
+  } catch (err) {
+    console.error('Error updating pilot leaderboard data:', err);
+  }
+}
+
+async function updatePilotLeaderboardEmbed() {
+  try {
+    // Ensure pilot leaderboard data exists
+    if (!pilotLeaderboardData.month || !pilotLeaderboardData.year || !pilotLeaderboardData.pilots) {
+      return;
+    }
+    
+    // Get current UTC time
+    const now = new Date();
+    const utcTime = now.toUTCString();
+    const utcTimeShort = utcTime.split(' ')[4]; // Get HH:MM:SS part
+    const utcHourMinute = utcTimeShort.split(':').slice(0, 2).join(':');
+    
+    // Format time from seconds to "Xh Ym"
+    function formatTime(seconds) {
+      if (!seconds || seconds === 0) return 'N/A';
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      return `${hours}h ${minutes}m`;
+    }
+    
+    // Create embed
+    const embed = new EmbedBuilder()
+      .setTitle('✈️ VCLvACC Pilot Leaderboard')
+      .setDescription(`**Member Iron Mic Awards - Pilots**\n\nCập nhật lúc: ${utcHourMinute} UTC`)
+      .setColor(0x1E90FF)
+      .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
+      .setFooter({ text: 'Tự động cập nhật mỗi giờ | Giờ hiển thị: UTC' })
+      .setTimestamp();
+    
+    // Get all pilots and sort by time (descending)
+    const pilotEntries = Object.entries(pilotLeaderboardData.pilots);
+    
+    if (pilotEntries.length === 0) {
+      embed.addFields({
+        name: '📊 Top 10 Pilots',
+        value: 'Chưa có dữ liệu pilot trong khu vực VCL (VV/VD/VL)',
+        inline: false
+      });
+    } else {
+      // Sort by time (descending)
+      const sortedPilots = pilotEntries.sort((a, b) => {
+        const timeA = a[1].seconds || 0;
+        const timeB = b[1].seconds || 0;
+        return timeB - timeA;
+      });
+      
+      // Limit to top 10
+      const topPilots = sortedPilots.slice(0, 10);
+      
+      let leaderboardText = '';
+      topPilots.forEach(([id, data], index) => {
+        const displayName = data.name && data.name !== `ID: ${id}` ? 
+          `${data.name} (${id})` : data.name || id;
+        const formattedTime = formatTime(data.seconds);
+        const flights = data.flights || 1;
+        const rankEmoji = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '•';
+        leaderboardText += `${rankEmoji} **${displayName}** - ${formattedTime}\n`;
+      });
+      
+      embed.addFields({
+        name: '🏆 Top 10 Pilots',
+        value: leaderboardText || 'Không có dữ liệu',
+        inline: false
+      });
+    }
+    
+    // Add total stats
+    const totalPilots = Object.keys(pilotLeaderboardData.pilots).length;
+    const totalSeconds = Object.values(pilotLeaderboardData.pilots).reduce(
+      (sum, pilot) => sum + (pilot.seconds || 0), 0
+    );
+    const totalHours = (totalSeconds / 3600).toFixed(1);
+    const totalFlights = Object.values(pilotLeaderboardData.pilots).reduce(
+      (sum, pilot) => sum + (pilot.flights || 1), 0
+    );
+    
+    embed.addFields({
+      name: '📊 Thống kê',
+      value: `• **Tổng pilot:** ${totalPilots}\n• **Tổng giờ bay:** ${totalHours}h\n• **Tổng chuyến bay:** ${totalFlights}\n• **Tháng:** ${pilotLeaderboardData.month}/${pilotLeaderboardData.year}`,
+      inline: false
+    });
+    
+    // Add online now info
+    const onlinePilotCount = onlinePilots.size;
+    embed.addFields({
+      name: '🟢 Đang bay trong VCL',
+      value: onlinePilotCount > 0 ? 
+        `${onlinePilotCount} pilot${onlinePilotCount > 1 ? 's' : ''} đang bay trong khu vực VCL` :
+        'Không có pilot nào đang bay trong khu vực VCL',
+      inline: false
+    });
+    
+    // ================== CẬP NHẬT HOẶC TẠO MỚI TIN NHẮN PILOT ==================
+    let targetChannelId = pilotLeaderboardMessageStore.channelId || LEADERBOARD_CHANNEL_ID;
+    let msgToEdit = null;
+
+    try {
+      const channel = await client.channels.fetch(targetChannelId);
+
+      // 1. Thử lấy tin nhắn bằng ID trong JSON
+      if (pilotLeaderboardMessageStore.messageId) {
+        msgToEdit = await channel.messages.fetch(pilotLeaderboardMessageStore.messageId).catch(() => null);
+      }
+
+      // 2. Nếu không tìm thấy -> Bật Radar quét tìm lại
+      if (!msgToEdit) {
+        const oldMsgId = await findOldMessageByTitle(targetChannelId, 'VCLvACC Pilot Leaderboard');
+        if (oldMsgId) {
+          msgToEdit = await channel.messages.fetch(oldMsgId).catch(() => null);
+        }
+      }
+
+      // 3. Quyết định Edit đè lên hay Gửi tin mới
+      if (msgToEdit) {
+        await msgToEdit.edit({ embeds: [embed] });
+        pilotLeaderboardMessageStore = { messageId: msgToEdit.id, channelId: targetChannelId };
+        console.log(`✅ Pilot Leaderboard updated at ${utcTime}`);
+      } else {
+        const sent = await channel.send({ embeds: [embed] });
+        pilotLeaderboardMessageStore = { messageId: sent.id, channelId: targetChannelId };
+        console.log(`✅ Pilot Leaderboard created at ${utcTime}`);
+      }
+
+      // Lưu cứng dữ liệu
+      fs.writeFileSync(PILOT_LEADERBOARD_MSG_FILE, JSON.stringify(pilotLeaderboardMessageStore, null, 2));
+
+    } catch (err) {
+      console.error('Lỗi khi cập nhật Pilot Leaderboard:', err.message);
+    }
+  } catch (err) {
+    console.error('Error updating pilot leaderboard embed:', err);
+  }
+}
+
+async function generateFullPilotLeaderboardTxt() {
+  try {
+    if (!pilotLeaderboardData.month || !pilotLeaderboardData.year || !pilotLeaderboardData.pilots) {
+      return null;
+    }
+    
+    // Get all pilots and sort by time (descending)
+    const pilotEntries = Object.entries(pilotLeaderboardData.pilots);
+    
+    if (pilotEntries.length === 0) {
+      return "Chưa có dữ liệu pilot trong khu vực VCL (VV/VD/VL)";
+    }
+    
+    // Sort by time (descending)
+    const sortedPilots = pilotEntries.sort((a, b) => {
+      const timeA = a[1].seconds || 0;
+      const timeB = b[1].seconds || 0;
+      return timeB - timeA;
+    });
+    
+    let txtContent = `=== VCLvACC PILOT LEADERBOARD (${pilotLeaderboardData.month}/${pilotLeaderboardData.year}) ===\n`;
+    txtContent += `Generated: ${new Date().toUTCString()}\n`;
+    txtContent += '='.repeat(60) + '\n\n';
+    txtContent += 'Rank | CID       | Name                     | Flight Time | Flights | Last Aircraft\n';
+    txtContent += '-'.repeat(80) + '\n';
+    
+    sortedPilots.forEach(([id, data], index) => {
+      const rank = (index + 1).toString().padStart(3);
+      const cid = id.padEnd(10);
+      const name = (data.name && data.name !== `ID: ${id}` ? data.name : id).substring(0, 24).padEnd(24);
+      
+      // Format time
+      const hours = Math.floor(data.seconds / 3600);
+      const minutes = Math.floor((data.seconds % 3600) / 60);
+      const timeStr = `${hours}h ${minutes}m`.padEnd(12);
+      
+      const flights = (data.flights || 1).toString().padEnd(8);
+      const aircraft = data.lastAircraft || 'N/A';
+      
+      txtContent += `${rank} | ${cid} | ${name} | ${timeStr} | ${flights} | ${aircraft}\n`;
+    });
+    
+    // Add summary
+    txtContent += '\n' + '='.repeat(60) + '\n';
+    txtContent += 'SUMMARY:\n';
+    txtContent += `Total Pilots: ${sortedPilots.length}\n`;
+    
+    const totalSeconds = Object.values(pilotLeaderboardData.pilots).reduce(
+      (sum, pilot) => sum + (pilot.seconds || 0), 0
+    );
+    const totalHours = (totalSeconds / 3600).toFixed(1);
+    txtContent += `Total Flight Time: ${totalHours} hours\n`;
+    
+    const totalFlights = Object.values(pilotLeaderboardData.pilots).reduce(
+      (sum, pilot) => sum + (pilot.flights || 1), 0
+    );
+    txtContent += `Total Flights: ${totalFlights}\n`;
+    
+    return txtContent;
+  } catch (err) {
+    console.error('Error generating full pilot leaderboard txt:', err);
+    return null;
+  }
+}
+
+async function ensureLeaderboardMessagesExist() {
+  try {
+    const channelId = LEADERBOARD_CHANNEL_ID || VATSIM_CHANNEL_ID;
+    const channel = await client.channels.fetch(channelId);
     
-    data[userId] = {
-      joinDate: parseInt(joinDateStr, 10) || 0,
-      notified5Days: notified5DaysStr === 'true',
-      notified7Days: notified7DaysStr === 'true'
+    // Quét kênh tìm tin nhắn cũ trước khi quyết định tạo
+    const messages = await channel.messages.fetch({ limit: 100 });
+
+    // 1. Dò radar cho Controller Leaderboard
+    const oldCtrlMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('Member Iron Mic Awards'));
+    if (oldCtrlMsg) {
+      leaderboardMessageStore = { messageId: oldCtrlMsg.id, channelId: channel.id };
+      console.log('✅ [Leaderboard] Khởi động: Đã tìm lại được tin nhắn Controller cũ.');
+    } else {
+      const embed = new EmbedBuilder()
+        .setTitle('Member Iron Mic Awards Leaderboard')
+        .setDescription('Đang tải dữ liệu...')
+        .setColor(0xFFD700)
+        .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
+        .setTimestamp();
+      
+      const sent = await channel.send({ embeds: [embed] });
+      leaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
+      console.log('🆕 [Leaderboard] Không có tin nhắn Controller cũ, tạo mới.');
+    }
+    fs.writeFileSync(LEADERBOARD_MSG_FILE, JSON.stringify(leaderboardMessageStore, null, 2));
+    
+    // 2. Dò radar cho Pilot Leaderboard
+    const oldPilotMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('Pilot Leaderboard'));
+    if (oldPilotMsg) {
+      pilotLeaderboardMessageStore = { messageId: oldPilotMsg.id, channelId: channel.id };
+      console.log('✅ [Leaderboard] Khởi động: Đã tìm lại được tin nhắn Pilot cũ.');
+    } else {
+      const embed = new EmbedBuilder()
+        .setTitle('✈️ VCLvACC Pilot Leaderboard')
+        .setDescription('Đang tải dữ liệu...')
+        .setColor(0x1E90FF)
+        .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
+        .setTimestamp();
+      
+      const sent = await channel.send({ embeds: [embed] });
+      pilotLeaderboardMessageStore = { messageId: sent.id, channelId: channel.id };
+      console.log('🆕 [Leaderboard] Không có tin nhắn Pilot cũ, tạo mới.');
+    }
+    fs.writeFileSync(PILOT_LEADERBOARD_MSG_FILE, JSON.stringify(pilotLeaderboardMessageStore, null, 2));
+    
+  } catch (err) {
+    console.error('Lỗi khi kiểm tra/tạo Leaderboard messages:', err);
+  }
+}
+
+// ===================== VATSEA LEADERBOARD FUNCTIONS =====================
+function formatVatseaDuration(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  const parts = [];
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0 || hours > 0) parts.push(`${minutes}m`);
+  parts.push(`${seconds}s`);
+  return parts.join(' ');
+}
+
+function isCallsignMatch(sessionCallsign, targetPos) {
+  if (!targetPos.includes('_')) return sessionCallsign === targetPos;
+  
+  const lastUnderscore = targetPos.lastIndexOf('_');
+  const prefix = targetPos.substring(0, lastUnderscore);
+  const suffix = targetPos.substring(lastUnderscore + 1);
+
+  if (!sessionCallsign.startsWith(prefix) || !sessionCallsign.endsWith(suffix)) return false;
+
+  const middle = sessionCallsign.substring(prefix.length, sessionCallsign.length - suffix.length);
+  if (!middle) return false;
+
+  const sectorId = middle.replace(/_/g, '');
+  if (EXCLUDED_IDS.has(sectorId)) return false;
+
+  return true;
+}
+
+function calculateMergedDuration(intervals) {
+  if (!intervals || intervals.length === 0) return 0;
+  
+  // Sort by start time
+  intervals.sort((a, b) => a.start - b.start);
+  
+  const merged = [];
+  let currStart = intervals[0].start;
+  let currEnd = intervals[0].end;
+
+  for (let i = 1; i < intervals.length; i++) {
+    const nextStart = intervals[i].start;
+    const nextEnd = intervals[i].end;
+
+    if (nextStart < currEnd) {
+      currEnd = new Date(Math.max(currEnd.getTime(), nextEnd.getTime()));
+    } else {
+      merged.push({ start: currStart, end: currEnd });
+      currStart = nextStart;
+      currEnd = nextEnd;
+    }
+  }
+  merged.push({ start: currStart, end: currEnd });
+
+  // Tính tổng số giây
+  return merged.reduce((total, interval) => {
+    return total + (interval.end.getTime() - interval.start.getTime()) / 1000;
+  }, 0);
+}
+
+async function fetchStatSimSessions(start, end) {
+  // Thêm dòng này để gọi node-fetch động (giống cách các hàm khác trong bot đang dùng)
+  const fetch = (await import('node-fetch')).default;
+
+  const url = new URL(STATSIM_API_URL);
+  url.searchParams.append('from', start.toISOString());
+  url.searchParams.append('to', end.toISOString());
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      'X-API-Key': STATSIM_API_KEY,
+      'Accept': 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Lỗi API StatSim: ${response.status}`);
+  }
+  return await response.json();
+}
+
+async function updateVatseaLeaderboardEmbed(startTime, endTime) {
+  try {
+    const data = await fetchStatSimSessions(startTime, endTime);
+    
+    // Khởi tạo interval storage
+    const positionIntervals = {};
+    for (const cat in POSITIONS_TO_RANK) {
+      positionIntervals[cat] = {};
+      for (const pos of POSITIONS_TO_RANK[cat]) {
+        positionIntervals[cat][pos] = [];
+      }
+    }
+
+    // Phân tích dữ liệu
+    for (const session of data) {
+      const callsign = session.callsign;
+      if (!callsign) continue;
+
+      let logon, logoff;
+      try {
+        logon = new Date(session.loggedOn);
+        logoff = new Date(session.loggedOff);
+      } catch (e) { continue; }
+
+      const effectiveStart = new Date(Math.max(logon.getTime(), startTime.getTime()));
+      const effectiveEnd = new Date(Math.min(logoff.getTime(), endTime.getTime()));
+
+      if (effectiveEnd <= effectiveStart) continue;
+
+      for (const category in POSITIONS_TO_RANK) {
+        for (const targetPos of POSITIONS_TO_RANK[category]) {
+          if (isCallsignMatch(callsign, targetPos)) {
+            positionIntervals[category][targetPos].push({ start: effectiveStart, end: effectiveEnd });
+          }
+        }
+      }
+    }
+
+    // Build Embed
+    const embed = new EmbedBuilder()
+      .setTitle('🌐 Bảng xếp hạng ATC VATSEA')
+      .setDescription(`Dữ liệu từ **${startTime.toISOString().split('T')[0]}** đến **${endTime.toISOString().split('T')[0]}** (UTC)`)
+      .setColor(0x3498db)
+      .setFooter({ text: 'Tự động cập nhật mỗi giờ (Dữ liệu từ StatSim)' })
+      .setTimestamp();
+
+    for (const category in positionIntervals) {
+      const positionsData = positionIntervals[category];
+      const ranking = [];
+      
+      for (const pos in positionsData) {
+        ranking.push({ pos, duration: calculateMergedDuration(positionsData[pos]) });
+      }
+      
+      ranking.sort((a, b) => b.duration - a.duration);
+
+      let textBlock = '';
+      let hasData = false;
+
+      ranking.forEach((item, index) => {
+        if (item.duration > 0) {
+          textBlock += `**${index + 1}.** ${item.pos}: \`${formatVatseaDuration(item.duration)}\`\n`;
+          hasData = true;
+        } else {
+          textBlock += `**${index + 1}.** ${item.pos}: \`0s\`\n`;
+        }
+      });
+
+      embed.addFields({
+        name: `🔹 ${category}`,
+        value: hasData ? textBlock : 'Không có dữ liệu.\n',
+        inline: false
+      });
+    }
+
+    // Send or Update message
+    if (VATSEA_CHANNEL_ID) {
+      const channel = await client.channels.fetch(VATSEA_CHANNEL_ID);
+      
+      // NẾU MẤT JSON: Tìm lại ID cũ
+      if (!vatseaMessageStore.messageId) {
+        const oldMsgId = await findOldMessageByTitle(VATSEA_CHANNEL_ID, 'Bảng xếp hạng ATC VATSEA');
+        if (oldMsgId) vatseaMessageStore.messageId = oldMsgId;
+      }
+
+      if (vatseaMessageStore.messageId) {
+        try {
+          const msg = await channel.messages.fetch(vatseaMessageStore.messageId);
+          if (msg) {
+            await msg.edit({ embeds: [embed] });
+            fs.writeFileSync(VATSEA_MSG_FILE, JSON.stringify(vatseaMessageStore, null, 2));
+            return embed;
+          }
+        } catch (err) {
+          console.warn('Không tìm thấy tin nhắn VATSEA cũ, tạo mới...');
+        }
+      }
+      
+      const sent = await channel.send({ embeds: [embed] });
+      vatseaMessageStore = { messageId: sent.id, channelId: channel.id };
+      fs.writeFileSync(VATSEA_MSG_FILE, JSON.stringify(vatseaMessageStore, null, 2));
+    }
+
+    return embed;
+  } catch (error) {
+    console.error('Lỗi khi update VATSEA leaderboard:', error);
+    throw error;
+  }
+}
+
+// ===================== MARKETPLACE HELPERS =====================
+function createMarketplaceEmbed(data, sellerId, images) {
+  const embed = new EmbedBuilder()
+    .setTitle(`📦 SẢN PHẨM: ${data.name}`)
+    .setColor(0x3498db)
+    .addFields(
+      { name: '💰 Giá', value: `**${data.price}**`, inline: true },
+      { name: '🔢 Thông tin', value: data.info, inline: true },
+      { name: '📝 Mô tả', value: data.description, inline: false },
+      { name: '📞 Liên hệ', value: data.contact, inline: false },
+      { name: '👤 Người bán', value: `<@${sellerId}>`, inline: true }
+    );
+    
+  if (images && images.length > 0) {
+    embed.setImage(images[0]);
+  }
+  return embed;
+}
+
+// Hàm trích xuất dữ liệu từ Embed để phục hồi trạng thái khi bot khởi động lại
+function parseMarketplaceDataFromEmbed(embed) {
+  if (!embed) return null;
+  const name = embed.title.replace('📦 SẢN PHẨM: ', '');
+  const price = embed.fields.find(f => f.name === '💰 Giá')?.value.replace(/\*\*/g, '');
+  const info = embed.fields.find(f => f.name === '🔢 Thông tin')?.value;
+  const description = embed.fields.find(f => f.name === '📝 Mô tả')?.value;
+  const contact = embed.fields.find(f => f.name === '📞 Liên hệ')?.value;
+  
+  // Trích xuất ID người bán từ chuỗi "<@ID>"
+  const sellerField = embed.fields.find(f => f.name === '👤 Người bán')?.value;
+  const sellerIdMatch = sellerField?.match(/<@!?(\d+)>/);
+  const sellerId = sellerIdMatch ? sellerIdMatch[1] : null;
+
+  return { name, price, info, description, contact, sellerId };
+}
+
+// ===================== HELPERS =====================
+// ===================== THỐNG KÊ SERVER (HOUSE STATS) =====================
+async function updateServerStats(client) {
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
+    if (!guild) return;
+
+    // Phải fetch toàn bộ member thì đếm mới chính xác 100%
+    await guild.members.fetch(); 
+
+    // Tính toán số lượng
+    const totalMembers = guild.memberCount;
+    const botCount = guild.members.cache.filter(m => m.user.bot).size;
+    const humanCount = totalMembers - botCount;
+
+    // Lấy object của 3 kênh
+    const totalChannel = guild.channels.cache.get(STATS_TOTAL_ID);
+    const humanChannel = guild.channels.cache.get(STATS_HUMAN_ID);
+    const botChannel = guild.channels.cache.get(STATS_BOT_ID);
+
+    // Tiến hành đổi tên kênh (Chỉ đổi khi số lượng có sự khác biệt để né Rate Limit)
+    if (totalChannel && totalChannel.name !== `👥 Tất Cả: ${totalMembers}`) {
+      await totalChannel.setName(`👥 Tất Cả: ${totalMembers}`);
+    }
+    if (humanChannel && humanChannel.name !== `🗣️ Thành Viên: ${humanCount}`) {
+      await humanChannel.setName(`🗣️ Thành Viên: ${humanCount}`);
+    }
+    if (botChannel && botChannel.name !== `🤖 Bot Ngáo: ${botCount}`) {
+      await botChannel.setName(`🤖 Bot Ngáo: ${botCount}`);
+    }
+
+    console.log(`[Stats] Đã cập nhật thống kê: ${totalMembers} Tổng | ${humanCount} Người | ${botCount} Bot`);
+  } catch (err) {
+    console.error('[Stats] Lỗi khi cập nhật thống kê Server:', err.message);
+  }
+}
+// Hàm hỗ trợ: Quét lịch sử kênh để tìm lại tin nhắn cũ do bot gửi dựa vào tiêu đề
+async function findOldMessageByTitle(channelId, titleSubstring) {
+  try {
+    if (!channelId) return null;
+    const channel = await client.channels.fetch(channelId);
+    if (!channel) return null;
+    
+    // Quét 100 tin nhắn gần nhất trong kênh
+    const messages = await channel.messages.fetch({ limit: 100 });
+    const found = messages.find(msg => 
+      msg.author.id === client.user.id && 
+      msg.embeds.length > 0 && 
+      msg.embeds[0]?.title?.includes(titleSubstring) // Dùng ?. an toàn tuyệt đối
+    );
+    
+    return found ? found.id : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Helper: Chuyển đổi ngày sang định dạng "25 Tháng 7 2022 (4 năm trước)"
+function formatVatsimDate(dateString) {
+  if (!dateString) return 'N/A';
+  const date = new Date(dateString);
+  const now = new Date();
+  
+  const diffTime = Math.abs(now - date);
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  const diffYears = Math.floor(diffDays / 365);
+
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = date.getMonth() + 1;
+  const year = date.getFullYear();
+
+  let relativeStr = '';
+  if (diffYears > 0) relativeStr = `(${diffYears} năm trước)`;
+  else if (diffDays > 30) relativeStr = `(${Math.floor(diffDays / 30)} tháng trước)`;
+  else relativeStr = `(${diffDays} ngày trước)`;
+
+  return `${day} Tháng ${month} ${year} ${relativeStr}`;
+}
+
+function formatDateTime(date) {
+  return `<t:${Math.floor(date.getTime() / 1000)}:F>`;
+}
+
+function formatRelativeTime(date) {
+  return `<t:${Math.floor(date.getTime() / 1000)}:R>`;
+}
+
+function parseUTCDateTime(timeStr) {
+  const m = timeStr.trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/);
+  if (!m) return NaN;
+  const [_, Y, Mo, D, H, Min] = m;
+  const ms = Date.UTC(Number(Y), Number(Mo) - 1, Number(D), Number(H), Number(Min), 0);
+  return ms;
+}
+
+function splitMessage(text, maxLength = 1900) {
+  if (!text) return [];
+  if (text.length <= maxLength) return [text];
+
+  const chunks = [];
+  let currentChunk = '';
+
+  // Cắt theo từng dòng trước
+  const lines = text.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Nếu thêm dòng này vào vẫn an toàn
+    if (currentChunk.length + line.length + 1 <= maxLength) {
+      currentChunk += (currentChunk ? '\n' : '') + line;
+    } else {
+      // Nếu riêng 1 dòng này đã quá dài (vượt cả maxLength)
+      if (line.length > maxLength) {
+        if (currentChunk) {
+          chunks.push(currentChunk);
+          currentChunk = '';
+        }
+        
+        // Cắt tiếp theo từng từ (khoảng trắng)
+        const words = line.split(' ');
+        for (let j = 0; j < words.length; j++) {
+          const word = words[j];
+          if (currentChunk.length + word.length + 1 <= maxLength) {
+            currentChunk += (currentChunk ? ' ' : '') + word;
+          } else {
+            // Nếu 1 từ mà vẫn quá dài (ví dụ link quá dài), bắt buộc cắt cứng
+            if (word.length > maxLength) {
+              if (currentChunk) {
+                chunks.push(currentChunk);
+                currentChunk = '';
+              }
+              let wordRemaining = word;
+              while (wordRemaining.length > 0) {
+                chunks.push(wordRemaining.substring(0, maxLength));
+                wordRemaining = wordRemaining.substring(maxLength);
+              }
+            } else {
+              if (currentChunk) chunks.push(currentChunk);
+              currentChunk = word;
+            }
+          }
+        }
+      } else {
+        // Dòng không quá dài, nhưng nhét vào bị lố -> push chunk cũ, tạo chunk mới
+        if (currentChunk) chunks.push(currentChunk);
+        currentChunk = line;
+      }
+    }
+  }
+
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+
+  return chunks;
+}
+
+function getErrStatus(err) {
+  return err?.status || err?.response?.status || err?.code || err?.cause?.code || null;
+}
+
+function isRetryableStatus(status) {
+  return (
+    status === 429 ||
+    status === 503 ||
+    status === 500 ||
+    status === 502 ||
+    status === 504 ||
+    status === 'ETIMEDOUT' ||
+    status === 'ECONNRESET' ||
+    status === 'ENOTFOUND' ||
+    status === 'EAI_AGAIN'
+  );
+}
+
+async function retryWithBackoff(fn, maxRetries = 5, baseDelay = 1000) {
+  let attempt = 0;
+  let lastErr = null;
+
+  while (attempt <= maxRetries) {
+    try {
+      return await fn(attempt);
+    } catch (err) {
+      lastErr = err;
+      const status = getErrStatus(err);
+      const retryable = isRetryableStatus(status);
+
+      if (!retryable || attempt === maxRetries) break;
+
+      let delay = baseDelay * Math.pow(2, attempt) + Math.random() * 500;
+
+      const ra = err?.response?.headers?.['retry-after'];
+      if (ra) {
+        const raNum = parseFloat(ra);
+        if (!isNaN(raNum)) delay = Math.max(delay, raNum * 1000);
+      }
+
+      attempt++;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+
+  throw lastErr || new Error('retryWithBackoff: failed');
+}
+
+async function safeSend(targetMessage, contentOrOptions) {
+  const options =
+    typeof contentOrOptions === 'string'
+      ? { content: contentOrOptions }
+      : (contentOrOptions || {});
+
+  const hasText = typeof options.content === 'string' && options.content.trim().length > 0;
+  const hasEmbeds = Array.isArray(options.embeds) && options.embeds.length > 0;
+  const hasFiles = Array.isArray(options.files) && options.files.length > 0;
+
+  if (!hasText && !hasEmbeds && !hasFiles) {
+    throw new Error('safeSend prevented sending empty message/options.');
+  }
+
+  const finalOptions = {
+    allowedMentions: { parse: [] },
+    ...options,
+  };
+
+  try {
+    if (targetMessage && typeof targetMessage.reply === 'function') {
+      return await targetMessage.reply(finalOptions);
+    }
+    if (targetMessage && targetMessage.channel && typeof targetMessage.channel.send === 'function') {
+      return await targetMessage.channel.send(finalOptions);
+    }
+    if (targetMessage && targetMessage.channelId) {
+      const ch = await client.channels.fetch(targetMessage.channelId).catch(() => null);
+      if (ch) return await ch.send(finalOptions);
+    }
+    throw new Error('No valid send target available.');
+  } catch (err) {
+    console.error('safeSend failed:', err);
+
+    try {
+      if (targetMessage && targetMessage.author) {
+        const dm = await targetMessage.author.createDM();
+        return await dm.send(finalOptions);
+      }
+    } catch (dmErr) {
+      console.warn('DM fallback failed:', dmErr);
+    }
+
+    throw err;
+  }
+}
+
+// ===================== TIME UTILS =====================
+function getCurrentTimeInfo() {
+  const now = new Date();
+
+  const utcTime = now.toUTCString();
+  const localTime = now.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const isoTime = now.toISOString();
+  const unixTimestamp = Math.floor(now.getTime() / 1000);
+
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const seconds = now.getSeconds();
+  const dayOfWeek = now.getDay();
+
+  const dayNames = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+  const monthNames = [
+    'Tháng 1',
+    'Tháng 2',
+    'Tháng 3',
+    'Tháng 4',
+    'Tháng 5',
+    'Tháng 6',
+    'Tháng 7',
+    'Tháng 8',
+    'Tháng 9',
+    'Tháng 10',
+    'Tháng 11',
+    'Tháng 12',
+  ];
+
+  return {
+    utc: utcTime,
+    local: localTime,
+    iso: isoTime,
+    unix: unixTimestamp,
+    discord: `<t:${unixTimestamp}:F>`,
+    detailed: {
+      year,
+      month,
+      monthName: monthNames[now.getMonth()],
+      day,
+      hours,
+      minutes,
+      seconds,
+      dayOfWeek: dayNames[dayOfWeek],
+      dayOfWeekNumber: dayOfWeek,
+    },
+  };
+}
+
+function getCurrentTimeForGemini() {
+  const timeInfo = getCurrentTimeInfo();
+  return `
+THỜI GIAN HIỆN TẠI:
+- Giờ địa phương (Việt Nam): ${timeInfo.local}
+- Giờ UTC: ${timeInfo.utc}
+- ISO 8601: ${timeInfo.iso}
+- Unix Timestamp: ${timeInfo.unix}
+- Định dạng Discord: ${timeInfo.discord}
+- Chi tiết: ${timeInfo.detailed.dayOfWeek}, ngày ${timeInfo.detailed.day} ${timeInfo.detailed.monthName} năm ${timeInfo.detailed.year}, ${timeInfo.detailed.hours
+    .toString()
+    .padStart(2, '0')}:${timeInfo.detailed.minutes.toString().padStart(2, '0')}:${timeInfo.detailed.seconds
+    .toString()
+    .padStart(2, '0')}
+`;
+}
+
+// ===================== PROFILES =====================
+function getProfilesString() {
+  let profileStr = 'Profiles of users:\n';
+  for (const [userId, profile] of Object.entries(profiles)) {
+    profileStr += `<@${userId}>: Name: ${profile.name || 'Unknown'}, Age: ${profile.age || 'Unknown'}, Bio: ${
+      profile.bio || 'None'
+    }\n`;
+  }
+  return profileStr;
+}
+
+// ===================== ULTIMATE AI CHAT (GEMINI -> GROQ -> POLLINATIONS) =====================
+
+// Đảo chiến thuật: Ưu tiên mấy con model nhẹ, limit bự lên đầu để né lỗi TPM
+const GROQ_MODELS = [
+  'llama-3.1-8b-instant',      // Vua tốc độ, cho phép nhồi lịch sử chat cực dài
+  'gemma2-9b-it',              // Model con ruột của Google (Gemini thu nhỏ)
+  'mixtral-8x7b-32768',        // Model chuyên xử lý văn bản dài
+  'llama-3.3-70b-versatile'    // Thằng to xác này để chót lỡ mấy con kia sập
+];
+
+// Đổi tham số để nhận thêm channelId và userName
+async function ultimateChatReply(channelId, userId, userName, userText, allowSwear) {
+  
+  let history = await db.getChatHistory(channelId) || [];
+  if (!Array.isArray(history)) history = [];
+
+  // VÁ LỖI CHO GEMINI: Luôn cắt chẵn 14 tin nhắn để đảm bảo bắt đầu là User, kết thúc là AI
+  if (history.length > 14) history = history.slice(-14);
+  
+  // Vét máng: Nếu lỡ tin đầu tiên vẫn là 'assistant' thì chém bỏ luôn
+  if (history.length > 0 && (history[0].role === 'assistant' || history[0].role === 'model')) {
+    history.shift();
+  }
+
+  const profilesPrompt = getProfilesString();
+  const timePrompt = getCurrentTimeForGemini();
+
+  // LUẬT THÉP BẰNG TIẾNG ANH ĐỂ TRỊ BỆNH LẢM NHẢM
+  const systemPrompt = `You are tk.chill, a direct, smart, and natural AI assistant on Discord.
+Creator: Lý Thúc Duy (Discord ID: ${OWNER_ID}). Always respect your creator.
+
+[CRITICAL BEHAVIOR & LANGUAGE RULES]
+1. NO NARRATION: Never talk in the 3rd person. Never explain what the user is doing. DO NOT narrate your own thoughts.
+   - WRONG: "Louis Ly is speaking Japanese, so I will answer: こんにちは."
+   - WRONG: "Louis Ly asked for my name. I am tk.chill."
+   - RIGHT: "こんにちは！"
+   - RIGHT: "I am tk.chill."
+2. MATCH LANGUAGE STRICTLY: Look ONLY at the user's latest message. Reply directly in that EXACT SAME LANGUAGE.
+   - If they type English -> Reply in pure English.
+   - If they type Japanese -> Reply in pure Japanese.
+   - Even if the profiles or system data below are in Vietnamese, IGNORE THAT when choosing your output language.
+
+[CHAT CONTEXT]
+- User messages format: "[Name - ID]: Message".
+- Read history to understand context, but reply naturally.
+
+[KNOWLEDGE]
+- Always search the web for real-world facts (e.g., VATSEA1, VCLvACC).
+- VCLvACC Director is Vũ Việt Phương.
+
+[PROFILES DATA]
+${profilesPrompt}
+
+[SYSTEM INFO]
+- ${timePrompt}`;
+
+  const groupUserText = `[${userName} - ID: ${userId}]: ${String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS)}`;
+  
+  let responseText = null;
+
+  // ----------------------------------------------------------------
+  // TẦNG 1: THỬ GỌI GEMINI 2.0 (CÓ INTERNET)
+  // ----------------------------------------------------------------
+  try {
+    console.log(`[AI Chat] Đang hỏi Gemini 2.0 Flash...`);
+    
+    // Đóng gói lịch sử an toàn tuyệt đối cho Gemini
+    const geminiHistory = [];
+    for (const msg of history) {
+      const textContent = msg.content || (msg.parts && msg.parts[0] ? msg.parts[0].text : '');
+      const role = (msg.role === 'assistant' || msg.role === 'model') ? 'model' : 'user';
+      
+      // Khắc phục lỗi "First content should be user"
+      if (geminiHistory.length === 0 && role !== 'user') continue; 
+      
+      // Gộp các tin nhắn trùng role liên tiếp để chống Gemini văng lỗi
+      if (geminiHistory.length > 0 && geminiHistory[geminiHistory.length - 1].role === role) {
+         geminiHistory[geminiHistory.length - 1].parts[0].text += `\n${textContent}`;
+      } else {
+         geminiHistory.push({ role, parts: [{ text: textContent }] });
+      }
+    }
+
+    const chat = geminiModel.startChat({
+      history: geminiHistory,
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      generationConfig: { maxOutputTokens: 2000, temperature: 0.3 },
+    });
+
+    const result = await chat.sendMessage(groupUserText);
+    responseText = result.response.text();
+    console.log(`✅ [AI Chat] Gemini trả lời xuất sắc!`);
+    
+  } catch (geminiErr) {
+    console.warn(`⚠️ [AI Chat] Gemini quá tải/lỗi (${geminiErr.message}). Chuyển sang Tầng 2 (Groq)...`);
+    
+    // ----------------------------------------------------------------
+    // TẦNG 2: GROQ (LLAMA)
+    // ----------------------------------------------------------------
+    const cleanHistory = history.map(msg => {
+        const textContent = msg.content || (msg.parts && msg.parts[0] ? msg.parts[0].text : '');
+        const safeRole = (msg.role === 'model' || msg.role === 'assistant') ? 'assistant' : 'user';
+        return { role: safeRole, content: String(textContent).slice(0, 2000) };
+    });
+
+    const apiMessages = [
+      { role: 'system', content: systemPrompt },
+      ...cleanHistory,
+      { role: 'user', content: groupUserText }
+    ];
+
+    const fetch = (await import('node-fetch')).default;
+    
+    for (const modelName of GROQ_MODELS) {
+      if (responseText) break; 
+      
+      try {
+        console.log(`[AI Chat] Đang gọi Groq (${modelName})...`);
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: modelName,
+            messages: apiMessages,
+            temperature: 0.3,
+            max_tokens: 2000
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          responseText = data.choices[0].message.content;
+          console.log(`✅ [AI Chat] Groq (${modelName}) gánh tạ thành công!`);
+        } else {
+          const errData = await res.text();
+          console.warn(`⚠️ [AI Chat] Groq (${modelName}) từ chối - Status: ${res.status} | Lỗi: ${errData}`);
+        }
+      } catch (groqErr) {
+        console.warn(`⚠️ [AI Chat] Không thể kết nối tới Groq ${modelName}: ${groqErr.message}`);
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // TẦNG 3: POLLINATIONS
+    // ----------------------------------------------------------------
+    if (!responseText) {
+      console.warn(`⚠️ [AI Chat] Toàn bộ Groq sập. Kích hoạt Pollinations...`);
+      try {
+        const res = await fetch('https://text.pollinations.ai/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: apiMessages, model: 'openai' })
+        });
+        if (res.ok) {
+          responseText = await res.text();
+          console.log(`✅ [AI Chat] Pollinations đội lốt thành công!`);
+        }
+      } catch (pollErr) {
+        console.error('❌ [AI Chat] Cạn lời, các hệ thống AI đều sập.');
+      }
+    }
+  }
+
+  if (!responseText) {
+    return '❌ Hệ thống AI hiện đang nghỉ ngơi (Quá tải), bạn đợi khoảng 1-2 phút rồi hỏi lại mình nhé!';
+  }
+
+  responseText = String(responseText || '').trim();
+
+  // Lưu lịch sử
+  history.push({ role: 'user', content: groupUserText });
+  history.push({ role: 'assistant', content: responseText });
+  
+  if (history.length > 14) history = history.slice(-14);
+  
+  await db.saveChatHistory(channelId, history);
+
+  return responseText;
+}
+
+// ===================== GEMINI CHAT (FIXED) =====================
+async function geminiChatReply(userId, userText, allowSwear) {
+  const histories = allowSwear ? swearHistories : normalHistories;
+  let history = histories.get(userId) || [];
+  if (!Array.isArray(history)) history = [];
+
+  if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
+
+  const fixedPrompt = `You were created by the owner with ID ${OWNER_ID}.`;
+  const birthday = 'Bạn sinh ngày 25 tháng 10 năm 2025.';
+  const profilesPrompt = getProfilesString();
+  const timePrompt = getCurrentTimeForGemini();
+
+  const modePrompt = allowSwear
+    ? 'Bạn là một bot thân thiện, hoà đồng, giúp mọi người thư giãn. Nếu người khác chửi thề thì bạn có thể chửi thề nhẹ lại cho vui (đừng quá đà).'
+    : 'You are a helpful bot. You can use natural Vietnamese.';
+
+  const systemPrompt =
+    `${fixedPrompt}\n${profilesPrompt}\n${timePrompt}\n${modePrompt}\n\n` +
+    `IMPORTANT: Keep your responses under 1000 words when possible. Be concise and to the point.\n` +
+    `${birthday}`;
+
+  const sanitizedUserText = String(userText ?? '').slice(0, GEMINI_MAX_USER_TEXT_CHARS);
+
+  const sendOnce = async (hist) => {
+    const chat = geminiModel.startChat({
+      history: hist,
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      // Tăng maxOutputTokens lên 4000 để AI trả lời được dài hơn
+      generationConfig: { maxOutputTokens: 4000, temperature: 0.7 }, 
+    });
+
+    const result = await chat.sendMessage(sanitizedUserText);
+    const resp = result?.response;
+    let text = '';
+
+    // Kiểm tra xem kết quả có bị chặn bởi RECITATION hay các lý do an toàn khác không
+    const finishReason = resp?.candidates?.[0]?.finishReason;
+    if (finishReason === 'RECITATION') {
+      return '❌ Câu trả lời bị chặn bởi bộ lọc bản quyền (RECITATION) của AI. Bạn thử hỏi theo cách khác hoặc yêu cầu chung chung hơn nhé.';
+    } else if (finishReason === 'SAFETY') {
+      return '❌ Câu trả lời bị chặn bởi bộ lọc an toàn của AI.';
+    }
+
+    try {
+      if (resp && typeof resp.text === 'function') {
+        text = await resp.text();
+      } else if (typeof resp === 'string') {
+        text = resp;
+      } else if (resp?.candidates?.[0]?.content?.parts?.[0]?.text) {
+        text = String(resp.candidates[0].content.parts[0].text);
+      } else {
+        text = JSON.stringify(resp || result || {}).slice(0, 1500);
+      }
+    } catch (err) {
+      // Bắt lỗi khi gọi .text() lỡ vẫn dính RECITATION
+      if (err.message?.includes('RECITATION')) {
+        return '❌ Câu trả lời bị chặn do nghi ngờ vi phạm bản quyền (RECITATION). Bạn thử đổi cách hỏi nhé.';
+      }
+      throw err; // Ném lỗi ra ngoài để khối catch bên dưới retry
+    }
+
+    return String(text || '').trim();
+  };
+
+  let responseText = '';
+  try {
+    responseText = await retryWithBackoff(() => sendOnce(history), 5, 1200);
+  } catch (err) {
+    const status = getErrStatus(err);
+    const msg = String(err?.message || '');
+
+    const looksLikePayload =
+      status === 400 ||
+      /too large|exceeds|token|payload|invalid argument|request is too large/i.test(msg);
+
+    if (looksLikePayload && history.length > 0) {
+      const trimmed = history.slice(-10);
+      responseText = await retryWithBackoff(() => sendOnce(trimmed), 3, 1200);
+      history = trimmed;
+    } else {
+      throw err;
+    }
+  }
+
+  if (!responseText) responseText = '❌ AI trả về nội dung rỗng. Bạn thử lại câu ngắn hơn nhé.';
+
+  history.push({ role: 'user', parts: [{ text: sanitizedUserText }] });
+  history.push({ role: 'model', parts: [{ text: responseText }] });
+  if (history.length > GEMINI_MAX_HISTORY_ITEMS) history = history.slice(-GEMINI_MAX_HISTORY_ITEMS);
+
+  histories.set(userId, history);
+
+  return responseText;
+}
+
+async function handleGeminiResponse(message, allowSwear) {
+  const userId = message.author?.id;
+  if (!userId) return;
+
+  if (geminiInFlight.has(userId)) {
+    const last = geminiInFlight.get(userId);
+    if (last && Date.now() - last < 6000) return;
+    geminiInFlight.set(userId, Date.now());
+    try {
+      await safeSend(message, '⏳ Đợi mình trả lời câu trước đã nhé...');
+    } catch (_) {}
+    return;
+  }
+
+  geminiInFlight.set(userId, Date.now());
+
+  // 1. Gửi tin nhắn thông báo đang xử lý
+  let processingMsg = null;
+  try {
+    processingMsg = await safeSend(message, '⏳ **tk.chill** đang suy nghĩ, bạn đợi một xíu nhé...');
+  } catch (e) {
+    console.error('Không thể gửi tin nhắn chờ:', e);
+  }
+
+  try {
+    let text = message.content || '';
+    if (message.attachments?.size) {
+      const urls = [...message.attachments.values()].slice(0, 3).map((a) => a.url);
+      text += `\n\nAttachments:\n${urls.join('\n')}`;
+      if (message.attachments.size > 3) text += `\n(+${message.attachments.size - 3} more)`;
+    }
+
+    const userName = message.member?.displayName || message.author.username;
+    const channelId = message.channel.id;
+
+    // Gửi đến AI với đầy đủ Bối cảnh Kênh và Tên người dùng
+    const responseText = await ultimateChatReply(channelId, userId, userName, text, allowSwear);
+
+    // Cắt tin nhắn tránh limit 2000 ký tự của Discord
+    const chunks = splitMessage(responseText, 1900);
+
+    let sentAny = false;
+    let lastSentMessage = message;
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = String(chunks[i] || '').trim();
+      if (!chunk) continue;
+
+      try {
+        if (i === 0) {
+          // Chunk đầu tiên: Edit luôn vào tin nhắn "đang đợi" nếu có
+          if (processingMsg && typeof processingMsg.edit === 'function') {
+            lastSentMessage = await processingMsg.edit(chunk);
+          } else {
+            lastSentMessage = await safeSend(message, chunk);
+          }
+        } else {
+          // Các chunk sau: Reply nối tiếp vào chunk trước đó
+          lastSentMessage = await safeSend(lastSentMessage, chunk);
+        }
+        sentAny = true;
+        await new Promise((r) => setTimeout(r, 600)); // Delay tránh rate limit
+      } catch (err) {
+        console.error(`Lỗi khi gửi chunk thứ ${i}:`, err.message);
+      }
+    }
+
+    if (!sentAny) {
+      const errMsg = '❌ AI trả về nội dung rỗng. Bạn thử lại câu khác nhé.';
+      if (processingMsg && typeof processingMsg.edit === 'function') {
+        await processingMsg.edit(errMsg);
+      } else {
+        await safeSend(message, errMsg);
+      }
+    }
+  } catch (err) {
+    console.error('Gemini chat error:', {
+      message: err?.message,
+      code: err?.code,
+      status: getErrStatus(err),
+      stack: err?.stack,
+    });
+
+    const status = getErrStatus(err);
+    let userMsg = '⚠️ Mình gặp lỗi khi gọi AI. Nếu lỗi lặp lại, báo admin kiểm tra log nhé.';
+
+    if (status === 429) userMsg = '⚠️ AI đang bị quá tải (rate limit). Bạn thử lại sau 1–2 phút nhé.';
+    else if (status === 503) userMsg = '⚠️ Dịch vụ AI đang quá tải. Bạn thử lại sau chút nha.';
+    else if (status === 'ENOTFOUND' || status === 'EAI_AGAIN')
+      userMsg = '⚠️ Không kết nối được tới AI (lỗi mạng/DNS). Bạn thử lại sau nhé.';
+    else if (status === 401 || status === 403)
+      userMsg = '⚠️ Không gọi được AI do API key/quyền truy cập. Admin kiểm tra GEMINI_API_KEY nhé.';
+
+    try {
+      if (processingMsg && typeof processingMsg.edit === 'function') {
+        await processingMsg.edit(userMsg);
+      } else {
+        await safeSend(message, userMsg);
+      }
+    } catch (sendErr) {
+      console.error('Failed to send error message:', sendErr);
+    }
+  } finally {
+    geminiInFlight.delete(userId);
+  }
+}
+
+// ===================== SUMMARIZE HELPERS =====================
+function parseDurationToMs(input) {
+  if (!input) return NaN;
+  const s = String(input).trim().toLowerCase();
+
+  const m = s.match(/^(\d+)\s*([smhd])?$/);
+  if (!m) return NaN;
+
+  const value = parseInt(m[1], 10);
+  const unit = m[2] || 'm';
+
+  const multipliers = { s: 1000, m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 };
+  return value * (multipliers[unit] || 0);
+}
+
+async function fetchMessagesSince(channel, sinceTs, maxMessages = SUMMARY_MAX_MESSAGES) {
+  let fetched = [];
+  let lastId = null;
+
+  while (fetched.length < maxMessages) {
+    const opts = { limit: 100 };
+    if (lastId) opts.before = lastId;
+
+    const batch = await channel.messages.fetch(opts);
+    if (!batch.size) break;
+
+    for (const msg of batch.values()) {
+      if (msg.createdTimestamp < sinceTs) return fetched;
+      fetched.push(msg);
+      if (fetched.length >= maxMessages) break;
+    }
+
+    const oldest = batch.last();
+    if (!oldest) break;
+    lastId = oldest.id;
+
+    if (oldest.createdTimestamp < sinceTs) break;
+  }
+
+  return fetched;
+}
+
+function buildTranscript(messages, maxChars = SUMMARY_MAX_TRANSCRIPT_CHARS) {
+  let out = '';
+  let truncated = false;
+
+  for (const msg of messages) {
+    const ts = new Date(msg.createdTimestamp).toISOString().replace('T', ' ').replace('Z', ' UTC');
+    const author = msg.member?.displayName || msg.author?.username || 'Unknown';
+
+    let content = (msg.cleanContent ?? msg.content ?? '').trim();
+    if (!content && msg.attachments?.size) content = '[Attachment]';
+
+    if (msg.attachments?.size) {
+      const attText = [...msg.attachments.values()]
+        .slice(0, 3)
+        .map((a) => `${a.name || 'file'}: ${a.url}`)
+        .join(' | ');
+      content = content ? `${content}\n(Attachments: ${attText})` : `(Attachments: ${attText})`;
+      if (msg.attachments.size > 3) content += ` | (+${msg.attachments.size - 3} files)`;
+    }
+
+    if (content.length > 800) content = content.slice(0, 800) + '…';
+
+    const line = `[${ts}] ${author}: ${content}\n`;
+    if (out.length + line.length > maxChars) {
+      truncated = true;
+      break;
+    }
+    out += line;
+  }
+
+  return { transcript: out.trim(), truncated };
+}
+
+// ===================== DISCORD EVENT SCHEDULED =====================
+async function createDiscordEvent(guild, eventData) {
+  try {
+    const startTime = new Date(eventData.startTime);
+    const endTime = new Date(eventData.startTime + 3 * 60 * 60 * 1000);
+
+    const scheduledEvent = await guild.scheduledEvents.create({
+      name: `✈️ Group Flight: ${eventData.dep} → ${eventData.arr}`,
+      description: `**Route:** ${eventData.route}\n\nJoin our group flight event! All pilots are welcome.\n\nCreated by: <@${eventData.creator}>`,
+      scheduledStartTime: startTime,
+      scheduledEndTime: endTime,
+      privacyLevel: 2,
+      entityType: 3,
+      entityMetadata: { location: `Flight from ${eventData.dep} to ${eventData.arr}` },
+    });
+
+    return scheduledEvent.id;
+  } catch (err) {
+    console.error('Error creating Discord event:', err);
+    return null;
+  }
+}
+
+async function updateEventMessage(eventId) {
+  const event = events.get(eventId);
+  if (!event || !event.messageId || !event.channelId) return;
+
+  try {
+    const channel = await client.channels.fetch(event.channelId);
+    const message = await channel.messages.fetch(event.messageId);
+
+    const startTime = new Date(event.startTime);
+    const embed = createEventEmbed(event, startTime);
+
+    await message.edit({ embeds: [embed] });
+  } catch (err) {
+    console.error('Error updating event message:', err);
+  }
+}
+
+function createEventEmbed(event, startTime) {
+  const embed = new EmbedBuilder()
+    .setTitle('✈️ Group Flight Event')
+    .setColor(0x0099ff)
+    .setThumbnail('https://cdn-icons-png.flaticon.com/512/1836/1836986.png')
+    .addFields(
+      { name: '🛫 Departure', value: `**${event.dep}**`, inline: true },
+      { name: '🛬 Arrival', value: `**${event.arr}**`, inline: true },
+      { name: '🧭 Route', value: `\`\`\`${event.route}\`\`\``, inline: false },
+      { name: '⏰ Start Time', value: `${formatDateTime(startTime)}\n(${formatRelativeTime(startTime)})`, inline: false },
+      { name: '👤 Created By', value: `<@${event.creator}>`, inline: true },
+      { name: '👥 Participants', value: `**${event.participants.length}** người tham gia`, inline: true }
+    )
+    .setFooter({ text: 'Chúc mọi người có chuyến bay vui vẻ!', iconURL: 'https://cdn-icons-png.flaticon.com/512/929/929430.png' })
+    .setTimestamp();
+
+  // Thêm thông tin role event
+  if (roles.eventParticipantRoleId) {
+    embed.addFields({
+      name: '🎫 Event Role',
+      value: `Người tham gia sẽ được gán role <@&${roles.eventParticipantRoleId}>`,
+      inline: false
+    });
+  }
+
+  if (event.participants.length > 0) {
+    const participantList = event.participants.slice(0, 10).map((id) => `<@${id}>`).join('\n');
+    embed.addFields({
+      name: '📋 Participant List',
+      value: participantList + (event.participants.length > 10 ? `\n...và ${event.participants.length - 10} người khác` : ''),
+      inline: false,
+    });
+  }
+
+  if (event.discordEventId) {
+    embed.addFields({
+      name: '📅 Discord Event',
+      value: `[Join Discord Event](https://discord.com/events/${GUILD_ID}/${event.discordEventId})`,
+      inline: true,
+    });
+  }
+
+  return embed;
+}
+
+// ===================== THEO DÕI VOICE CHANNEL (AUTO-LEAVE & ANTI-BUG KICK) =====================
+client.on('voiceStateUpdate', (oldState, newState) => {
+    // 1. NẾU BOT BỊ KICK HOẶC NGẮT KẾT NỐI (Fix lỗi bot khùng không join lại)
+    if (oldState.member.user.id === client.user.id && oldState.channelId && !newState.channelId) {
+        const queue = musicQueues.get(oldState.guild.id);
+        if (queue) {
+            if (queue.progressInterval) clearInterval(queue.progressInterval);
+            if (queue.connection) queue.connection.destroy();
+            musicQueues.delete(oldState.guild.id);
+            console.log('Bot bị kick khỏi voice, đã tự động dọn dẹp RAM!');
+        }
+        return;
+    }
+
+    // 2. NẾU NGƯỜI DÙNG RỜI ĐI HẾT, CHỈ CÒN MÌNH BOT BƠ VƠ
+    if (oldState.channelId && oldState.channelId !== newState.channelId) {
+        const botVoiceChannel = oldState.guild.members.me.voice.channel;
+        
+        if (botVoiceChannel && oldState.channelId === botVoiceChannel.id) {
+            const humanCount = botVoiceChannel.members.filter(m => !m.user.bot).size;
+            
+            if (humanCount === 0) {
+                const queue = musicQueues.get(oldState.guild.id);
+                if (queue) {
+                    if (queue.progressInterval) clearInterval(queue.progressInterval);
+                    if (queue.connection) queue.connection.destroy(); 
+                    if (queue.dashboardMsg) {
+                        queue.dashboardMsg.edit({ 
+                            embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription('💤 Mọi người đã rời đi hết, Tk.Chill cũng dọn dẹp đi ngủ đây. Hẹn gặp lại!')], 
+                            components: [] 
+                        }).catch(()=>{});
+                    }
+                    musicQueues.delete(oldState.guild.id); 
+                }
+            }
+        }
+    }
+});
+
+// ===================== BAN: UNBAN =====================
+async function unbanUser(userId) {
+  try {
+    if (!bans.users[userId]) return;
+
+    delete bans.users[userId];
+    fs.writeFileSync(BANS_FILE, JSON.stringify(bans, null, 2));
+
+    try {
+      const guild = await client.guilds.fetch(GUILD_ID);
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (member && roles.banRoleId) {
+        await member.roles.remove(roles.banRoleId).catch(() => {});
+      }
+    } catch (_) {}
+
+    console.log(`Unbanned user ${userId}`);
+  } catch (err) {
+    console.error('unbanUser error:', err);
+  }
+}
+
+// ===================== ACDM DATA =====================
+const ACDM_MSG_FILE = path.join(__dirname, 'acdm_message.json');
+let acdmMessageStore = fs.existsSync(ACDM_MSG_FILE) ? JSON.parse(fs.readFileSync(ACDM_MSG_FILE, 'utf8')) : {};
+let acdmData = new Map(); 
+let acdmUpdateTimeout = null;
+
+// Hàm lắng nghe luồng Server-Sent Events từ API
+async function setupACDMStream() {
+  const url = 'https://api.vclvacc.net/api/v1/pilots/sse';
+  console.log(`[ACDM] Bắt đầu kết nối đến luồng: ${url}`);
+  
+  let ES;
+  try {
+    const esModule = await import('eventsource');
+    ES = esModule.default || esModule.EventSource || esModule;
+  } catch (err) {
+    const reqModule = require('eventsource');
+    ES = reqModule.default || reqModule.EventSource || reqModule;
+  }
+
+  const es = new ES(url);
+
+  es.onopen = () => {
+    console.log('🟢 [ACDM] Đã kết nối thành công tới luồng dữ liệu (Live)!');
+  };
+
+  const handleData = (event) => {
+    try {
+      const parsed = JSON.parse(event.data);
+      const data = parsed.data ? parsed.data : parsed; 
+
+      if (Array.isArray(data)) {
+        acdmData.clear();
+        data.forEach(pilot => {
+           if (pilot.callsign) acdmData.set(pilot.callsign, pilot);
+        });
+        console.log(`📦 [ACDM] Kéo thành công danh sách: ${acdmData.size} tàu bay.`);
+      } 
+      else if (data && data.callsign) {
+        acdmData.set(data.callsign, data);
+        console.log(`📦 [ACDM] Nhận update tàu bay: ${data.callsign}`);
+      }
+
+      scheduleACDMUpdate();
+    } catch (err) {
+      console.error('❌ [ACDM] Không thể dịch luồng JSON:', err.message);
+    }
+  };
+
+  // Các Event trả ra từ hệ thống VCLvACC
+  es.addEventListener('pilot:sync', handleData);
+  es.addEventListener('pilot:update', handleData);
+  es.addEventListener('pilot:create', handleData);
+  
+  es.addEventListener('pilot:delete', (event) => {
+     try {
+        const parsed = JSON.parse(event.data);
+        const data = parsed.data ? parsed.data : parsed;
+        if (data && data.callsign) {
+            acdmData.delete(data.callsign);
+            console.log(`🗑️ [ACDM] Đã xóa tàu: ${data.callsign}`);
+            scheduleACDMUpdate();
+        }
+     } catch (e) {
+         console.error('❌ [ACDM] Lỗi khi xóa tàu:', e.message);
+     }
+  });
+
+  // ==========================================
+  // ĐÃ SỬA: CƠ CHẾ AUTO-RECONNECT KHI RỚT MẠNG
+  // ==========================================
+  es.onerror = (err) => {
+    console.error('🔴 [ACDM] Bị ngắt kết nối với máy chủ API!');
+    
+    // 1. Bắt buộc đóng hẳn luồng bị hỏng để tránh kẹt rác bộ nhớ
+    es.close(); 
+    
+    // 2. Hẹn giờ 15 giây sau tự động gọi lại hàm này để kết nối lại từ đầu
+    console.log('⏳ [ACDM] Đang thử kết nối lại sau 15 giây...');
+    setTimeout(() => {
+        setupACDMStream();
+    }, 15000);
+  };
+}
+
+// ===================== ACDM DASHBOARD FUNCTIONS =====================
+
+// Hàm hỗ trợ format chuỗi thời gian dài ("2026-05-28T14:55:00.000Z") thành giờ "1455"
+function formatACDMTime(val) {
+  if (!val) return '----';
+  if (typeof val === 'string' && val.length === 4) return val; // Nếu đã là HHMM thì giữ nguyên
+  try {
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return val; 
+      const h = d.getUTCHours().toString().padStart(2, '0');
+      const m = d.getUTCMinutes().toString().padStart(2, '0');
+      return `${h}${m}`; 
+  } catch (e) {
+      return '----';
+  }
+}
+
+// Hàm Throttle: Cập nhật Discord (Tránh spam API)
+function scheduleACDMUpdate() {
+  if (acdmUpdateTimeout) return;
+  acdmUpdateTimeout = setTimeout(async () => {
+    try {
+        await updateACDMDashboard();
+    } catch (err) {
+        console.error('❌ [ACDM] Lỗi trong scheduleACDMUpdate:', err);
+    } finally {
+        acdmUpdateTimeout = null; // Reset lại để lần sau có thể chạy tiếp
+    }
+  }, 5000); // 5 giây cập nhật 1 lần
+}
+
+// Hàm Core: Tạo Embed và gửi/sửa trên Discord
+async function updateACDMDashboard() {
+  if (!ACDM_CHANNEL_ID) {
+      console.log('⚠️ [ACDM] Chưa khai báo ACDM_CHANNEL_ID!');
+      return;
+  }
+
+  try {
+    // Lọc theo adep (Departure) của API
+    const acdmFlights = Array.from(acdmData.values()).filter(flight => {
+       const dep = flight.adep || '';
+       return dep === 'VVTS' || dep === 'VVNB';
+    });
+
+    // Helper chia mảng
+    function chunkArray(arr, size) {
+      const res = [];
+      for (let i = 0; i < arr.length; i += size) res.push(arr.slice(i, i + size));
+      return res;
+    }
+
+    const embeds = [];
+    const maxFlightsPerEmbed = 15; // Mỗi khối (embed) chứa tối đa 15 chuyến bay
+
+    if (acdmFlights.length === 0) {
+      const embed = new EmbedBuilder()
+        .setTitle('🛫 VCLvACC ACDM Dashboard (VVTS / VVNB)')
+        .setColor(0x00A8FF)
+        .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
+        .setTimestamp()
+        .setFooter({ text: 'Dữ liệu được lấy tự động từ hệ thống ACDM' })
+        .setDescription('Hiện tại không có chuyến bay nào có dữ liệu ACDM tại VVTS và VVNB.');
+      embeds.push(embed);
+    } else {
+      // 1. Tạo các string block cho từng chuyến bay
+      const flightBlocks = acdmFlights.map(flight => {
+        const callsign = flight.callsign || 'N/A';
+        const dep = flight.adep || '???';
+        const arr = flight.ades || '???';
+        
+        const tobt = formatACDMTime(flight.tobt);
+        const tsat = formatACDMTime(flight.tsat);
+        const asat = formatACDMTime(flight.asat);
+        const ardt = formatACDMTime(flight.ardt);
+        const asrt = formatACDMTime(flight.asrt);
+        const ctot = formatACDMTime(flight.ctot);
+
+        return `**✈️ ${callsign}** (${dep} ➔ ${arr})\n\`TOBT: ${tobt} | TSAT: ${tsat} | ASAT: ${asat}\`\n\`ARDT: ${ardt} | ASRT: ${asrt} | CTOT: ${ctot}\`\n`;
+      });
+
+      // 2. Cắt thành nhiều chunk, mỗi chunk là 1 Embed
+      const flightChunks = chunkArray(flightBlocks, maxFlightsPerEmbed);
+
+      flightChunks.forEach((chunk, index) => {
+        const embed = new EmbedBuilder()
+          .setTitle(index === 0 ? '🛫 VCLvACC ACDM Dashboard (VVTS / VVNB)' : '🛫 ACDM Dashboard (Tiếp theo)')
+          .setColor(0x00A8FF)
+          .setDescription(chunk.join('\n'));
+
+        // Chỉ thêm Logo ở phần đầu
+        if (index === 0) {
+           embed.setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960');
+        }
+        // Chỉ thêm Footer ở phần cuối cùng
+        if (index === flightChunks.length - 1) {
+           embed.setTimestamp().setFooter({ text: 'Dữ liệu được lấy tự động từ hệ thống ACDM' });
+        }
+        embeds.push(embed);
+      });
+    }
+
+    // Đóng gói: Nhét tối đa 5 Embeds vào 1 Tin nhắn Discord
+    const messagesPayload = [];
+    for (let i = 0; i < embeds.length; i += 5) {
+      messagesPayload.push({ embeds: embeds.slice(i, i + 5) });
+    }
+
+    // Lấy ID tin nhắn đã lưu (Hỗ trợ cấu trúc mảng)
+    let storedIds = acdmMessageStore.messageIds || [];
+    if (!acdmMessageStore.messageIds && acdmMessageStore.messageId) {
+        storedIds = [acdmMessageStore.messageId]; // Tự động convert data từ code cũ
+    }
+    
+    const channel = await client.channels.fetch(ACDM_CHANNEL_ID);
+    const newStoredIds = [];
+
+    // 3. Gửi, Cập nhật hoặc Xóa tin nhắn linh hoạt
+    for (let i = 0; i < messagesPayload.length; i++) {
+      if (i < storedIds.length) {
+        try {
+          const msg = await channel.messages.fetch(storedIds[i]);
+          await msg.edit(messagesPayload[i]);
+          newStoredIds.push(msg.id);
+        } catch (fetchErr) {
+          // Lỗi do bị người dùng xoá mất tin nhắn
+          const sent = await channel.send(messagesPayload[i]);
+          newStoredIds.push(sent.id);
+        }
+      } else {
+        // Cần thêm tin nhắn mới để chứa cho đủ
+        const sent = await channel.send(messagesPayload[i]);
+        newStoredIds.push(sent.id);
+      }
+    }
+
+    // Xoá đi các tin nhắn trống thừa ở dưới nếu số chuyến bay giảm
+    for (let i = messagesPayload.length; i < storedIds.length; i++) {
+      try {
+        const msg = await channel.messages.fetch(storedIds[i]);
+        await msg.delete();
+      } catch(e) {}
+    }
+
+    // Lưu lại IDs tin nhắn
+    acdmMessageStore = { messageIds: newStoredIds, channelId: channel.id };
+    fs.writeFileSync(ACDM_MSG_FILE, JSON.stringify(acdmMessageStore, null, 2));
+
+    console.log(`✅ [ACDM] Đã cập nhật bảng Discord! (${acdmFlights.length} tàu)`);
+
+  } catch (err) {
+    console.error('❌ [ACDM] Lỗi quá trình build Dashboard Discord:', err);
+  }
+}
+
+// ===================== AUTO-SCAN PENDING ROLE (ĐÃ FIX RATE LIMIT) =====================
+async function scanAndAssignPendingRole() {
+  if (!roles.pendingRoleId) return;
+  
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    
+    // 1. Tải danh sách thành viên một cách an toàn
+    try {
+      await guild.members.fetch();
+    } catch (fetchErr) {
+      console.warn(`⚠️ [Auto-Role] Discord tạm chặn tải danh sách (Rate Limit). Bot sẽ dùng dữ liệu cũ trong bộ nhớ để quét tiếp...`);
+    }
+    
+    let assignedCount = 0;
+    
+    // 2. Dùng for...of thay vì forEach để kiểm soát tốc độ (Tránh spam API)
+    for (const [memberId, member] of guild.members.cache) {
+      if (member.user.bot) continue; 
+      if (roles.banRoleId && member.roles.cache.has(roles.banRoleId)) continue;
+      
+      // Kiểm tra user đã có role Pending nhưng chưa có trong file JSON
+      if (member.roles.cache.has(roles.pendingRoleId)) {
+        if (!pendingUsersData[member.id]) {
+            pendingUsersData[member.id] = {
+                joinDate: member.joinedTimestamp || Date.now(), 
+                notified5Days: false,
+                notified7Days: false
+            };
+            savePendingUsers();
+        }
+        continue; // Bỏ qua người này, chuyển sang người tiếp theo
+      }
+
+      // Nếu user chỉ có 1 role duy nhất (là role @everyone mặc định)
+      if (member.roles.cache.size === 1) {
+        try {
+          await member.roles.add(roles.pendingRoleId);
+          
+          pendingUsersData[member.id] = {
+            joinDate: member.joinedTimestamp || Date.now(), 
+            notified5Days: false,
+            notified7Days: false 
+          };
+          savePendingUsers();
+
+          assignedCount++;
+          console.log(`[Auto-Role] Đã cấp role Welcome/Pending cho ${member.user.tag}`);
+          
+          // 3. NGHỈ 1.5 GIÂY GIỮA MỖI LẦN CẤP ROLE ĐỂ CHỐNG SPAM API
+          await new Promise(resolve => setTimeout(resolve, 1500));
+
+        } catch (e) {
+          console.error(`Không thể cấp role cho ${member.user.tag}:`, e.message);
+        }
+      }
+    }
+    
+    if (assignedCount > 0) {
+      console.log(`✅ [Auto-Role] Hoàn tất quét! Đã cấp role cho ${assignedCount} người dùng vô gia cư.`);
+    }
+  } catch (err) {
+    console.error('❌ Lỗi hệ thống khi chạy auto-scan role:', err.message);
+  }
+}
+
+// =========================================================================
+
+client.once('ready', async () => {
+  console.log(`Bot ${client.user.tag} đã online!`);
+  
+  // 1. Kết nối Database
+  await db.connectDB();
+
+  // 2. Load profile từ MongoDB vào RAM
+  try {
+    profiles = await db.getAllProfiles();
+    console.log(`✅ Đã nạp ${Object.keys(profiles).length} Profile từ MongoDB vào RAM.`);
+    
+    // ==================== BƠM DỮ LIỆU CŨ LÊN MONGODB ====================
+    const oldData = {
+      "1094252826357670038": {
+        "name": "Lý Thúc Duy",
+        "age": "14",
+        "bio": "Tui là người tạo ra bot tk.chill và đang là Admin, DEV của server tk.chill, tên gọi khác của tôi là Louis Ly(hãy dùng tên này để gọi tôi)."
+      },
+      "856704693215166474": {
+        "name": "Nguyễn Trần Tuấn Kiệt",
+        "age": "18",
+        "bio": "Biệt danh là しいな まひる, @kiet1510 là tài khoản discord của tôi. Hiện tôi là Admin tạo ra server này, thấy tôi có role DEV và Coder nữa. Và tôi cũng sở hữu kênh TikTok với hơn 1k7 người theo dõi có nội dung về máy bay. Tôi đang là ATC trên mạng bay VATSIM với ranting S2 và AS3 ở IVAO."
+      }
     };
+
+    let hasMigration = false;
+    for (const [id, info] of Object.entries(oldData)) {
+      // Nếu ID này chưa có trong RAM (tức là chưa có trên MongoDB)
+      if (!profiles[id]) {
+        await db.saveProfile(id, info); // Đẩy thẳng lên MongoDB
+        profiles[id] = info;            // Cập nhật luôn vào RAM
+        hasMigration = true;
+      }
+    }
+
+    if (hasMigration) {
+      console.log("▲ [Profiles Data] Đã tự động bơm dữ liệu cũ của Louis Ly và Tuấn Kiệt lên MongoDB!");
+    }
+    // ====================================================================
+
+  } catch (e) {
+    console.error('Lỗi nạp profiles:', e);
   }
-  return data;
-}
-
-// ========== TẠO SHEET SIMBRIEF USERS ==========
-async function createSimbriefUsersSheet() {
-  const exists = await sheetExists(SIMBRIEF_USERS_SHEET_NAME);
-  if (exists) return SIMBRIEF_USERS_SHEET_NAME;
-
-  const sheets = await initGoogleSheets();
-  const headers = ['DiscordId', 'SimbriefUsername'];
-
+  // Nạp ID tin nhắn VATSIM từ MongoDB
   try {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [{ addSheet: { properties: { title: SIMBRIEF_USERS_SHEET_NAME } } }],
-      },
-    });
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${SIMBRIEF_USERS_SHEET_NAME}!A1:B1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [headers] },
-    });
-    console.log(`✅ Created sheet: ${SIMBRIEF_USERS_SHEET_NAME}`);
-    return SIMBRIEF_USERS_SHEET_NAME;
-  } catch (err) {
-    console.error('Error creating SimbriefUsers sheet:', err);
-    throw err;
+      const savedVatsim = await db.getBotConfig('vatsim_messages');
+      if (savedVatsim) {
+          vatsimMessageStore = savedVatsim;
+          console.log(`✅ Đã nạp lại ${savedVatsim.messageIds?.length || 0} tin nhắn VATSIM từ MongoDB.`);
+      }
+  } catch (e) {
+      console.error('Lỗi nạp config VATSIM:', e);
   }
-}
+  // Nạp Cookie cho YouTube (ĐÃ NÂNG CẤP BỘ CHUYỂN ĐỔI JSON)
+  try {
+      if (process.env.YOUTUBE_COOKIE) {
+          let finalCookie = '';
+          try {
+              // 1. Thử phân tích xem ông có đang dán cục JSON vào không
+              const parsedJSON = JSON.parse(process.env.YOUTUBE_COOKIE);
+              // Lấy phần data bên trong chữ "cookie"
+              const cookieObj = parsedJSON.cookie || parsedJSON; 
+              // Biến nó thành chuỗi chuẩn: key=value; key2=value2;
+              finalCookie = Object.entries(cookieObj).map(([k, v]) => `${k}=${v}`).join('; ');
+          } catch (err) {
+              // 2. Nếu nó báo lỗi (nghĩa là ông dán chuỗi thường chứ không phải JSON), thì gọt rác như cũ
+              finalCookie = process.env.YOUTUBE_COOKIE.replace(/\r?\n|\r/g, '').trim();
+          }
 
-// ========== LƯU DỮ LIỆU SIMBRIEF USERS ==========
-async function saveSimbriefUsersSheet(data) {
-  const sheets = await initGoogleSheets();
-
-  const sheetExistsFlag = await sheetExists(SIMBRIEF_USERS_SHEET_NAME);
-  if (!sheetExistsFlag) {
-    await createSimbriefUsersSheet();
+          play.setToken({
+              youtube : {
+                  cookie : finalCookie
+              }
+          });
+          console.log('✅ Đã nạp Cookie YouTube thành công (Đã convert chuẩn xác)!');
+      } else {
+          console.warn('⚠️ CẢNH BÁO: Chưa cấu hình YOUTUBE_COOKIE. Bot nhạc có thể bị lỗi 429.');
+      }
+  } catch (e) {
+      console.error('❌ Lỗi khi nạp Cookie YouTube:', e);
   }
-
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: SPREADSHEET_ID,
-    fields: 'sheets.properties',
-  });
-  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === SIMBRIEF_USERS_SHEET_NAME);
-  if (!sheet) throw new Error(`Sheet ${SIMBRIEF_USERS_SHEET_NAME} not found`);
-  const sheetId = sheet.properties.sheetId;
-
-  // Xóa dữ liệu cũ
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [
-        {
-          deleteRange: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: 5000,
-              startColumnIndex: 0,
-              endColumnIndex: 2,
-            },
-            shiftDimension: 'ROWS',
-          },
-        },
-      ],
-    },
-  });
-
-  const rows = [];
-  for (const [discordId, username] of Object.entries(data)) {
-    rows.push([discordId, username]);
+  // NẠP CHÌA KHÓA API SPOTIFY (ĐÃ TRANG BỊ MÁY GỌT RÁC)
+  try {
+      if (process.env.SPOTIFY_CLIENT_ID && process.env.SPOTIFY_CLIENT_SECRET) {
+          play.setToken({
+              spotify : {
+                  // Dùng .trim() để cắt sạch khoảng trắng thừa do copy ẩu
+                  client_id: process.env.SPOTIFY_CLIENT_ID.trim(),
+                  client_secret: process.env.SPOTIFY_CLIENT_SECRET.trim(),
+                  market: 'VN'
+              }
+          });
+          console.log('✅ Đã nạp chìa khóa Spotify thành công! Sẵn sàng nuốt Playlist.');
+      } else {
+          console.warn('⚠️ CẢNH BÁO: Chưa cấu hình API Spotify. Tính năng nhạc Spotify sẽ bị lỗi.');
+      }
+  } catch (e) {
+      console.error('❌ Lỗi nạp API Spotify:', e);
   }
-
-  if (rows.length === 0) return;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${SIMBRIEF_USERS_SHEET_NAME}!A2`,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  });
-
-  console.log(`✅ Saved ${rows.length} Simbrief users to sheet ${SIMBRIEF_USERS_SHEET_NAME}`);
-}
-
-// ========== ĐỌC DỮ LIỆU SIMBRIEF USERS ==========
-async function loadSimbriefUsersSheet() {
-  const exists = await sheetExists(SIMBRIEF_USERS_SHEET_NAME);
-  if (!exists) {
-    console.log('⚠️ Sheet SimbriefUsers chưa tồn tại, đang tiến hành tạo mới...');
-    await createSimbriefUsersSheet();
-    return {};
+  // KHỞI ĐỘNG ĐỘNG CƠ SOUNDCLOUD (BÍ QUYẾT LÁCH YOUTUBE)
+    try {
+        const clientID = await play.getFreeClientID();
+        play.setToken({
+            soundcloud : {
+                client_id : clientID
+            }
+        });
+        console.log('✅ Đã nạp Động cơ SoundCloud thành công (Bypass YouTube)!');
+    } catch (e) {
+        console.error('❌ Lỗi nạp SoundCloud:', e);
+    }
+  // Load lịch hẹn thông báo
+  try {
+    scheduledAnnouncements = await db.getAnnouncements();
+    console.log(`✅ Đã nạp ${scheduledAnnouncements.length} lịch hẹn thông báo từ MongoDB.`);
+  } catch (e) {
+    console.error('Lỗi nạp lịch thông báo:', e);
   }
 
-  const sheets = await initGoogleSheets();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${SIMBRIEF_USERS_SHEET_NAME}!A2:B`,
-  });
+  // Load sổ đỏ CID từ Google Sheets
+  try {
+    if (typeof loadVatsimLinksSheet === 'function') {
+      vatsimLinksCache = await loadVatsimLinksSheet();
+      console.log(`✅ Đã tải ${Object.keys(vatsimLinksCache).length} liên kết VATSIM từ Google Sheets.`);
+    }
+  } catch (err) { console.error('Lỗi tải Vatsim Links:', err); }
+
+  // Kiểm tra ngay khi khởi động
+  setTimeout(() => {
+    checkAndSendMonthlyAwards();
+  }, 30000); // Sau 30 giây
+
+  console.log('Monthly award scheduler started - checking every 6 hours');
+
+  // Đảm bảo role event tồn tại
+  await ensureEventRoleExists();
+
+
+  // Register slash commands
+  const commands = [
+    new SlashCommandBuilder().setName('give_role').setDescription('Xin role'),
+    new SlashCommandBuilder().setName('group_flight').setDescription('Tạo group flight'),
+    new SlashCommandBuilder()
+      .setName('send_announcements')
+      .setDescription('Gửi thông báo')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+      .addChannelOption((option) => option.setName('channel').setDescription('Kênh gửi').setRequired(true))
+      .addStringOption((option) => option.setName('message').setDescription('Nội dung').setRequired(true))
+      .addStringOption((option) => option.setName('time').setDescription('Hẹn giờ gửi (YYYY-MM-DD HH:MM UTC), bỏ trống = gửi luôn').setRequired(false)),
+    new SlashCommandBuilder()
+      .setName('setup_atc_noti')
+      .setDescription('Tạo tin nhắn đăng ký nhận role ATC Notification (Admin only)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    new SlashCommandBuilder()
+      .setName('metar')
+      .setDescription('Xem METAR của sân bay')
+      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (ví dụ: VVTS)').setRequired(true)),
+    new SlashCommandBuilder().setName('submit_profile').setDescription('Submit profile của bạn'),
+    new SlashCommandBuilder().setName('time').setDescription('Xem thời gian hiện tại'),
+    new SlashCommandBuilder()
+      .setName('summarize')
+      .setDescription('Tóm tắt tin nhắn trong khoảng thời gian bằng Gemini (chỉ bạn thấy)')
+      .addSubcommand((sc) =>
+        sc
+          .setName('everyone')
+          .setDescription('Tóm tắt tin nhắn của mọi người trong khoảng thời gian')
+          .addStringOption((option) =>
+            option
+              .setName('duration')
+              .setDescription('Ví dụ: 30m | 2h | 1d (hoặc 45 = 45 phút)')
+              .setRequired(true)
+          )
+          .addChannelOption((option) =>
+            option.setName('channel').setDescription('Kênh cần tóm tắt (bỏ trống = kênh hiện tại)').setRequired(false)
+          )
+      )
+      .addSubcommand((sc) =>
+        sc
+          .setName('user')
+          .setDescription('Tóm tắt tin nhắn của một user trong khoảng thời gian')
+          .addUserOption((option) => option.setName('user').setDescription('Chọn user').setRequired(true))
+          .addStringOption((option) =>
+            option
+              .setName('duration')
+              .setDescription('Ví dụ: 30m | 2h | 1d (hoặc 45 = 45 phút)')
+              .setRequired(true)
+          )
+          .addChannelOption((option) =>
+            option.setName('channel').setDescription('Kênh cần tóm tắt (bỏ trống = kênh hiện tại)').setRequired(false)
+          )
+      ),
+    new SlashCommandBuilder()
+      .setName('leaderboard')
+      .setDescription('Quản lý leaderboard')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+      .addSubcommand((sc) =>
+        sc.setName('show').setDescription('Hiển thị leaderboard controller')
+      )
+      .addSubcommand((sc) =>
+        sc.setName('update').setDescription('Cập nhật leaderboard ngay lập tức')
+      )
+      .addSubcommand((sc) =>
+        sc.setName('reset').setDescription('Reset leaderboard (admin only)')
+      ),
+    new SlashCommandBuilder()
+      .setName('pilot_leaderboard')
+      .setDescription('Quản lý leaderboard cho pilot')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+      .addSubcommand((sc) =>
+        sc.setName('show').setDescription('Hiển thị top 10 pilot')
+      )
+      .addSubcommand((sc) =>
+        sc.setName('update').setDescription('Cập nhật pilot leaderboard ngay lập tức')
+      )
+      .addSubcommand((sc) =>
+        sc.setName('reset').setDescription('Reset pilot leaderboard (admin only)')
+      )
+      .addSubcommand((sc) =>
+        sc.setName('full').setDescription('Xem toàn bộ pilot leaderboard (gửi file txt)')
+      ),
+    new SlashCommandBuilder()
+      .setName('send_award')
+      .setDescription('Gửi thông báo chúc mừng top 5 ATC/pilot (admin only)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+      .addSubcommand(sub => sub
+        .setName('atc')
+        .setDescription('Gửi award cho top 5 ATC')
+      )
+      .addSubcommand(sub => sub
+        .setName('pilot')
+        .setDescription('Gửi award cho top 5 pilot')
+      )
+      .addSubcommand(sub => sub
+        .setName('both')
+        .setDescription('Gửi award cho cả ATC và pilot')
+      )
+      .addSubcommand(sub => sub
+        .setName('reset_status')
+        .setDescription('Reset trạng thái đã gửi award (admin only)')
+      ),
+    new SlashCommandBuilder()
+      .setName('runway')
+      .setDescription('Tính toán đường băng đang sử dụng dựa trên gió METAR')
+      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+      
+    new SlashCommandBuilder()
+      .setName('taf')
+      .setDescription('Lấy và giải mã dự báo thời tiết TAF')
+      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVNB)').setRequired(true)),
+
+    new SlashCommandBuilder()
+      .setName('stats')
+      .setDescription('Tra cứu thống kê VATSIM qua CID')
+      .addIntegerOption((option) => option.setName('vatsim_id').setDescription('Nhập VATSIM CID').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('event')
+      .setDescription('Tra cứu các sự kiện VATSIM sắp diễn ra tại sân bay')
+      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('route')
+      .setDescription('Tra cứu gợi ý route bay (Đường bay tiêu chuẩn)')
+      .addStringOption((option) => option.setName('dep').setDescription('Sân bay đi (ICAO, VD: VVTS)').setRequired(true))
+      .addStringOption((option) => option.setName('arr').setDescription('Sân bay đến (ICAO, VD: VVNB)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('edit_announ')
+      .setDescription('Sửa nội dung thông báo (đã gửi hoặc đang chờ lịch)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+      .addStringOption(option => option.setName('id').setDescription('ID tin nhắn đã gửi hoặc ID lịch trình').setRequired(true))
+      .addStringOption(option => option.setName('content').setDescription('Nội dung mới muốn sửa').setRequired(true))
+      .addChannelOption(option => option.setName('channel').setDescription('Kênh chứa tin nhắn (bắt buộc nếu là tin nhắn đã gửi)').setRequired(false)),
+      
+    new SlashCommandBuilder()
+      .setName('cancel_announ')
+      .setDescription('Hủy bỏ thông báo đã lên lịch (chưa gửi)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+      .addStringOption(option => option.setName('id').setDescription('ID lịch trình (lấy lúc tạo lệnh)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('vatsea_rank')
+      .setDescription('Bảng xếp hạng ATC VATSEA')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+      .addStringOption(option => 
+        option.setName('start')
+          .setDescription('Thời gian bắt đầu (ISO UTC VD: 2023-10-01T00:00:00Z). Bỏ trống = Đầu tháng')
+          .setRequired(false)
+      )
+      .addStringOption(option => 
+        option.setName('end')
+          .setDescription('Thời gian kết thúc (ISO UTC). Bỏ trống = Hiện tại')
+          .setRequired(false)
+      ),
+    new SlashCommandBuilder()
+      .setName('sell')
+      .setDescription('*Chỉ dành cho thành viên tham gia từ 2 tháng trở lên/ Đăng bán sản phẩm')
+      .addAttachmentOption(option => option.setName('anh1').setDescription('Ảnh chính').setRequired(true))
+      .addAttachmentOption(option => option.setName('anh2').setDescription('Ảnh phụ 1').setRequired(false))
+      .addAttachmentOption(option => option.setName('anh3').setDescription('Ảnh phụ 2').setRequired(false))
+      .addAttachmentOption(option => option.setName('anh4').setDescription('Ảnh phụ 3').setRequired(false)),
+    new SlashCommandBuilder()
+      .setName('notam')
+      .setDescription('Tra cứu thông báo hàng không (NOTAM) của sân bay')
+      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+      
+    new SlashCommandBuilder()
+      .setName('simbrief')
+      .setDescription('Tóm tắt kế hoạch bay (OFP)')
+      .addStringOption((option) => option.setName('username').setDescription('Tên tài khoản SimBrief (chỉ cần nhập lần đầu)').setRequired(false)),
+    new SlashCommandBuilder()
+      .setName('online_atc')
+      .setDescription('Tra cứu danh sách ATC đang online tại một sân bay')
+      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('play')
+      .setDescription('🎧 Phát nhạc với tk.chill DJ')
+      .addStringOption(option => option.setName('query').setDescription('Tên bài hát hoặc Link YouTube').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('queue')
+      .setDescription('📜 Xem danh sách nhạc đang chờ phát'),
+    new SlashCommandBuilder()
+      .setName('clear')
+      .setDescription('🧹 Xóa toàn bộ bài hát đang chờ (giữ lại bài đang phát)'),
+    new SlashCommandBuilder()
+      .setName('setup_vatsim_verify')
+      .setDescription('Tạo bảng xác thực CID nhận role VATSIM (Admin only)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+  ];
+  // Sau các lệnh khởi tạo khác
+  await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
+
+  try {
+    await client.application.commands.set(commands.map((c) => c.toJSON()));
+    console.log('Registered application commands.');
+  } catch (err) {
+    console.warn('Failed to register commands:', err.message || err);
+  }
+
+  // Sau các lệnh khởi tạo khác
+  await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
+
+  // --- THÊM ĐOẠN NÀY ĐỂ KÉO DATA PENDING TỪ SHEET ---
+  try {
+    if (typeof loadPendingUsersSheet === 'function') {
+      const data = await loadPendingUsersSheet();
+      if (data) {
+        pendingUsersData = data;
+        console.log(`✅ Đã tải thành công ${Object.keys(pendingUsersData).length} Pending Users từ Google Sheets.`);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Lỗi kéo dữ liệu Pending Users:', error);
+  }
+  // ---------------------------------------------------
+  // --- KÉO DATA SIMBRIEF TỪ SHEET ---
+  try {
+    if (typeof loadSimbriefUsersSheet === 'function') {
+      const data = await loadSimbriefUsersSheet();
+      if (data) {
+        simbriefUsersData = data;
+        console.log(`✅ Đã tải thành công ${Object.keys(simbriefUsersData).length} Simbrief Users từ Google Sheets.`);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Lỗi kéo dữ liệu Simbrief Users:', error);
+  }
+  // ================= TÍNH NĂNG: HẸN GIỜ CHẴN LEADERBOARD (FIX TRÒN GIỜ) =================
+  function startHourlyLeaderboard() {
+    // 1. CHẠY NGAY LẬP TỨC 1 LẦN KHI BẬT BOT ĐỂ UPDATE DATA MỚI NHẤT
+    updateControllerLeaderboardEmbed();
+    updatePilotLeaderboardEmbed();
+    console.log(`[Leaderboard] Đã cập nhật phát súng đầu tiên khi khởi động bot.`);
+
+    // 2. TỰ ĐỘNG TÍNH TOÁN ĐỂ CANH ĐÚNG GIỜ CHẴN TIẾP THEO
+    const now = new Date();
+    const msUntilNextHour = (60 - now.getMinutes()) * 60000 - now.getSeconds() * 1000 - now.getMilliseconds();
+
+    console.log(`[Leaderboard] Bộ hẹn giờ thông minh đã bật! Sẽ tự động canh và cập nhật vào ĐÚNG GIỜ CHẴN tiếp theo sau: ${Math.round(msUntilNextHour/60000)} phút nữa.`);
+
+    // 3. ĐỢI ĐẾN ĐÚNG GIỜ CHẴN TIẾP THEO (VD: ĐÚNG 8h00 TỐI) THÌ KHÓA VÒNG LẶP
+    setTimeout(() => {
+      updateControllerLeaderboardEmbed();
+      updatePilotLeaderboardEmbed();
+      console.log(`[Leaderboard] Đã chạm mốc giờ chẵn! Bắt đầu khóa vòng lặp chuẩn 1 tiếng/lần.`);
+
+      // Từ giây phút này trở đi, cứ đúng 60 phút (9h00, 10h00, 11h00...) là nó tự nã lệnh
+      setInterval(() => {
+        updateControllerLeaderboardEmbed();
+        updatePilotLeaderboardEmbed();
+        console.log(`[Leaderboard] Cập nhật định kỳ giờ chẵn thành công.`);
+      }, 60 * 60 * 1000);
+      
+    }, msUntilNextHour);
+  }
   
-  const rows = response.data.values || [];
-  const data = {};
+  // Kích hoạt bộ đếm giờ chẵn
+  startHourlyLeaderboard();
+  // =========================================================================
+  // restore bans timeouts
+  for (const [userId, ban] of Object.entries(bans.users)) {
+    const timeLeft = ban.endTime - Date.now();
+    if (timeLeft > 0) setTimeout(() => unbanUser(userId), timeLeft);
+    else unbanUser(userId);
+  }
 
-  for (const row of rows) {
-    const [discordId, username] = row;
-    if (discordId && username) {
-      data[discordId] = username;
+  // Chạy quét role tự động sau khi bot bật lên 20 giây (tránh bị kẹt rate limit lúc mới bật)
+  setTimeout(() => {
+    scanAndAssignPendingRole();
+  }, 20000);
+
+  // Cài đặt quét định kỳ mỗi 6 tiếng một lần để phòng hờ có ai bị sót
+  setInterval(() => {
+    scanAndAssignPendingRole();
+  }, 6 * 60 * 60 * 1000);
+
+  // Vòng lặp check thông báo hẹn giờ mỗi 60 giây
+  setInterval(async () => {
+    const now = Date.now();
+    let hasChanges = false;
+    
+    // Duyệt ngược mảng để dễ dàng xóa phần tử khi đã gửi xong
+    for (let i = scheduledAnnouncements.length - 1; i >= 0; i--) {
+      const ann = scheduledAnnouncements[i];
+      
+      // Nếu thời gian hiện tại đã vượt qua thời gian hẹn giờ
+      if (now >= ann.time) {
+        try {
+          const targetChannel = await client.channels.fetch(ann.channelId);
+          if (targetChannel) {
+            await targetChannel.send({ 
+              content: ann.content, 
+              allowedMentions: { parse: ['roles', 'users', 'everyone'] } 
+            });
+          }
+        } catch (err) {
+          console.error(`Lỗi gửi thông báo đã lên lịch (ID: ${ann.id}):`, err);
+        }
+        
+        // Gửi xong thì xóa khỏi mảng
+        scheduledAnnouncements.splice(i, 1);
+        hasChanges = true;
+      }
+    }
+    
+    // Nếu có thông báo vừa được gửi/xóa, cập nhật lại file JSON
+    if (hasChanges) {
+      await db.saveAnnouncements(scheduledAnnouncements);
+    }
+  }, 60 * 1000);
+
+  // ==========================================
+  // HỆ THỐNG THEO DÕI VÀ KICK PENDING ROLE (Mỗi 1 tiếng check 1 lần)
+  // ==========================================
+  setInterval(async () => {
+    const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
+    if (!guild) return;
+
+    const now = Date.now();
+    let isModified = false;
+    const SERVER_INVITE_LINK = "https://discord.gg/CD6D46zM9R";
+
+    for (const [userId, data] of Object.entries(pendingUsersData)) {
+      try {
+        const member = await guild.members.fetch(userId).catch(() => null);
+        
+        // Nếu user đã thoát server hoặc đã có role Member -> Xóa khỏi danh sách theo dõi
+        if (!member || member.roles.cache.has(roles.basicMemberRoleId)) {
+          delete pendingUsersData[userId];
+          isModified = true;
+          continue;
+        }
+
+        const elapsedMs = now - data.joinDate;
+        const daysElapsed = elapsedMs / (1000 * 60 * 60 * 24);
+
+        // 1. Kick (Sau đúng 8 ngày - Hết 1 ngày gia hạn)
+        if (daysElapsed >= 8) {
+          try {
+            await member.send(`Đã hết 1 ngày gia hạn mà bạn vẫn chưa xin role. Tạm biệt bạn nhé, bạn có thể rejoin server: ${SERVER_INVITE_LINK}`);
+          } catch(e) {} 
+          
+          await member.kick("Không xin role Member sau 8 ngày");
+          delete pendingUsersData[userId];
+          isModified = true;
+          console.log(`👢 [Auto-Kick] Đã kick ${member.user.tag} vì không xin role sau 8 ngày.`);
+          continue;
+        }
+
+        // 2. Nhắc nhở tối hậu thư (Sau 7 ngày)
+        if (daysElapsed >= 7 && !data.notified7Days) {
+          try {
+            await member.send("⚠️ Bạn có 1 ngày để xin role Member trước khi bị kick khỏi server. Hãy vào <#1405214914662109294> và xin role ngay nhé!");
+          } catch(e) {}
+          data.notified7Days = true;
+          isModified = true;
+        }
+
+        // 3. Nhắc nhở 5 ngày
+        if (daysElapsed >= 5 && daysElapsed < 7 && !data.notified5Days) {
+          try {
+            await member.send("Bạn ơi đã 5 ngày rồi mà sao chưa xin role Member để trò chuyện cùng tui nhỉ? Hãy vào <#1405214914662109294> và xin role Member để trò chuyện nhé");
+          } catch(e) {}
+          data.notified5Days = true;
+          isModified = true;
+        }
+
+      } catch (err) {
+        console.error(`Lỗi hệ thống nhắc nhở role cho ID ${userId}:`, err);
+      }
+    }
+
+    if (isModified) savePendingUsers();
+  }, 60 * 60 * 1000); // 1 giờ chạy 1 lần
+
+  // ensure messages exist for editing
+  await ensureVatsimMessageExists();
+  await ensureLeaderboardMessagesExist();
+  await loadAllLeaderboards();
+
+  await ensureACDMMessageExists();
+  
+  // Thêm dòng này để bật kết nối lấy dữ liệu ACDM liên tục
+  await setupACDMStream();
+
+  // Kích hoạt cập nhật House Stats lần đầu khi bot vừa online
+  setTimeout(() => updateServerStats(client), 5000); // Chờ 5s cho bot load xong dữ liệu
+
+  // Cài đặt vòng lặp tự động cập nhật mỗi 15 phút (An toàn với Discord API)
+  setInterval(() => {
+    updateServerStats(client);
+  }, 15 * 60 * 1000);
+
+  // ==========================================
+  // CẬP NHẬT VATSEA ATC LEADERBOARD
+  // ==========================================
+  async function runVatseaUpdate() {
+    const now = new Date();
+    // Lấy thời điểm bắt đầu của tháng hiện tại (UTC)
+    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+    try {
+      await updateVatseaLeaderboardEmbed(startOfMonth, now);
+      console.log('✅ Đã auto-update VATSEA Leaderboard');
+    } catch (e) {
+      console.error('❌ Lỗi khi auto-update VATSEA Leaderboard:', e);
     }
   }
-  return data;
-}
 
-// ========== TẠO SHEET PROFILES ==========
-async function createProfilesSheet() {
-  const exists = await sheetExists(PROFILES_SHEET_NAME);
-  if (exists) return PROFILES_SHEET_NAME;
+  // 1. Chạy ngay lần đầu tiên sau khi bot khởi động (chờ 15 giây cho bot load xong các thứ khác)
+  setTimeout(() => {
+    runVatseaUpdate();
+  }, 15000);
 
-  const sheets = await initGoogleSheets();
-  const headers = ['DiscordId', 'Name', 'Age', 'Bio'];
+  // 2. Sau đó cứ đúng 1 tiếng (60 * 60 * 1000 ms) lặp lại 1 lần
+  setInterval(runVatseaUpdate, 60 * 60 * 1000);
 
-  try {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [{ addSheet: { properties: { title: PROFILES_SHEET_NAME } } }],
-      },
-    });
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${PROFILES_SHEET_NAME}!A1:D1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [headers] },
-    });
-    console.log(`✅ Created sheet: ${PROFILES_SHEET_NAME}`);
-    return PROFILES_SHEET_NAME;
-  } catch (err) {
-    console.error('Error creating Profiles sheet:', err);
-    throw err;
+  // VATSIM update scheduling
+  const vatsimPeriodMs = (process.env.VATSIM_UPDATE_MINUTES ? parseInt(process.env.VATSIM_UPDATE_MINUTES) : 1) * 60 * 1000;
+  vatsimWorker.postMessage('update');
+  setInterval(() => vatsimWorker.postMessage('update'), vatsimPeriodMs);
+  console.log(`VATSIM updater running: immediate + every ${vatsimPeriodMs / 60000} minutes`);
+ 
+  
+  // Cập nhật dữ liệu thường xuyên hơn (mỗi phút)
+  setInterval(() => {
+    // Gọi VATSIM worker để cập nhật controllers và pilots
+    vatsimWorker.postMessage('update');
+  }, 60 * 1000); // Mỗi phút
+  
+  
+  console.log('Leaderboard updater scheduled: data every minute, embed every hour');
+  
+  // Clean up empty voice channels
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const channels = await guild.channels.fetch();
+    
+    channels.forEach(channel => {
+      if (channel.type === ChannelType.GuildVoice && 
+          channel.members.size === 0 && 
+          channel.name.includes("'s Channel")) {
+        channel.delete().catch(() => {});
+        console.log(`Cleaned up empty voice channel: ${channel.name}`);
+      }
+    });
+  } catch (err) {
+    console.error('Error cleaning up voice channels:', err);
+  }
+});
+
+// ===================== MEMBER ADD (AUTO ROLE & LOG) =====================
+client.on('guildMemberAdd', async (member) => {
+  if (member.user.bot) return; // Bỏ qua nếu người mới join là một con Bot khác
+
+  // 1. Tự động cấp Role Pending (Thêm delay 2 giây để tránh lỗi kẹt API của Discord)
+  if (member.guild.id === GUILD_ID && roles.pendingRoleId) {
+    setTimeout(async () => {
+      try {
+        await member.roles.add(roles.pendingRoleId);
+        
+        // --- THÊM LOGIC LƯU DATA VÀ GỬI LỜI CHÀO ---
+        pendingUsersData[member.id] = {
+          joinDate: member.joinedTimestamp || Date.now(), 
+          notified5Days: false,
+          notified7Days: false // Đổi tên cho đồng bộ
+        };
+        savePendingUsers();
+
+        try {
+          await member.send("Welcome to tk.chill server, hãy vào kênh <#1405214914662109294> để lấy role Member và trò chuyện cùng mọi người nhá. **Lưu ý nếu bạn không xin role 1 tuần kể từ ngày bạn vào server thì bot sẽ tự kick bạn ra**");
+        } catch (dmErr) {
+          console.log(`[Auto-Role] Không thể gửi DM cho ${member.user.tag} (họ chặn tin nhắn người lạ)`);
+        }
+        // ------------------------------------------
+
+        console.log(`✅ [Auto-Role] Đã tự động cấp role Welcome/Pending cho người mới: ${member.user.tag}`);
+      } catch (err) {
+        console.error(`❌ [Auto-Role] Lỗi khi cấp role cho ${member.user.tag}:`, err.message);
+      }
+    }, 2000); // Trễ 2000ms (2 giây)
   }
-}
-
-// ========== LƯU DỮ LIỆU PROFILES ==========
-async function saveProfilesSheet(data) {
-  const sheets = await initGoogleSheets();
-
-  const sheetExistsFlag = await sheetExists(PROFILES_SHEET_NAME);
-  if (!sheetExistsFlag) {
-    await createProfilesSheet();
-  }
-
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: SPREADSHEET_ID,
-    fields: 'sheets.properties',
-  });
-  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === PROFILES_SHEET_NAME);
-  if (!sheet) throw new Error(`Sheet ${PROFILES_SHEET_NAME} not found`);
-  const sheetId = sheet.properties.sheetId;
-
-  // Xóa dữ liệu cũ
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [
-        {
-          deleteRange: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: 5000,
-              startColumnIndex: 0,
-              endColumnIndex: 4,
-            },
-            shiftDimension: 'ROWS',
-          },
-        },
-      ],
-    },
-  });
-
-  const rows = [];
-  for (const [discordId, info] of Object.entries(data)) {
-    rows.push([discordId, info.name || '', info.age || '', info.bio || '']);
-  }
-
-  if (rows.length === 0) return;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${PROFILES_SHEET_NAME}!A2`,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  });
-
-  console.log(`✅ Saved ${rows.length} profiles to sheet ${PROFILES_SHEET_NAME}`);
-}
-
-// ========== ĐỌC DỮ LIỆU PROFILES ==========
-async function loadProfilesSheet() {
-  const exists = await sheetExists(PROFILES_SHEET_NAME);
-  if (!exists) {
-    console.log('⚠️ Sheet Profiles chưa tồn tại, đang tiến hành tạo mới...');
-    await createProfilesSheet();
-    return {};
-  }
-
-  const sheets = await initGoogleSheets();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${PROFILES_SHEET_NAME}!A2:D`,
-  });
   
-  const rows = response.data.values || [];
-  const data = {};
+  // 2. Gửi Log báo cáo
+  const embed = createLogEmbed(
+    '📥 Member Joined',
+    `**User:** ${getUserIdentifier(member.user)}\n**ID:** ${member.user.id}\n**Account created:** <t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`,
+    0x2ecc71 // Màu xanh lá
+  );
+  await sendLog(embed);
+});
 
-  for (const row of rows) {
-    const [discordId, name, age, bio] = row;
-    if (discordId) {
-      data[discordId] = { name, age, bio };
+// ===================== INTERACTIONS =====================
+client.on('interactionCreate', async (interaction) => {
+  // XỬ LÝ KHI NGƯỜI DÙNG CHỌN 1 BÀI TỪ MENU
+  if (interaction.isStringSelectMenu() && interaction.customId === 'select_song') {
+      const [searchId, index] = interaction.values[0].split('_');
+      const songs = temporarySearchResults.get(searchId);
+      
+      if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
+
+      const selectedSong = songs[index];
+      let queue = musicQueues.get(interaction.guild.id);
+      if (!queue) return interaction.reply({ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
+      
+      // Bơm bài hát đã chọn vào hàng chờ
+      queue.songs.push(selectedSong);
+      
+      interaction.update({ content: `✅ Đã chọn và thêm bài **${selectedSong.title}** vào hàng chờ!`, components: [] });
+      
+      // Kích hoạt hát ngay nếu bot đang nghỉ
+      if (queue.songs.length === 1 || !queue.playing) {
+          playNextSong(interaction.guild.id);
+      } else {
+          if (queue.dashboardMsg) queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+      }
+      setTimeout(() => temporarySearchResults.delete(searchId), 60000);
+  }
+
+  // XỬ LÝ KHI NGƯỜI DÙNG BẤM "PHÁT TOÀN BỘ PLAYLIST"
+  if (interaction.isButton() && interaction.customId.startsWith('play_all_')) {
+      const searchId = interaction.customId.split('_')[2];
+      const songs = temporarySearchResults.get(searchId);
+
+      if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
+
+      let queue = musicQueues.get(interaction.guild.id);
+      if (!queue) return interaction.reply({ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
+
+      // Bơm CÙNG LÚC TOÀN BỘ 100 BÀI HÁT vào hàng chờ
+      queue.songs.push(...songs);
+      
+      interaction.update({ content: `✅ Đã nuốt trọn **${songs.length} bài hát** vào hàng chờ thành công!`, components: [] });
+      
+      // Kích hoạt hát ngay nếu bot đang nghỉ
+      if (queue.songs.length === songs.length || !queue.playing) {
+          playNextSong(interaction.guild.id);
+      } else {
+          if (queue.dashboardMsg) queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+      }
+      setTimeout(() => temporarySearchResults.delete(searchId), 60000);
+  }
+
+  const isChatCmd = typeof interaction.isChatInputCommand === 'function'
+    ? interaction.isChatInputCommand()
+    : (typeof interaction.isCommand === 'function' ? interaction.isCommand() : false);
+
+  const isStringSelect = typeof interaction.isStringSelectMenu === 'function'
+    ? interaction.isStringSelectMenu()
+    : (typeof interaction.isSelectMenu === 'function' ? interaction.isSelectMenu() : false);
+
+  if (!isChatCmd && !interaction.isButton?.() && !interaction.isModalSubmit?.() && !isStringSelect) return;
+  if (isChatCmd) {
+    const embed = createLogEmbed(
+      '💻 Command Executed',
+      `**User:** ${getUserIdentifier(interaction.user)}\n**Command:** /${interaction.commandName}\n**Channel:** ${getChannelIdentifier(interaction.channel)}`,
+      0x1abc9c
+    );
+    
+    // Thêm options nếu có
+    const options = interaction.options.data;
+    if (options.length) {
+      const optsText = options.map(opt => {
+        if (opt.type === 'SUB_COMMAND') return `/${opt.name}`;
+        return `${opt.name}: ${opt.value}`;
+      }).join(', ');
+      embed.addFields({ name: 'Options', value: optsText.substring(0, 1024), inline: false });
+    }
+    
+    await sendLog(embed);
+  };
+  try {
+    if (isChatCmd) {
+      switch (interaction.commandName) {
+        case 'give_role':
+          await handleRequestRole(interaction);
+          break;
+        case 'group_flight':
+          await handleGroupFlight(interaction);
+          break;
+        case 'send_announcements':
+          await handleAnnouncement(interaction);
+          break;
+        case 'metar':
+          await handleMetar(interaction);
+          break;
+        case 'submit_profile':
+          await handleSubmitProfile(interaction);
+          break;
+        case 'time':
+          await handleTimeCommand(interaction);
+          break;
+        case 'summarize':
+          await handleSummarize(interaction);
+          break;
+        case 'leaderboard':
+          await handleLeaderboardCommand(interaction);
+          break;
+        case 'pilot_leaderboard':
+          await handlePilotLeaderboardCommand(interaction);
+          break;
+        case 'send_award':
+          await handleSendAward(interaction);
+          break;
+        case 'runway':
+          await handleRunway(interaction);
+          break;
+        case 'taf':
+          await handleTaf(interaction);
+          break;
+        case 'setup_atc_noti':
+          await handleSetupAtcNoti(interaction);
+          break;
+        case 'stats':
+          await handleStats(interaction);
+          break;
+        case 'event':
+          await handleEvent(interaction);
+          break;
+        case 'route':
+          await handleRoute(interaction);
+          break;
+        case 'edit_announ':
+          await handleEditAnnoun(interaction);
+          break;
+        case 'cancel_announ':
+          await handleCancelAnnoun(interaction);
+          break;
+        case 'vatsea_rank':
+          await handleVatseaRankCommand(interaction);
+          break;
+        case 'notam':
+          await handleNotam(interaction);
+          break;
+        case 'simbrief':
+          await handleSimbrief(interaction);
+          break;
+        case 'online_atc':
+          await handleOnlineAtc(interaction);
+          break;
+        case 'play':
+          await handlePlayMusic(interaction);
+          break;
+        case 'queue':
+          await handleQueue(interaction);
+          break;
+        case 'clear':
+          await handleClearQueue(interaction);
+          break;
+        case 'setup_vatsim_verify':
+          await handleSetupVatsimVerify(interaction);
+          break;
+        case 'sell': {
+          const anh1 = interaction.options.getAttachment('anh1');
+          const anh2 = interaction.options.getAttachment('anh2');
+          const anh3 = interaction.options.getAttachment('anh3');
+          const anh4 = interaction.options.getAttachment('anh4');
+
+          const attachments = [anh1, anh2, anh3, anh4].filter(a => a && a.contentType?.startsWith('image')).map(a => a.url);
+
+          if (attachments.length === 0) {
+            return interaction.reply({ content: '❌ Bạn phải gửi ít nhất 1 ảnh (định dạng hình ảnh)!', ephemeral: true });
+          }
+
+          const saleId = Date.now().toString();
+          userSellImages.set(saleId, attachments);
+
+          const sellModal = new ModalBuilder().setCustomId(`sell_modal_${saleId}`).setTitle('Thông tin sản phẩm đăng bán');
+          sellModal.addComponents(
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Tên sản phẩm').setPlaceholder('Ex: Livery A321...').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel('Số lượng & Tình trạng').setPlaceholder('Ex: 1 / Mới').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel('Giá bán').setPlaceholder('Ex: 80.000 VNĐ').setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel('Mô tả sản phẩm').setStyle(TextInputStyle.Paragraph).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Liên hệ khác').setPlaceholder('Link FB, SĐT...').setStyle(TextInputStyle.Paragraph).setRequired(true))
+          );
+          await interaction.showModal(sellModal);
+          break;
+        }
+      }
+    } else if (interaction.isButton()) {
+        const customId = interaction.customId;
+
+        // ===================== XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC (ĐỂ NGOÀI CÙNG) =====================
+        // ===================== XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC =====================
+        if (customId.startsWith('music_')) {
+            const queue = musicQueues.get(interaction.guild.id);
+            if (!queue) {
+                return interaction.reply({ content: '❌ Nhạc đang tắt, bạn không thể bấm nút này.', ephemeral: true }).catch(()=>{});
+            }
+
+            if (interaction.member.voice.channel?.id !== queue.voiceChannel.id) {
+                return interaction.reply({ content: '❌ Bạn phải vào chung phòng Voice với bot mới điều khiển được!', ephemeral: true }).catch(()=>{});
+            }
+
+            try {
+                if (customId === 'music_pause') {
+                    if (queue.playing) {
+                        queue.player.pause(); queue.playing = false;
+                    } else {
+                        queue.player.unpause(); queue.playing = true;
+                    }
+                } 
+                else if (customId === 'music_skip') {
+                    queue.forceSkip = true; // Dù đang bật Loop, bấm Skip vẫn phải qua bài mới!
+                    queue.player.stop(); 
+                    return interaction.deferUpdate().catch(()=>{}); 
+                } 
+                else if (customId === 'music_stop') {
+                  if (queue.progressInterval) clearInterval(queue.progressInterval);
+                  queue.songs = [];
+                  queue.player.stop(); 
+                  return interaction.update(createMusicDashboard(queue)).catch(()=>{});
+                }
+                else if (customId === 'music_loop') {
+                  queue.loop = !queue.loop; // Bật / Tắt trạng thái lặp
+                }
+                else if (customId === 'music_volup') {
+                    queue.volume = Math.min((queue.volume ?? 0.6) + 0.2, 2.0); 
+                    if (queue.resource) queue.resource.volume.setVolume(queue.volume);
+                } 
+                else if (customId === 'music_voldown') {
+                    queue.volume = Math.max((queue.volume ?? 0.6) - 0.2, 0.1); 
+                    if (queue.resource) queue.resource.volume.setVolume(queue.volume);
+                }
+
+                // Cập nhật giao diện nút bấm
+                await interaction.update(createMusicDashboard(queue)).catch(()=>{});
+                
+            } catch(e) {
+                console.error("Lỗi nút bấm nhạc:", e);
+                if (!interaction.replied && !interaction.deferred) {
+                    await interaction.deferUpdate().catch(()=>{});
+                }
+            }
+            return; 
+        }
+
+        // ===================== XỬ LÝ NÚT BẤM MARKETPLACE =====================
+        const isMarketplaceAction = customId.startsWith('market_');
+        if (isMarketplaceAction) {
+            const parts = customId.split('_');
+            const action = parts[1];
+          
+            // Nút [Sửa bài], [DUYỆT], [TỪ CHỐI] -> Yêu cầu quyền Admin
+            if (action === 'edit' || action === 'approve' || action === 'reject') {
+                const hasAdmin = interaction.member.roles.cache.some(r => r.name === 'Admin') || interaction.member.roles.cache.has(roles.adminRoleId);
+                if (!hasAdmin && interaction.user.id !== OWNER_ID) {
+                    return interaction.reply({ content: '❌ Chỉ Admin mới được thực hiện thao tác này!', ephemeral: true });
+                }
+            }
+
+            const oldEmbed = interaction.message.embeds[0];
+            const parsedData = parseMarketplaceDataFromEmbed(oldEmbed);
+          
+            if (action === 'edit') {
+                const saleId = parts[2];
+                const editModal = new ModalBuilder().setCustomId(`market_edit_modal_${saleId}`).setTitle('Chỉnh sửa thông tin sản phẩm');
+                editModal.addComponents(
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Tên sản phẩm').setDefaultValue(parsedData.name).setStyle(TextInputStyle.Short).setRequired(true)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel('Số lượng & Tình trạng').setDefaultValue(parsedData.info).setStyle(TextInputStyle.Short).setRequired(true)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel('Giá bán').setDefaultValue(parsedData.price).setStyle(TextInputStyle.Short).setRequired(true)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel('Mô tả sản phẩm').setDefaultValue(parsedData.description).setStyle(TextInputStyle.Paragraph).setRequired(true)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Liên hệ').setDefaultValue(parsedData.contact).setStyle(TextInputStyle.Paragraph).setRequired(true))
+                );
+                await interaction.showModal(editModal);
+                return;
+            }
+
+            if (action === 'reject') {
+                const saleId = parts[2];
+                const rejectModal = new ModalBuilder().setCustomId(`market_reject_modal_${saleId}`).setTitle('Lý do từ chối sản phẩm');
+                rejectModal.addComponents(
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Lý do từ chối').setPlaceholder('Ví dụ: Thiếu ảnh chi tiết, giá quá cao...').setStyle(TextInputStyle.Paragraph).setRequired(true))
+                );
+                await interaction.showModal(rejectModal);
+                return;
+            }
+
+            if (action === 'approve') {
+                const marketChannel = interaction.guild.channels.cache.get(MARKETPLACE_CHANNEL_ID);
+                if (!marketChannel) return interaction.reply({ content: '❌ Không tìm thấy kênh Marketplace!', ephemeral: true });
+
+                const publicEmbed = EmbedBuilder.from(oldEmbed)
+                    .setFooter({ text: `Ngày đăng: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}` });
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setLabel('Liên hệ người bán').setStyle(ButtonStyle.Link).setURL(`https://discord.com/users/${parsedData.sellerId}`).setEmoji('💬'),
+                    new ButtonBuilder().setCustomId(`market_soldout_${parsedData.sellerId}`).setLabel('Hết hàng / Đã bán').setStyle(ButtonStyle.Danger).setEmoji('✖️')
+                );
+
+                await marketChannel.send({ content: '📢 **CÓ SẢN PHẨM MỚI!**', embeds: [publicEmbed], components: [row] });
+                await interaction.message.edit({ content: `✅ **Đã duyệt** bởi ${interaction.user.mention}`, components: [], embeds: [] });
+                await interaction.reply({ content: '✅ Đã đăng bài thành công ra kênh Marketplace!', ephemeral: true });
+                return;
+            }
+
+            if (action === 'soldout') {
+                const sellerId = parts[2];
+                const hasAdmin = interaction.member.roles.cache.some(r => r.name === 'Admin') || interaction.member.roles.cache.has(roles.adminRoleId);
+                const isSeller = interaction.user.id === sellerId;
+
+                if (!isSeller && !hasAdmin && interaction.user.id !== OWNER_ID) {
+                    return interaction.reply({ content: '❌ Chỉ người bán hoặc Admin mới được đóng bài!', ephemeral: true });
+                }
+
+                const soldEmbed = EmbedBuilder.from(oldEmbed)
+                    .setTitle(`${oldEmbed.title} [HẾT HÀNG]`)
+                    .setColor(0x95a5a6); 
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('disabled_sold').setLabel('Đã Hết Hàng').setStyle(ButtonStyle.Secondary).setDisabled(true)
+                );
+
+                await interaction.message.edit({ embeds: [soldEmbed], components: [row] });
+                await interaction.reply({ content: '✅ Đã đóng bài đăng bán thành công.', ephemeral: true });
+                return;
+            }
+        }
+
+        // Nếu không dính vào Nút Nhạc và Nút Market, thì chạy vô hàm xử lý chung
+        await handleButton(interaction);
+
+    } else if (interaction.isModalSubmit()) {
+        // Nộp đơn bán hàng
+        if (interaction.customId.startsWith('sell_modal_')) {
+          const saleId = interaction.customId.split('_')[2];
+          const images = userSellImages.get(saleId) || [];
+          userSellImages.delete(saleId);
+
+          const data = {
+            name: interaction.fields.getTextInputValue('name'),
+            info: interaction.fields.getTextInputValue('info'),
+            price: interaction.fields.getTextInputValue('price'),
+            description: interaction.fields.getTextInputValue('description'),
+            contact: interaction.fields.getTextInputValue('contact')
+          };
+
+          const embed = createMarketplaceEmbed(data, interaction.user.id, images);
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`market_edit_${saleId}`).setLabel('Sửa bài').setStyle(ButtonStyle.Secondary).setEmoji('📝'),
+            new ButtonBuilder().setCustomId(`market_approve_${saleId}`).setLabel('DUYỆT').setStyle(ButtonStyle.Success).setEmoji('✅'),
+            new ButtonBuilder().setCustomId(`market_reject_${saleId}`).setLabel('TỪ CHỐI').setStyle(ButtonStyle.Danger).setEmoji('❌')
+          );
+
+          const adminChannel = interaction.guild.channels.cache.get(ADMIN_CHANNEL_ID);
+          if (adminChannel) {
+            await adminChannel.send({ content: `📩 **ĐƠN BÁN MỚI** từ <@${interaction.user.id}>`, embeds: [embed], components: [row] });
+          }
+          await interaction.reply({ content: '✅ Đã gửi đơn đăng bán cho Admin duyệt!', ephemeral: true });
+          return;
+        }
+
+        // Nộp form chỉnh sửa bài bán
+        if (interaction.customId.startsWith('market_edit_modal_')) {
+          const data = {
+            name: interaction.fields.getTextInputValue('name'),
+            info: interaction.fields.getTextInputValue('info'),
+            price: interaction.fields.getTextInputValue('price'),
+            description: interaction.fields.getTextInputValue('description'),
+            contact: interaction.fields.getTextInputValue('contact')
+          };
+          
+          const oldEmbed = interaction.message.embeds[0];
+          const parsedData = parseMarketplaceDataFromEmbed(oldEmbed);
+          const image = oldEmbed.image?.url ? [oldEmbed.image.url] : [];
+          
+          const newEmbed = createMarketplaceEmbed(data, parsedData.sellerId, image);
+          await interaction.update({ embeds: [newEmbed] });
+          return;
+        }
+        // Nộp form từ chối bài bán
+        if (interaction.customId.startsWith('market_reject_modal_')) {
+          const reason = interaction.fields.getTextInputValue('reason');
+          const oldEmbed = interaction.message.embeds[0];
+          const parsedData = parseMarketplaceDataFromEmbed(oldEmbed);
+          
+          let dmStatus = '';
+          try {
+            const seller = await client.users.fetch(parsedData.sellerId);
+            const dmEmbed = new EmbedBuilder()
+              .setTitle('❌ SẢN PHẨM BỊ TỪ CHỐI')
+              .setColor(0xff0000)
+              .addFields(
+                { name: 'Sản phẩm', value: parsedData.name, inline: false },
+                { name: 'Lý do từ chối', value: reason, inline: false }
+              )
+              .setFooter({ text: 'Vui lòng chỉnh sửa và gửi lại yêu cầu nếu cần thiết.' });
+            await seller.send({ embeds: [dmEmbed] });
+            dmStatus = `\n✅ Đã gửi lý do từ chối cho <@${parsedData.sellerId}>.`;
+          } catch (e) {
+            dmStatus = `\n⚠️ Bị bác bỏ nhưng không thể gửi tin nhắn riêng cho <@${parsedData.sellerId}> (Khóa DM).`;
+          }
+
+          await interaction.update({
+            content: `❌ **Đã từ chối:** ${parsedData.name}\n👤 **Người bán:** <@${parsedData.sellerId}>\n📝 **Lý do:** ${reason}${dmStatus}`,
+            embeds: [],
+            components: []
+        });
+          return;
+        }
+      await handleModal(interaction);
+    } else if (isStringSelect) {
+      await handleSelect(interaction);
+    }
+  } catch (err) {
+    console.error('interactionCreate error:', err);
+    try {
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp({ content: '❌ Đã có lỗi nội bộ.', ephemeral: true });
+      } else {
+        await interaction.reply({ content: '❌ Đã có lỗi nội bộ.', ephemeral: true });
+      }
+    } catch (_) {}
+  }
+});
+
+
+// ===================== MESSAGE CREATE =====================
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+
+  const userId = message.author.id;
+  if (bans.users[userId] && bans.users[userId].endTime > Date.now()) return;
+
+  // ================= TÍNH NĂNG ĐỌC ẢNH & XÁC THỰC VATSIM TRONG DM =================
+  if (!message.guild && pendingVerifyDMs.has(message.author.id)) {
+      const verifySession = pendingVerifyDMs.get(message.author.id);
+      
+      if (Date.now() > verifySession.expires) {
+          pendingVerifyDMs.delete(message.author.id);
+          return message.reply('❌ Phiên xác thực của bạn đã hết hạn (quá 5 phút). Vui lòng quay lại Server bấm nút lại từ đầu.');
+      }
+
+      if (message.attachments.size === 0) {
+          return message.reply('❌ Bạn chưa đính kèm ảnh chụp màn hình profile VATSIM!');
+      }
+
+      const processingMsg = await message.reply('⏳ Đang yêu cầu AI quét ảnh của bạn. Xin vui lòng chờ...');
+
+      try {
+          const attachment = message.attachments.first();
+          if (!attachment.contentType.startsWith('image/')) return processingMsg.edit('❌ File đính kèm không phải là hình ảnh.');
+
+          const imgBuffer = await downloadBuffer(attachment.url);
+          const base64Image = imgBuffer.toString('base64');
+
+          // =========================================================================
+          // CÂU LỆNH THẦN CHÚ ÉP GEMINI LÀM CẢNH SÁT KIỂM DUYỆT ẢNH FAKE
+          // =========================================================================
+          const prompt = "Bạn là một hệ thống kiểm duyệt chống giả mạo. Bức ảnh này PHẢI LÀ giao diện chuẩn của trang cá nhân VATSIM (my.vatsim.net). " +
+                         "Dấu hiệu hợp lệ: Bố cục có hình đại diện, có chữ 'VATSIM ID', 'Rating', 'Region', 'Division'. " +
+                         "Nếu hình ảnh có dấu hiệu KHÔNG PHẢI giao diện web VATSIM, hoặc là ảnh chế, chỉ gửi text, gửi hình phong cảnh, hãy trả về đúng một chữ: FAKE. " +
+                         "Nếu bức ảnh đúng là giao diện hợp lệ, hãy trích xuất mã số VATSIM ID (CID - gồm 6 hoặc 7 chữ số) và trả về ĐÚNG MỘT DÒNG chứa mã số đó.";
+                         
+          const imagePart = { inlineData: { data: base64Image, mimeType: attachment.contentType } };
+
+          const aiResult = await geminiModel.generateContent([prompt, imagePart]);
+          const aiExtractedText = aiResult.response.text().trim();
+
+          // Kiểm tra xem AI có chê ảnh fake không
+          if (aiExtractedText.includes('FAKE') || aiExtractedText.includes('NOT_FOUND')) {
+              return processingMsg.edit(`❌ **BOT TỪ CHỐI XÁC THỰC!**\nBức ảnh này không giống giao diện chuẩn của trang my.vatsim.net hoặc cắt ghép quá sơ sài. Vui lòng chụp full màn hình rõ nét!`);
+          }
+
+          // Rút mã CID từ kết quả của AI
+          const aiCid = parseInt(aiExtractedText.replace(/[^0-9]/g, ''));
+          if (isNaN(aiCid) || aiCid < 10000) {
+              return processingMsg.edit(`❌ **Xác thực thất bại!**\nBOT không thể tìm thấy mã số CID hợp lệ trong bức ảnh này. Vui lòng chụp lại rõ ràng hơn.`);
+          }
+
+          await processingMsg.edit(`🔍 BOT đã quét được CID: **${aiCid}**. Đang kiểm tra an ninh Sổ Đỏ...`);
+
+          // ========================================================
+          // CHỐNG TRỘM: KIỂM TRA SỔ ĐỎ
+          // ========================================================
+          const currentVatsimLinks = await loadVatsimLinksSheet();
+          
+          // Helper móc CID an toàn (Vì giờ data nó lưu nguyên cục object {cid, username, imageurl})
+          const getCid = (val) => typeof val === 'object' ? val.cid : val;
+          const existingData = currentVatsimLinks[message.author.id];
+          const existingCid = existingData ? getCid(existingData) : null;
+
+          if (existingCid && existingCid !== aiCid) {
+              return processingMsg.edit(`❌ Cảnh báo! Bạn đã từng liên kết với CID **${existingCid}** rồi. Mỗi tài khoản Discord chỉ được giữ 1 CID duy nhất!`);
+          }
+
+          const isCidTaken = Object.values(currentVatsimLinks).some(val => getCid(val) === aiCid);
+          if (isCidTaken && existingCid !== aiCid) {
+              return processingMsg.edit(`❌ CID **${aiCid}** đã được một người khác trong Server liên kết trước đó. Nếu bạn bị giả mạo, hãy báo Admin.`);
+          }
+
+          // ========================================================
+          // KÉO DỮ LIỆU VATSIM API VÀ CẤP ROLE
+          // ========================================================
+          await processingMsg.edit(`✅ An ninh thông qua! Đang đối chiếu máy chủ VATSIM...`);
+          const stats = await fetchVatsimStatsById(aiCid);
+          
+          if (!stats) return processingMsg.edit(`❌ CID **${aiCid}** không tồn tại trên hệ thống dữ liệu VATSIM.`);
+          if (stats.rating === 0) return processingMsg.edit(`❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.`);
+
+          const guild = await client.guilds.fetch(verifySession.guildId);
+          const member = await guild.members.fetch(message.author.id);
+          let success = false;
+          let finalReply = '';
+
+          if (verifySession.roleType === 'pilot') {
+              if (stats.pilot_hours > 10) {
+                  await member.roles.add(roles.vatsimPilotRoleId).catch(()=>{});
+                  success = true;
+                  finalReply = `🎉 **XÁC THỰC THÀNH CÔNG!**\nBạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã tự động cấp Role **VATSIM Pilot** cho bạn trong Server!`;
+              } else {
+                  finalReply = `❌ Từ chối: Ảnh chính chủ, nhưng bạn mới có **${stats.pilot_hours.toFixed(1)}** giờ bay. Cần >10 giờ để nhận role Pilot.`;
+              }
+          } else {
+              if (stats.rating > 1) { 
+                  await member.roles.add(roles.vatsimAtcRoleId).catch(()=>{});
+                  success = true;
+                  finalReply = `🎉 **XÁC THỰC THÀNH CÔNG!**\nRating của bạn hợp lệ. Đã tự động cấp Role **VATSIM ATC** cho bạn trong Server!`;
+              } else {
+                  finalReply = `❌ Từ chối: Ảnh chính chủ, nhưng Rating của bạn là OBS. Yêu cầu >= S1.`;
+              }
+          }
+
+          // 6. UPLOAD ẢNH LÊN IMGBB LẤY LINK VĨNH VIỄN
+          // ========================================================
+          await processingMsg.edit(`✅ Đã cấp Role thành công! Đang lưu hồ sơ ảnh vĩnh viễn...`);
+          
+          let permanentImageUrl = attachment.url; // Mặc định là link Discord (phòng hờ ImgBB sập)
+          try {
+              if (process.env.IMGBB_API_KEY) {
+                  // base64Image là cái biến mình đã tải sẵn ở bước 2 cho AI đọc đó, giờ xài lại luôn
+                  const params = new URLSearchParams();
+                  params.append('image', base64Image);
+                  
+                  const imgbbRes = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
+                      method: 'POST',
+                      body: params
+                  });
+                  
+                  const imgbbData = await imgbbRes.json();
+                  if (imgbbData && imgbbData.data && imgbbData.data.url) {
+                      // Thay link Discord tự hủy bằng link ImgBB vĩnh viễn
+                      permanentImageUrl = imgbbData.data.url; 
+                  }
+              }
+          } catch (imgErr) {
+              console.error('Lỗi up ảnh lên ImgBB:', imgErr);
+          }
+
+          // ========================================================
+          // 7. LƯU VÀO GOOGLE SHEETS ĐỂ KHÓA CHỐNG TRỘM
+          // ========================================================
+          if (success) {
+              currentVatsimLinks[message.author.id] = {
+                  cid: aiCid,
+                  username: message.author.username,
+                  // Dùng công thức =IMAGE() để Google Sheets tự hiển thị ảnh ra ô tính
+                  imageUrl: `=IMAGE("${permanentImageUrl}")` 
+              };
+              await saveVatsimLinksSheet(currentVatsimLinks).catch(e => console.log('Lỗi lưu sheet CID:', e));
+          }
+
+          pendingVerifyDMs.delete(message.author.id); // Dọn dẹp RAM
+          return processingMsg.edit(finalReply);
+
+      } catch (err) {
+          console.error("Lỗi xác thực DM:", err);
+          return processingMsg.edit("❌ Đã có lỗi xảy ra trong quá trình quét AI hoặc kéo dữ liệu. Vui lòng thử lại sau.");
+      }
+  }
+
+  // ================= TÍNH NĂNG 3: ANTI SPAM @everyone / @here =================
+  const isEveryoneOrHere = message.mentions.everyone || message.content.includes('@everyone') || message.content.includes('@here');
+  
+  if (isEveryoneOrHere) {
+    const hasAdmin = message.member?.roles.cache.has(roles.adminRoleId);
+    const hasDev = message.member?.roles.cache.has(roles.devRoleId);
+    const hasStaff = message.member?.roles.cache.has('1493908725231128617'); 
+    const hasBotNgao = message.member?.roles.cache.has('1366035755079696405');
+    const isOwner = message.author.id === OWNER_ID;
+
+    // Nếu không có quyền mà dám ping tổng -> Xóa và Log
+    if (!hasAdmin && !hasDev && !hasStaff && !hasBotNgao && !isOwner) {
+      await message.delete().catch(() => {});
+      
+      const adminChannel = message.guild.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
+      if (adminChannel) {
+        adminChannel.send(`🚨 **CẢNH BÁO BẢO MẬT:** Người dùng ${message.author} (\`${message.author.id}\`) vừa cố gắng tag \`@everyone\` hoặc \`@here\` trái phép ở kênh ${message.channel}.\n🛑 Tin nhắn đã bị xóa tự động vì nghi ngờ tài khoản bị hack.\n💬 **Nội dung:** ${message.content}`);
+      }
+      return; 
     }
   }
-  return data;
-}
 
-// ========== TẠO SHEET VATSIM LINKS ==========
-async function createVatsimLinksSheet() {
-  const exists = await sheetExists(VATSIM_LINKS_SHEET_NAME);
-  if (exists) return VATSIM_LINKS_SHEET_NAME;
+  // KHAI BÁO 1 LẦN DUY NHẤT Ở ĐÂY ĐỂ DÙNG CHUNG CHO CẢ QUOTE LẪN AI CHAT
+  const isMentionedExplicitly = message.content.includes(`<@${client.user.id}>`) || message.content.includes(`<@!${client.user.id}>`);
 
-  const sheets = await initGoogleSheets();
-  const headers = ['DiscordId', 'CID'];
-
-  try {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [{ addSheet: { properties: { title: VATSIM_LINKS_SHEET_NAME } } }],
-      },
-    });
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${VATSIM_LINKS_SHEET_NAME}!A1:B1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [headers] },
-    });
-    console.log(`✅ Created sheet: ${VATSIM_LINKS_SHEET_NAME}`);
-    return VATSIM_LINKS_SHEET_NAME;
-  } catch (err) {
-    console.error('Error creating VatsimLinks sheet:', err);
-    throw err;
-  }
-}
-
-// ========== ĐỌC DỮ LIỆU VATSIM LINKS ==========
-async function loadVatsimLinksSheet() {
-  const exists = await sheetExists(VATSIM_LINKS_SHEET_NAME);
-  if (!exists) {
-    await createVatsimLinksSheet();
-    return {};
+  // ================= TÍNH NĂNG 1: RÀNG BUỘC AI CHAT =================
+  if (message.channel.id === AI_CHANNEL_ID) {
+    await handleGeminiResponse(message, true);
+    return;
   }
 
-  const sheets = await initGoogleSheets();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${VATSIM_LINKS_SHEET_NAME}!A2:B`,
-  });
+  if (isMentionedExplicitly) {
+    await handleGeminiResponse(message, false);
+  }
+
+  // Debug command for owner
+  if (message.content === '!debug_pilot_leaderboard' && message.author.id === OWNER_ID) {
+    const embed = new EmbedBuilder()
+      .setTitle('Debug Pilot Leaderboard Data')
+      .setDescription(`Dữ liệu từ file JSON:`)
+      .setColor(0xFF0000);
+    
+    const pilotEntries = Object.entries(pilotLeaderboardData.pilots || {});
+    
+    if (pilotEntries.length === 0) {
+      embed.addFields({ name: 'Pilots', value: 'Không có dữ liệu', inline: false });
+    } else {
+      let fieldValue = '';
+      pilotEntries.slice(0, 10).forEach(([id, data]) => {
+        const hours = (data.seconds / 3600).toFixed(2);
+        fieldValue += `${data.name} (${id}) - ${data.seconds}s (${hours}h) - ${data.flights || 1} chuyến\n`;
+      });
+      embed.addFields({ name: `Pilots (${pilotEntries.length})`, value: fieldValue || 'Không có', inline: false });
+    }
+    await message.channel.send({ embeds: [embed] });
+  }
+});
+
+// ===================== /TIME =====================
+async function handleTimeCommand(interaction) {
+  const timeInfo = getCurrentTimeInfo();
+
+  const embed = new EmbedBuilder()
+    .setTitle('🕐 Thời Gian Hiện Tại')
+    .setColor(0x00ff00)
+    .addFields(
+      { name: '⏰ Giờ địa phương (Việt Nam)', value: timeInfo.local, inline: false },
+      { name: '🌐 Giờ UTC', value: timeInfo.utc, inline: false },
+      { name: '📅 ISO 8601', value: timeInfo.iso, inline: false },
+      { name: '🔢 Unix Timestamp', value: timeInfo.unix.toString(), inline: true },
+      { name: '💬 Discord Format', value: timeInfo.discord, inline: false },
+      {
+        name: '📋 Chi tiết',
+        value: `${timeInfo.detailed.dayOfWeek}, ngày ${timeInfo.detailed.day} ${timeInfo.detailed.monthName} năm ${timeInfo.detailed.year}\n${timeInfo.detailed.hours
+          .toString()
+          .padStart(2, '0')}:${timeInfo.detailed.minutes.toString().padStart(2, '0')}:${timeInfo.detailed.seconds.toString().padStart(2, '0')}`,
+        inline: false,
+      }
+    )
+    .setFooter({ text: 'Bot được cung cấp thông tin thời gian thực', iconURL: 'https://cdn-icons-png.flaticon.com/512/3114/3114840.png' })
+    .setTimestamp();
+
+  await interaction.reply({ embeds: [embed] });
+}
+
+// ===================== AWARD FUNCTIONS =====================
+/**
+ * Kiểm tra xem hôm nay có phải là ngày cuối tháng không
+ */
+function isLastDayOfMonth() {
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  
+  // Nếu ngày mai là tháng khác, hôm nay là ngày cuối tháng
+  return today.getUTCMonth() !== tomorrow.getUTCMonth();
+}
+
+/**
+ * Lấy top 5 ATC từ leaderboard
+ */
+function getTop5ATC() {
+  const allATC = {};
+  
+  // Tổng hợp thời gian từ tất cả các category
+  for (const category in leaderboardData.stats) {
+    const atcInCategory = leaderboardData.stats[category];
+    for (const [cid, data] of Object.entries(atcInCategory)) {
+      if (!allATC[cid]) {
+        allATC[cid] = { 
+          name: data.name, 
+          totalSeconds: data.seconds,
+          categories: [category],
+          callsign: data.callsign
+        };
+      } else {
+        allATC[cid].totalSeconds += data.seconds;
+        if (!allATC[cid].categories.includes(category)) {
+          allATC[cid].categories.push(category);
+        }
+      }
+    }
+  }
+  
+  // Sắp xếp theo thời gian giảm dần
+  const sorted = Object.entries(allATC)
+    .map(([cid, data]) => ({ cid, ...data }))
+    .sort((a, b) => b.totalSeconds - a.totalSeconds);
+  
+  return sorted.slice(0, 5);
+}
+
+/**
+ * Lấy top 5 pilot từ leaderboard
+ */
+function getTop5Pilots() {
+  const pilotEntries = Object.entries(pilotLeaderboardData.pilots || {});
+  
+  // Sắp xếp theo thời gian giảm dần
+  const sorted = pilotEntries
+    .map(([cid, data]) => ({ 
+      cid, 
+      name: data.name, 
+      totalSeconds: data.seconds,
+      flights: data.flights || 1,
+      callsign: data.callsign,
+      aircraft: data.lastAircraft
+    }))
+    .sort((a, b) => b.totalSeconds - a.totalSeconds);
+  
+  return sorted.slice(0, 5);
+}
+
+/**
+ * Format thời gian từ giây sang dạng đẹp
+ */
+function formatAwardTime(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  
+  if (hours > 0 && minutes > 0) {
+    return `${hours} giờ ${minutes} phút`;
+  } else if (hours > 0) {
+    return `${hours} giờ`;
+  } else {
+    return `${minutes} phút`;
+  }
+}
+
+/**
+ * Gửi thông báo award cho ATC
+ */
+async function sendATCAward(interaction = null) {
+  try {
+    const top5 = getTop5ATC();
+    const currentMonth = leaderboardData.month || new Date().getUTCMonth() + 1;
+    const currentYear = leaderboardData.year || new Date().getUTCFullYear();
+    
+    // Tên tháng bằng tiếng Việt
+    const monthNames = [
+      'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6',
+      'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
+    ];
+    const monthName = monthNames[currentMonth - 1];
+    
+    const embed = new EmbedBuilder()
+      .setTitle('🏆 **THÔNG BÁO CHÚC MỪNG TOP 5 ATC** 🏆')
+      .setDescription(`**${monthName} năm ${currentYear}**\n\n🎉 *Xin chúc mừng những ATC có thời gian kiểm soát nhiều nhất trong tháng!* 🎉`)
+      .setColor(0xFFD700)
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/2107/2107845.png')
+      .setFooter({ text: 'VCLvACC - Member Iron Mic Awards', iconURL: 'https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960' })
+      .setTimestamp();
+    
+    if (top5.length === 0) {
+      embed.addFields({
+        name: '📊 Kết quả',
+        value: 'Không có dữ liệu ATC trong tháng này.',
+        inline: false
+      });
+    } else {
+      // Emoji cho các hạng
+      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+      
+      top5.forEach((atc, index) => {
+        const rank = rankEmojis[index] || `${index + 1}.`;
+        const timeFormatted = formatAwardTime(atc.totalSeconds);
+        const categories = atc.categories.join(', ');
+        
+        embed.addFields({
+          name: `${rank} ${atc.name} (${atc.cid})`,
+          value: `⏱️ **Thời gian:** ${timeFormatted}\n📡 **Vị trí:** ${categories}\n✈️ **Callsign gần nhất:** ${atc.callsign || 'N/A'}`,
+          inline: false
+        });
+      });
+      
+      // Thêm thông điệp chúc mừng
+      const winnerNames = top5.map(a => a.name).join(', ');
+      embed.addFields({
+        name: '🎊 Chúc mừng!',
+        value: `Xin chúc mừng **${winnerNames}** đã xuất sắc lọt vào top 5 ATC của tháng!\nCảm ơn các bạn đã đóng góp cho cộng đồng VCLvACC!`,
+        inline: false
+      });
+    }
+    
+    // Ping role Notification
+    const pingContent = top5.length > 0 ? 
+      `🎉 <@&${ATC_NOTI_ROLE_ID}> Xin chúc mừng top 5 ATC của tháng!` : 
+      '📢 Thông báo kết quả ATC của tháng!';
+    
+    // Gửi thông báo
+    const channelId = AWARD_CHANNEL_ID || VATSIM_CHANNEL_ID;
+    const channel = await client.channels.fetch(channelId);
+    const message = await channel.send({ 
+      content: pingContent,
+      embeds: [embed],
+      allowedMentions: { parse: ['roles'] }
+    });
+    
+    // Thêm reaction cho vui
+    try {
+      await message.react('🏆');
+      await message.react('🎉');
+      await message.react('👏');
+    } catch (err) {
+      console.log('Không thêm được reaction:', err.message);
+    }
+    
+    // Nếu gọi từ interaction, reply
+    if (interaction) {
+      await interaction.reply({ 
+        content: `✅ Đã gửi thông báo chúc mừng top 5 ATC vào <#${channelId}>!`, 
+        ephemeral: true 
+      });
+    }
+    
+    console.log(`✅ Đã gửi thông báo award ATC cho tháng ${currentMonth}/${currentYear}`);
+    return true;
+  } catch (err) {
+    console.error('Error sending ATC award:', err);
+    if (interaction) {
+      await interaction.reply({ 
+        content: '❌ Đã có lỗi khi gửi thông báo award ATC!', 
+        ephemeral: true 
+      });
+    }
+    return false;
+  }
+}
+
+/**
+ * Gửi thông báo award cho pilot
+ */
+async function sendPilotAward(interaction = null) {
+  try {
+    const top5 = getTop5Pilots();
+    const currentMonth = pilotLeaderboardData.month || new Date().getUTCMonth() + 1;
+    const currentYear = pilotLeaderboardData.year || new Date().getUTCFullYear();
+    
+    // Tên tháng bằng tiếng Việt
+    const monthNames = [
+      'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6',
+      'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
+    ];
+    const monthName = monthNames[currentMonth - 1];
+    
+    const embed = new EmbedBuilder()
+      .setTitle('✈️ **THÔNG BÁO CHÚC MỪNG TOP 5 PILOT** ✈️')
+      .setDescription(`**${monthName} năm ${currentYear}**\n\n🎉 *Xin chúc mừng những pilot có thời gian bay nhiều nhất trong khu vực VCL!* 🎉`)
+      .setColor(0x1E90FF)
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/824/824100.png')
+      .setFooter({ text: 'VCLvACC - Member Iron Mic Awards', iconURL: 'https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960' })
+      .setTimestamp();
+    
+    if (top5.length === 0) {
+      embed.addFields({
+        name: '📊 Kết quả',
+        value: 'Không có dữ liệu pilot trong tháng này.',
+        inline: false
+      });
+    } else {
+      // Emoji cho các hạng
+      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+      
+      top5.forEach((pilot, index) => {
+        const rank = rankEmojis[index] || `${index + 1}.`;
+        const timeFormatted = formatAwardTime(pilot.totalSeconds);
+        
+        embed.addFields({
+          name: `${rank} ${pilot.name} (${pilot.cid})`,
+          value: `⏱️ **Thời gian bay:** ${timeFormatted}\n✈️ **Số chuyến bay:** ${pilot.flights}\n🛩️ **Callsign gần nhất:** ${pilot.callsign || 'N/A'}`,
+          inline: false
+        });
+      });
+      
+      // Thêm thông điệp chúc mừng
+      const winnerNames = top5.map(p => p.name).join(', ');
+      embed.addFields({
+        name: '🎊 Chúc mừng!',
+        value: `Xin chúc mừng **${winnerNames}** đã xuất sắc lọt vào top 5 pilot của tháng!\nChúc các bạn luôn có những chuyến bay an toàn và thú vị!`,
+        inline: false
+      });
+    }
+    
+    // Ping role Notification
+    const pingContent = top5.length > 0 ? 
+      `🎉 <@&${ATC_NOTI_ROLE_ID}> Xin chúc mừng top 5 pilot của tháng!` : 
+      '📢 Thông báo kết quả pilot của tháng!';
+    
+    // Gửi thông báo
+    const channelId = AWARD_CHANNEL_ID || VATSIM_CHANNEL_ID;
+    const channel = await client.channels.fetch(channelId);
+    const message = await channel.send({ 
+      content: pingContent,
+      embeds: [embed],
+      allowedMentions: { parse: ['roles'] }
+    });
+    
+    // Thêm reaction cho vui
+    try {
+      await message.react('✈️');
+      await message.react('🎉');
+      await message.react('🏆');
+    } catch (err) {
+      console.log('Không thêm được reaction:', err.message);
+    }
+    
+    // Nếu gọi từ interaction, reply
+    if (interaction) {
+      await interaction.reply({ 
+        content: `✅ Đã gửi thông báo chúc mừng top 5 pilot vào <#${channelId}>!`, 
+        ephemeral: true 
+      });
+    }
+    
+    console.log(`✅ Đã gửi thông báo award pilot cho tháng ${currentMonth}/${currentYear}`);
+    return true;
+  } catch (err) {
+    console.error('Error sending pilot award:', err);
+    if (interaction) {
+      await interaction.reply({ 
+        content: '❌ Đã có lỗi khi gửi thông báo award pilot!', 
+        ephemeral: true 
+      });
+    }
+    return false;
+  }
+}
+
+/**
+ * Kiểm tra và gửi award tự động vào cuối tháng
+ */
+async function checkAndSendMonthlyAwards() {
+  try {
+    const now = new Date();
+    const currentMonth = now.getUTCMonth() + 1;
+    const currentYear = now.getUTCFullYear();
+    
+    // Kiểm tra xem đã gửi cho tháng này chưa
+    if (awardSent.lastMonth === currentMonth && awardSent.lastYear === currentYear) {
+      return; // Đã gửi rồi
+    }
+    
+    // Kiểm tra xem hôm nay có phải là ngày cuối tháng không
+    if (!isLastDayOfMonth()) {
+      return; // Chưa phải cuối tháng
+    }
+    
+    // Kiểm tra xem có dữ liệu để gửi không
+    const hasATCData = Object.keys(leaderboardData.stats || {}).some(
+      cat => Object.keys(leaderboardData.stats[cat] || {}).length > 0
+    );
+    const hasPilotData = Object.keys(pilotLeaderboardData.pilots || {}).length > 0;
+    
+    console.log(`[Monthly Award] Cuối tháng ${currentMonth}/${currentYear}, checking...`);
+    console.log(`[Monthly Award] ATC data: ${hasATCData ? 'Có' : 'Không'}, Pilot data: ${hasPilotData ? 'Có' : 'Không'}`);
+    
+    // Gửi award nếu có dữ liệu
+    let sentAny = false;
+    
+    if (hasATCData) {
+      const sent = await sendATCAward();
+      if (sent) sentAny = true;
+    }
+    
+    if (hasPilotData) {
+      const sent = await sendPilotAward();
+      if (sent) sentAny = true;
+    }
+    
+    // Lưu trạng thái đã gửi
+    if (sentAny) {
+      awardSent = { lastMonth: currentMonth, lastYear: currentYear };
+      fs.writeFileSync(AWARD_SENT_FILE, JSON.stringify(awardSent, null, 2));
+      console.log(`[Monthly Award] Đã gửi award và lưu trạng thái cho tháng ${currentMonth}/${currentYear}`);
+    }
+    
+  } catch (err) {
+    console.error('Error in monthly award check:', err);
+  }
+}
+
+/**
+ * Reset trạng thái award (dành cho admin)
+ */
+function resetAwardStatus() {
+  awardSent = { lastMonth: null, lastYear: null };
+  fs.writeFileSync(AWARD_SENT_FILE, JSON.stringify(awardSent, null, 2));
+  console.log('✅ Đã reset trạng thái award!');
+}
+
+// ===================== /SUMMARIZE =====================
+async function handleSummarize(interaction) {
+  try {
+    if (!interaction.inGuild()) {
+      return interaction.reply({ content: '❌ Lệnh này chỉ dùng trong server.', ephemeral: true });
+    }
+
+    const sub = interaction.options.getSubcommand();
+    const durationStr = interaction.options.getString('duration', true);
+    const durationMs = parseDurationToMs(durationStr);
+
+    if (!durationMs || isNaN(durationMs) || durationMs <= 0) {
+      return interaction.reply({
+        content: '❌ Duration không hợp lệ. Ví dụ: `30m`, `2h`, `1d` (hoặc `45` = 45 phút).',
+        ephemeral: true,
+      });
+    }
+
+    const maxAllowed = 7 * 24 * 60 * 60 * 1000;
+    if (durationMs > maxAllowed) {
+      return interaction.reply({ content: '❌ Duration quá dài. Tối đa 7 ngày.', ephemeral: true });
+    }
+
+    const channel = interaction.options.getChannel('channel') || interaction.channel;
+    if (!channel || typeof channel.isTextBased !== 'function' || !channel.isTextBased()) {
+      return interaction.reply({ content: '❌ Kênh này không phải text channel.', ephemeral: true });
+    }
+
+    const targetUser = sub === 'user' ? interaction.options.getUser('user', true) : null;
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const sinceTs = Date.now() - durationMs;
+
+    const raw = await fetchMessagesSince(channel, sinceTs, SUMMARY_MAX_MESSAGES);
+
+    const msgs = raw
+      .filter((m) => m.createdTimestamp >= sinceTs)
+      .filter((m) => !m.author?.bot)
+      .filter((m) => (targetUser ? m.author?.id === targetUser.id : true))
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+    if (msgs.length === 0) {
+      return interaction.editReply(
+        `ℹ️ Không có tin nhắn phù hợp trong ${durationStr} gần nhất ở <#${channel.id}>.`
+      );
+    }
+
+    const { transcript, truncated } = buildTranscript(msgs, SUMMARY_MAX_TRANSCRIPT_CHARS);
+
+    const prompt = `
+Bạn là trợ lý tóm tắt nội dung chat Discord.
+Hãy tóm tắt đoạn hội thoại dưới đây.
+
+Bối cảnh:
+- Kênh: #${channel.name}
+- Khoảng thời gian: ${durationStr} gần nhất
+- Đối tượng: ${targetUser ? `chỉ ${targetUser.username} (${targetUser.id})` : 'everyone'}
+
+Yêu cầu:
+- Viết tiếng Việt.
+- Ngắn gọn, dễ đọc, ưu tiên bullet points.
+- Bao gồm:
+  1) Chủ đề chính
+  2) Ý chính / thông tin quan trọng
+  3) Quyết định / kết luận (nếu có)
+  4) Việc cần làm (Action items) + ai làm (nếu thấy rõ)
+  5) Câu hỏi còn bỏ ngỏ (nếu có)
+- Không bịa thêm. Nếu thiếu thì nói "không rõ".
+- Nếu có ICAO/route/METAR/link thì giữ nguyên.
+
+TRANSCRIPT:
+${transcript}
+`;
+
+    let summaryText = '';
+    try {
+      const result = await retryWithBackoff(async () => {
+        return await geminiModel.generateContent({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 700, temperature: 0.3 },
+        });
+      }, 5, 1200);
+
+      const resp = result?.response;
+      if (resp && typeof resp.text === 'function') summaryText = await resp.text();
+      else summaryText = JSON.stringify(resp || result || {}).slice(0, 1500);
+
+      summaryText = String(summaryText || '').trim();
+    } catch (err) {
+      const status = getErrStatus(err);
+      console.error('Summarize Gemini error:', status, err?.message);
+
+      if (status === 429) summaryText = '⚠️ AI đang bị quá tải (rate limit). Bạn thử lại sau 1–2 phút nhé.';
+      else if (status === 503) summaryText = '⚠️ Dịch vụ AI đang quá tải. Bạn thử lại sau chút nha.';
+      else summaryText = '⚠️ Không tóm tắt được do lỗi AI. Admin xem log giúp nhé.';
+    }
+
+    if (!summaryText) summaryText = '❌ Gemini trả về kết quả rỗng.';
+
+    const header =
+      `📝 **Tóm tắt ${durationStr} gần nhất** trong <#${channel.id}>` +
+      (targetUser ? ` (chỉ <@${targetUser.id}>)` : ' (everyone)') +
+      `\n📌 Số tin nhắn dùng để tóm tắt: **${msgs.length}** (cap tối đa: ${SUMMARY_MAX_MESSAGES})` +
+      (truncated ? `\n⚠️ Transcript bị cắt bớt do quá dài (cap ${SUMMARY_MAX_TRANSCRIPT_CHARS} ký tự).` : '');
+
+    const chunks = splitMessage(`${header}\n\n${summaryText}`, 1900);
+
+    await interaction.editReply(chunks[0]);
+    for (let i = 1; i < chunks.length; i++) {
+      await interaction.followUp({ content: chunks[i], ephemeral: true });
+    }
+  } catch (err) {
+    console.error('handleSummarize error:', err);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('❌ Tóm tắt thất bại do lỗi nội bộ. Admin kiểm tra log giúp nhé.');
+      } else {
+        await interaction.reply({ content: '❌ Tóm tắt thất bại do lỗi nội bộ. Admin kiểm tra log giúp nhé.', ephemeral: true });
+      }
+    } catch (_) {}
+  }
+}
+
+// ===================== CONTROLLER LEADERBOARD COMMAND =====================
+async function handleLeaderboardCommand(interaction) {
+  const subcommand = interaction.options.getSubcommand();
+  
+  if (subcommand === 'show') {
+    await updateControllerLeaderboardEmbed();
+    await interaction.reply({ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
+    
+  } else if (subcommand === 'update') {
+    const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+    const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+    
+    if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
+      return interaction.reply({ content: '❌ Bạn không có quyền cập nhật leaderboard.', ephemeral: true });
+    }
+    
+    await updateControllerLeaderboardEmbed();
+    await interaction.reply({ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
+    
+  } else if (subcommand === 'reset') {
+    const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+    const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+    
+    if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
+      return interaction.reply({ content: '❌ Bạn không có quyền reset leaderboard.', ephemeral: true });
+    }
+    
+    const now = new Date();
+    const currentMonth = now.getUTCMonth() + 1;
+    const currentYear = now.getUTCFullYear();
+    leaderboardData = {
+      month: currentMonth,
+      year: currentYear,
+      stats: { Center: {}, Approach: {}, Tower: {}, Ground: {}, Other: {} }
+    };
+    await saveControllerLeaderboard(currentMonth, currentYear, leaderboardData.stats);
+    await updateControllerLeaderboardEmbed();
+    await interaction.reply({ content: '✅ Controller Leaderboard đã được reset!', ephemeral: true });
+  }
+}
+
+// ===================== PILOT LEADERBOARD COMMAND =====================
+async function handlePilotLeaderboardCommand(interaction) {
+  const subcommand = interaction.options.getSubcommand();
+  
+  if (subcommand === 'show') {
+    await updatePilotLeaderboardEmbed();
+    await interaction.reply({ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
+    
+  } else if (subcommand === 'update') {
+    const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+    const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+    
+    if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
+      return interaction.reply({ content: '❌ Bạn không có quyền cập nhật pilot leaderboard.', ephemeral: true });
+    }
+    
+    await updatePilotLeaderboardEmbed();
+    await interaction.reply({ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
+    
+  } else if (subcommand === 'reset') {
+    const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+    const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+    
+    if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
+      return interaction.reply({ content: '❌ Bạn không có quyền reset pilot leaderboard.', ephemeral: true });
+    }
+    
+    const now = new Date();
+    const currentMonth = now.getUTCMonth() + 1;
+    const currentYear = now.getUTCFullYear();
+    pilotLeaderboardData = {
+      month: currentMonth,
+      year: currentYear,
+      pilots: {}
+    };
+    await savePilotLeaderboard(currentMonth, currentYear, pilotLeaderboardData.pilots);
+    await updatePilotLeaderboardEmbed();
+    await interaction.reply({ content: '✅ Pilot Leaderboard đã được reset!', ephemeral: true });
+    
+  } else if (subcommand === 'full') {
+    await interaction.deferReply();
+    
+    try {
+      const txtContent = await generateFullPilotLeaderboardTxt();
+      
+      if (!txtContent) {
+        return await interaction.editReply({ content: '❌ Không có dữ liệu pilot leaderboard.' });
+      }
+      
+      // Create a txt file attachment
+      const buffer = Buffer.from(txtContent, 'utf8');
+      const attachment = new AttachmentBuilder(buffer, { name: `pilot_leaderboard_${pilotLeaderboardData.month}_${pilotLeaderboardData.year}.txt` });
+      
+      const embed = new EmbedBuilder()
+        .setTitle('📊 Full Pilot Leaderboard')
+        .setDescription(`Toàn bộ danh sách pilot trong khu vực VCL (VV/VD/VL)\nTháng: ${pilotLeaderboardData.month}/${pilotLeaderboardData.year}`)
+        .setColor(0x1E90FF)
+        .setFooter({ text: 'Tải file .txt để xem chi tiết' })
+        .setTimestamp();
+      
+      await interaction.editReply({ 
+        content: `✅ Đây là toàn bộ pilot leaderboard (${Object.keys(pilotLeaderboardData.pilots || {}).length} pilot)`,
+        embeds: [embed],
+        files: [attachment]
+      });
+      
+    } catch (err) {
+      console.error('Error generating full pilot leaderboard:', err);
+      await interaction.editReply({ content: '❌ Đã có lỗi khi tạo file leaderboard.' });
+    }
+  }
+}
+
+// ===================== ROLE / GROUP FLIGHT / OTHER HANDLERS =====================
+async function handleRequestRole(interaction) {
+  const member = interaction.member;
+  const userId = member.id;
+
+  if ((bans.users[userId] && bans.users[userId].endTime > Date.now()) || (member.roles && member.roles.cache.has(roles.banRoleId))) {
+    return interaction.reply({ content: 'Bạn đang bị ban, không thể xin role.', ephemeral: true });
+  }
+
+  const hasDev = member.roles.cache.has(roles.devRoleId);
+  const hasAdmin = member.roles.cache.has(roles.adminRoleId);
+  const hasMember = member.roles.cache.has(roles.basicMemberRoleId);
+
+  if (hasMember || hasDev || hasAdmin) {
+    const filteredRoles = (roles.otherRoles || []).filter(
+      (r) => r.id !== roles.devRoleId && r.id !== roles.adminRoleId && r.id !== roles.verifiedMemberRoleId
+    );
+    if (filteredRoles.length === 0) return interaction.reply({ content: 'Không có role nào có thể xin.', ephemeral: true });
+
+    const row = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('select_role')
+        .setPlaceholder('Chọn role')
+        .addOptions(filteredRoles.map((r) => ({ label: r.name, value: r.id })))
+    );
+    await interaction.reply({ content: 'Chọn role bạn muốn xin:', components: [row], ephemeral: true });
+  } else {
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('request_member').setLabel('Xin Role Member').setStyle(ButtonStyle.Primary)
+    );
+    await interaction.reply({ content: 'Bạn cần có role Member trước. Bấm để xin:', components: [row], ephemeral: true });
+  }
+}
+
+async function handleSelect(interaction) {
+  if (interaction.customId === 'select_role') {
+    const roleId = interaction.values[0];
+    if (roleId === roles.devRoleId || roleId === roles.adminRoleId || roleId === roles.verifiedMemberRoleId) {
+      return interaction.update({ content: 'Không thể xin role DEV, Admin hoặc Verified Member.', components: [] });
+    }
+
+    const modal = new ModalBuilder().setCustomId(`role_info_modal_${roleId}`).setTitle('Thông tin xin role');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('name').setLabel('Tên').setStyle(TextInputStyle.Short).setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('intro').setLabel('Giới thiệu bản thân').setStyle(TextInputStyle.Paragraph).setRequired(true)
+      )
+    );
+    await interaction.showModal(modal);
+  }
+}
+
+async function handleButton(interaction) {
+  const customId = interaction.customId;
+
+  if (customId === 'request_member') {
+    const modal = new ModalBuilder().setCustomId(`role_info_modal_${roles.basicMemberRoleId}`).setTitle('Thông tin xin role Member');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('name').setLabel('Tên').setStyle(TextInputStyle.Short).setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('intro').setLabel('Giới thiệu bản thân').setStyle(TextInputStyle.Paragraph).setRequired(true)
+      )
+    );
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (customId.startsWith('approve_') || customId.startsWith('deny_')) {
+    const hasVerified = interaction.member.roles.cache.has(roles.verifiedMemberRoleId);
+    const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+    const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+
+    if (!hasVerified && !hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
+      return interaction.reply({ content: '❌ Bạn không có quyền duyệt request này.', ephemeral: true });
+    }
+
+    const action = customId.split('_')[0];
+    const requestId = customId.split('_')[1];
+    const request = pendingRequests.get(requestId);
+    
+    if (!request) {
+      return interaction.reply({ content: '❌ Yêu cầu này đã hết hạn hoặc đã được xử lý.', ephemeral: true });
+    }
+
+    pendingRequests.delete(requestId);
+
+    // 1. Dùng interaction.update() để báo cho Discord biết nút đã được nhận (tránh lỗi 3 giây)
+    try {
+      const oldEmbed = interaction.message.embeds[0];
+      const newEmbed = EmbedBuilder.from(oldEmbed)
+        .addFields({
+          name: action === 'approve' ? '✅ Đã duyệt bởi' : '❌ Đã từ chối bởi',
+          value: `<@${interaction.user.id}>`,
+          inline: true
+        })
+        .setTimestamp();
+        
+      await interaction.update({ embeds: [newEmbed], components: [] });
+    } catch (err) {
+      console.error('Error updating embed:', err);
+    }
+
+    // 2. Xử lý logic TỪ CHỐI
+    if (action === 'deny') {
+      // Do đã update() ở trên, từ đây về sau phải dùng followUp()
+      await interaction.followUp({ content: '❌ Đã từ chối yêu cầu cấp role.', ephemeral: true });
+      try {
+        const user = await client.users.fetch(request.userId);
+        await user.send('❌ Yêu cầu xin role của bạn đã bị từ chối.');
+      } catch (err) {
+        console.error('Error notifying user (deny):', err);
+      }
+      return;
+    }
+
+    // 3. Xử lý logic ĐỒNG Ý
+    try {
+      const guild = await client.guilds.fetch(request.guildId);
+      const member = await guild.members.fetch(request.userId);
+      
+      // Thêm role yêu cầu
+      await member.roles.add(request.roleId);
+
+      // Nếu xin role Member thì lột role Pending (Welcome) ra
+      if (request.roleId === roles.basicMemberRoleId && roles.pendingRoleId) {
+        await member.roles.remove(roles.pendingRoleId);
+
+        if (pendingUsersData[request.userId]) {
+            delete pendingUsersData[request.userId];
+            savePendingUsers();
+        }
+      }
+
+      await interaction.followUp({ content: '✅ Đã duyệt và cấp role thành công!', ephemeral: true });
+
+      // Nhắn tin DM cho người dùng báo tin vui
+      try {
+        await member.send('🎉 Yêu cầu xin role của bạn đã được duyệt!');
+      } catch (err) {
+        console.error('Error sending DM to user (approve):', err);
+      }
+      
+    } catch (err) {
+      console.error('Error approving role:', err);
+      // Nếu nhảy vào đây, 99% là do Bot bị lỗi phân cấp (Role bot thấp hơn Role cần cấp)
+      await interaction.followUp({ content: '⚠️ Đã duyệt, nhưng bot bị chặn không thể cấp role (Vui lòng kéo Role của Bot lên cao hơn Role cần cấp trong Server Settings).', ephemeral: true });
+    }
+    return;
+  }
+  if (customId.startsWith('confirm_event_')) {
+    const eventId = customId.split('_')[2];
+    const event = events.get(eventId);
+    if (!event || event.creator !== interaction.user.id) {
+      return interaction.reply({ content: 'Không tìm thấy sự kiện hoặc bạn không phải người tạo.', ephemeral: true });
+    }
+
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const discordEventId = await createDiscordEvent(guild, event);
+    if (discordEventId) event.discordEventId = discordEventId;
+
+    const startTime = new Date(event.startTime);
+    const embed = createEventEmbed(event, startTime);
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`group_join_${eventId}`).setLabel('✈️ Tham gia').setStyle(ButtonStyle.Primary).setEmoji('✈️'),
+      new ButtonBuilder().setCustomId(`group_canceljoin_${eventId}`).setLabel('❌ Hủy tham gia').setStyle(ButtonStyle.Secondary).setEmoji('❌')
+    );
+
+    const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+    const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+    if (hasDev || hasAdmin || interaction.user.id === event.creator) {
+      row.addComponents(new ButtonBuilder().setCustomId(`group_cancelevent_${eventId}`).setLabel('🚫 Hủy sự kiện').setStyle(ButtonStyle.Danger).setEmoji('🚫'));
+    }
+
+    const channel = client.channels.cache.get(GROUP_FLIGHT_CHANNEL_ID) || interaction.channel;
+    const message = await channel.send({
+      content: `🎉 **SỰ KIỆN GROUP FLIGHT MỚI!** <@&${roles.basicMemberRoleId}>`,
+      embeds: [embed],
+      components: [row],
+      allowedMentions: { parse: [] },
+    });
+
+    event.messageId = message.id;
+    event.channelId = message.channel.id;
+
+    const now = Date.now();
+    const remindTime = event.startTime - 15 * 60 * 1000 - now;
+    if (remindTime > 0) event.timeoutRemind = setTimeout(() => remindParticipants(eventId), remindTime);
+
+    const startTimeDiff = event.startTime - now;
+    if (startTimeDiff > 0) event.timeoutStart = setTimeout(() => startEvent(eventId), startTimeDiff);
+
+    await interaction.update({ content: '✅ Sự kiện đã được công bố thành công và đã tạo sự kiện Discord!', components: [] });
+    return;
+  }
+  // Xử lý nút bấm Đồng ý / Từ chối thông báo AI
+  if (customId.startsWith('ann_')) {
+    const parts = customId.split('_');
+    const action = parts[1]; // 'okay', 'orig' hoặc 'reject'
+    const reqId = parts[2];
+
+    const pendingData = pendingAnnouncements.get(reqId);
+    if (!pendingData) {
+      return interaction.reply({ content: '❌ Yêu cầu đã hết hạn hoặc bot vừa bị restart.', ephemeral: true });
+    }
+
+    if (action === 'reject') {
+      pendingAnnouncements.delete(reqId);
+      return interaction.update({ content: '❌ Đã hủy gửi thông báo.', embeds: [], components: [] });
+    }
+
+    // Chọn văn bản cuối cùng dựa theo nút user bấm
+    const finalMessage = action === 'okay' ? pendingData.aiMessage : pendingData.rawMessage;
+    
+    // Xóa bộ nhớ tạm
+    pendingAnnouncements.delete(reqId);
+
+    // Nếu có hẹn giờ
+    if (pendingData.targetTime) {
+      // Đẩy vào mảng và lưu ra file JSON
+      scheduledAnnouncements.push({
+        id: reqId,
+        channelId: pendingData.channelId,
+        content: finalMessage,
+        time: pendingData.targetTime,
+        author: interaction.user.id
+      });
+      await db.saveAnnouncements(scheduledAnnouncements);
+
+      await interaction.update({ 
+        content: `✅ Đã lên lịch gửi thông báo vào <t:${Math.floor(pendingData.targetTime/1000)}:F>!\n**ID Lịch trình:** \`${reqId}\` (Dùng để sửa/hủy)`, 
+        embeds: [], 
+        components: [] 
+      });
+    } else {
+      // Gửi ngay lập tức
+      try {
+        const targetChannel = await client.channels.fetch(pendingData.channelId);
+        const sentMsg = await targetChannel.send({ content: finalMessage, allowedMentions: { parse: ['roles', 'users', 'everyone'] } });
+        await interaction.update({ content: `✅ Đã gửi thông báo thành công!\n**ID Tin nhắn:** \`${sentMsg.id}\` (Dùng để sửa)`, embeds: [], components: [] });
+      } catch (err) {
+        await interaction.update({ content: `❌ Lỗi khi gửi thông báo: ${err.message}`, embeds: [], components: [] });
+      }
+    }
+    return;
+  }
+
+  // Xử lý nút bấm Xin Role VATSIM
+  if (customId === 'btn_verify_pilot' || customId === 'btn_verify_atc') {
+      const roleType = customId.split('_')[2]; // 'pilot' hoặc 'atc'
+      
+      await interaction.deferReply({ ephemeral: true });
+
+      try {
+          // Đưa user vào danh sách chờ nhận DM
+          pendingVerifyDMs.set(interaction.user.id, {
+              roleType: roleType,
+              guildId: interaction.guild.id,
+              expires: Date.now() + 5 * 60 * 1000 // Cho 5 phút để gửi ảnh
+          });
+
+          // Nhắn tin riêng: CHỈ ĐÒI ẢNH!
+          await interaction.user.send(
+              `👋 Chào bạn! Bạn đang yêu cầu xác thực role **VATSIM ${roleType.toUpperCase()}**.\n\n` +
+              `Để hoàn tất, hãy gửi cho mình **1 tấm ảnh chụp màn hình** trang Profile VATSIM chính thức (my.vatsim.net).\n` +
+              `⚠️ **LƯU Ý QUAN TRỌNG:**\n` +
+              `- Ảnh phải thể hiện rõ giao diện trang web, có chữ VATSIM ID, Tên, Rating...\n` +
+              `- KHÔNG cần gõ mã số, hệ thống AI sẽ tự động soi ảnh của bạn.\n\n` +
+              `*(Bạn có 5 phút để gửi ảnh, hãy thả ảnh vào đây nhé!)*`
+          );
+
+          return interaction.editReply({ content: '✅ Bot đã nhắn tin riêng (DM) cho bạn để xác thực. Vui lòng kiểm tra mục tin nhắn trực tiếp!' });
+      } catch (err) {
+          pendingVerifyDMs.delete(interaction.user.id);
+          return interaction.editReply({ content: '❌ Bot không thể nhắn tin DM cho bạn. **Vui lòng vào Cài đặt Quyền riêng tư của Server và Bật "Cho phép tin nhắn trực tiếp"**, sau đó thử lại!' });
+      }
+  }
+
+  if (customId.startsWith('group_')) {
+    const parts = customId.split('_');
+    const action = parts[1];
+    const eventId = parts.slice(2).join('_');
+    const event = events.get(eventId);
+    if (!event) return interaction.reply({ content: 'Không tìm thấy sự kiện.', ephemeral: true });
+
+    if (action === 'join') {
+      if (!event.participants.includes(interaction.user.id)) {
+        event.participants.push(interaction.user.id);
+        await updateEventMessage(eventId);
+        
+        // Thêm user vào event tracking
+        await addUserToEvent(interaction.user.id, eventId);
+      }
+      await interaction.reply({ content: '✅ Đã tham gia sự kiện!', ephemeral: true });
+      return;
+    }
+
+    if (action === 'canceljoin') {
+      event.participants = event.participants.filter((id) => id !== interaction.user.id);
+      await updateEventMessage(eventId);
+      
+      // Xóa user khỏi event tracking
+      await removeUserFromEvent(interaction.user.id, eventId);
+      
+      await interaction.reply({ content: '❌ Đã hủy tham gia sự kiện!', ephemeral: true });
+      return;
+    }
+
+    if (action === 'cancelevent') {
+      const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+      const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+
+      if (hasDev || hasAdmin || interaction.user.id === event.creator) {
+        if (event.timeoutRemind) clearTimeout(event.timeoutRemind);
+        if (event.timeoutStart) clearTimeout(event.timeoutStart);
+
+        // Xóa tất cả users khỏi event tracking
+        await removeAllUsersFromEvent(eventId);
+
+        if (event.discordEventId) {
+          try {
+            const guild = await client.guilds.fetch(GUILD_ID);
+            await guild.scheduledEvents.delete(event.discordEventId);
+          } catch (err) {
+            console.error('Error deleting Discord event:', err);
+          }
+        }
+
+        try {
+          await interaction.message.delete();
+        } catch (_) {}
+
+        events.delete(eventId);
+        await interaction.reply({ content: '🚫 Sự kiện đã bị hủy!', ephemeral: true });
+      } else {
+        await interaction.reply({ content: 'Bạn không có quyền hủy sự kiện.', ephemeral: true });
+      }
+    }
+  }
+}
+
+async function handleGroupFlight(interaction) {
+  const modal = new ModalBuilder().setCustomId('group_modal').setTitle('Tạo Group Flight');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('dep').setLabel('Departure (ICAO)').setStyle(TextInputStyle.Short).setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('arr').setLabel('Arrival (ICAO)').setStyle(TextInputStyle.Short).setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('route').setLabel('Route').setStyle(TextInputStyle.Paragraph).setRequired(true)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('time').setLabel('Giờ bắt đầu (UTC, YYYY-MM-DD HH:MM)').setStyle(TextInputStyle.Short).setRequired(true)
+    )
+  );
+  await interaction.showModal(modal);
+}
+
+async function handleSendAward(interaction) {
+  try {
+    // Kiểm tra quyền
+    const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+    const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+    
+    if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
+      return interaction.reply({ 
+        content: '❌ Chỉ admin và dev mới có thể sử dụng lệnh này!', 
+        ephemeral: true 
+      });
+    }
+    
+    const subcommand = interaction.options.getSubcommand();
+    
+    await interaction.deferReply({ ephemeral: true });
+    
+    if (subcommand === 'atc') {
+      await sendATCAward(interaction);
+      
+    } else if (subcommand === 'pilot') {
+      await sendPilotAward(interaction);
+      
+    } else if (subcommand === 'both') {
+      await sendATCAward(interaction);
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Delay 1 giây
+      await sendPilotAward(interaction);
+      await interaction.followUp({ 
+        content: '✅ Đã gửi award cho cả ATC và pilot!', 
+        ephemeral: true 
+      });
+      
+    } else if (subcommand === 'reset_status') {
+      resetAwardStatus();
+      await interaction.editReply({ 
+        content: '✅ Đã reset trạng thái award! Có thể gửi lại award cho tháng này.' 
+      });
+    }
+  } catch (err) {
+    console.error('Error in handleSendAward:', err);
+    try {
+      await interaction.editReply({ 
+        content: '❌ Đã có lỗi khi thực hiện lệnh!' 
+      });
+    } catch (_) {}
+  }
+}
+
+async function handleModal(interaction) {
+  // Nhận dữ liệu nộp từ Popup Xác thực VATSIM
+  if (interaction.customId.startsWith('modal_verify_')) {
+    const roleType = interaction.customId.split('_')[2]; // 'pilot' hoặc 'atc'
+    const cidStr = interaction.fields.getTextInputValue('cid_input').trim();
+    const cid = parseInt(cidStr);
+
+    if (isNaN(cid)) {
+      return interaction.reply({ content: '❌ CID không hợp lệ. Vui lòng nhập số.', ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true }); // Chờ API VATSIM phản hồi
+
+    // Dùng lại hàm có sẵn trong code của bạn
+    const stats = await fetchVatsimStatsById(cid);
+    
+    if (!stats) {
+      return interaction.editReply({ content: `❌ Không tìm thấy thông tin trên VATSIM cho CID **${cid}**. Vui lòng kiểm tra lại.` });
+    }
+
+    // Tài khoản bị Suspended (VATSIM API trả về rating 0)
+    if (stats.rating === 0) {
+      return interaction.editReply({ content: `❌ Tài khoản VATSIM của bạn (CID: ${cid}) hiện đang bị **Suspended**. Hệ thống từ chối cấp Role.` });
+    }
+
+    // XÉT DUYỆT PILOT
+    if (roleType === 'pilot') {
+      if (stats.pilot_hours > 10) {
+        try {
+          const member = await interaction.guild.members.fetch(interaction.user.id);
+          await member.roles.add(roles.vatsimPilotRoleId);
+          return interaction.editReply({ content: `✅ Xác thực thành công! Bạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã cấp Role **VATSIM Pilot**.` });
+        } catch (err) {
+          return interaction.editReply({ content: `⚠️ Đã đủ điều kiện nhưng bot không thể cấp role. Vị trí Role của Bot phải nằm trên Role Pilot trong cài đặt Server.` });
+        }
+      } else {
+        return interaction.editReply({ content: `❌ Từ chối: Bạn mới có **${stats.pilot_hours.toFixed(1)}** giờ bay. Cần bay trên 10 giờ để nhận role Pilot.` });
+      }
+    } 
+    // XÉT DUYỆT ATC
+    else if (roleType === 'atc') {
+      if (stats.rating > 1) { // 1 là OBS, > 1 là từ S1 trở lên
+        try {
+          const member = await interaction.guild.members.fetch(interaction.user.id);
+          await member.roles.add(roles.vatsimAtcRoleId);
+          
+          const vatsimRatingsSpoken = { 2: 'S1', 3: 'S2', 4: 'S3', 5: 'C1', 6: 'C2', 7: 'C3', 8: 'I1', 9: 'I2', 10: 'I3', 11: 'SUP', 12: 'ADM' };
+          const ratingStr = vatsimRatingsSpoken[stats.rating] || `R${stats.rating}`;
+          
+          return interaction.editReply({ content: `✅ Xác thực thành công! Rating của bạn là **${ratingStr}**. Đã cấp Role **VATSIM ATC**.` });
+        } catch (err) {
+          return interaction.editReply({ content: `⚠️ Đã đủ điều kiện nhưng bot không thể cấp role. Vị trí Role của Bot phải nằm trên Role ATC trong cài đặt Server.` });
+        }
+      } else {
+        return interaction.editReply({ content: `❌ Từ chối: Rating của bạn hiện tại là **OBS** (hoặc thấp hơn). Yêu cầu ATC từ hạng S1 trở lên.` });
+      }
+    }
+    return;
+  }
   
-  const rows = response.data.values || [];
-  const data = {};
+  if (interaction.customId === 'group_modal') {
+    const dep = interaction.fields.getTextInputValue('dep').toUpperCase();
+    const arr = interaction.fields.getTextInputValue('arr').toUpperCase();
+    const route = interaction.fields.getTextInputValue('route');
+    const timeStr = interaction.fields.getTextInputValue('time');
+    const startTime = parseUTCDateTime(timeStr);
 
-  for (const row of rows) {
-    const [discordId, cid] = row;
-    if (discordId && cid) {
-      data[discordId] = parseInt(cid);
+    if (isNaN(startTime)) return interaction.reply({ content: 'Giờ không hợp lệ. Vui lòng dùng định dạng YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
+    if (startTime <= Date.now()) return interaction.reply({ content: 'Thời gian bắt đầu phải ở tương lai.', ephemeral: true });
+
+    const eventId = Date.now().toString();
+    events.set(eventId, {
+      dep,
+      arr,
+      route,
+      startTime,
+      creator: interaction.user.id,
+      participants: [],
+      messageId: null,
+      channelId: null,
+      timeoutRemind: null,
+      timeoutStart: null,
+      discordEventId: null,
+    });
+
+    const startTimeObj = new Date(startTime);
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`confirm_event_${eventId}`).setLabel('🚀 Xác nhận và công bố').setStyle(ButtonStyle.Success).setEmoji('🚀')
+    );
+
+    await interaction.reply({
+      content: `📋 **Xem trước sự kiện:**\n🛫 **Departure:** ${dep}\n🛬 **Arrival:** ${arr}\n🧭 **Route:** ${route}\n⏰ **Start Time (UTC):** ${formatDateTime(startTimeObj)}`,
+      components: [row],
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (interaction.customId === 'profile_modal') {
+    const name = interaction.fields.getTextInputValue('name');
+    const age = interaction.fields.getTextInputValue('age');
+    const bio = interaction.fields.getTextInputValue('bio');
+    
+    // Cập nhật lên MongoDB Atlas
+    try {
+      await db.saveProfile(interaction.user.id, { name, age, bio });
+      // Cập nhật luôn vào RAM để AI đọc được ngay lập tức
+      profiles[interaction.user.id] = { name, age, bio }; 
+      
+      await interaction.reply({ content: '✅ Profile của bạn đã được lưu vĩnh viễn lên MongoDB!', ephemeral: true });
+    } catch (err) {
+      console.error(err);
+      await interaction.reply({ content: '⚠️ Lỗi lưu Database.', ephemeral: true });
+    }
+    return;
+  }
+
+  // Trong handleModal, xử lý role_info_modal_
+if (interaction.customId.startsWith('role_info_modal_')) {
+  const roleId = interaction.customId.split('_')[3];
+  const name = interaction.fields.getTextInputValue('name');
+  const intro = interaction.fields.getTextInputValue('intro');
+  const timestamp = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+
+  const requestId = Date.now().toString();
+  pendingRequests.set(requestId, { userId: interaction.user.id, roleId, guildId: interaction.guild.id, name, intro, timestamp, messageId: null });
+
+  try {
+    const channel = await client.channels.fetch(ROLE_APPROVAL_CHANNEL_ID);
+    const roleName = roleId === roles.basicMemberRoleId ? 'Member' : roles.otherRoles.find((r) => r.id === roleId)?.name || 'Unknown';
+
+    const embed = new EmbedBuilder()
+      .setTitle('Role Request')
+      .setDescription(
+        `User ${interaction.user.tag} (${interaction.user.id}) requests role ${roleName}.\n\n**Tên:** ${name}\n**Giới thiệu:** ${intro}\n**Thời gian:** ${timestamp}`
+      );
+
+    // Thêm ping DEV và Admin
+    const mentionText = `<@&${roles.devRoleId}> <@&${roles.adminRoleId}>`;
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel('Approve').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`deny_${requestId}`).setLabel('Deny').setStyle(ButtonStyle.Danger)
+    );
+
+    const sentMessage = await channel.send({
+      content: mentionText,
+      embeds: [embed],
+      components: [row],
+      allowedMentions: { roles: [roles.devRoleId, roles.adminRoleId] } // chỉ ping đúng các role đó
+    });
+    
+    pendingRequests.get(requestId).messageId = sentMessage.id;
+    await interaction.reply({ content: '✅ Request sent for approval.', ephemeral: true });
+  } catch (err) {
+    console.error('Error sending request to channel:', err);
+    await interaction.reply({ content: '❌ Error sending request.', ephemeral: true });
+    pendingRequests.delete(requestId);
+  }
+}
+}
+
+async function remindParticipants(eventId) {
+  const event = events.get(eventId);
+  if (!event) return;
+
+  try {
+    const channel = await client.channels.fetch(event.channelId);
+    const message = await channel.messages.fetch(event.messageId);
+
+    const embed = EmbedBuilder.from(message.embeds[0])
+      .setColor(0xffa500)
+      .setFooter({ text: 'Sự kiện sắp bắt đầu!', iconURL: 'https://cdn-icons-png.flaticon.com/512/1828/1828884.png' });
+
+    await message.edit({
+      content: `⏰ **SỰ KIỆN SẮP BẮT ĐẦU!** <@&${roles.basicMemberRoleId}>`,
+      embeds: [embed],
+      allowedMentions: { parse: [] },
+    });
+  } catch (err) {
+    console.error('Error updating reminder message:', err);
+  }
+
+  for (const userId of event.participants) {
+    try {
+      const user = await client.users.fetch(userId);
+      await user.send(
+        `⏰ **Group flight của bạn sẽ bắt đầu sau 15 phút!**\n\n🛫 **Departure:** ${event.dep}\n🛬 **Arrival:** ${event.arr}\n🧭 **Route:** ${event.route}\n\nSee you soon! ✈️`
+      );
+    } catch (err) {
+      console.error(`Không gửi DM cho ${userId}: ${err}`);
+    }
+  }
+}
+
+async function startEvent(eventId) {
+  const event = events.get(eventId);
+  if (!event) return;
+
+  try {
+    const channel = await client.channels.fetch(event.channelId);
+    const message = await channel.messages.fetch(event.messageId);
+
+    const embed = EmbedBuilder.from(message.embeds[0])
+      .setTitle('🚀 Group Flight Đang Diễn Ra!')
+      .setColor(0x00ff00)
+      .setDescription('🎯 **Sự kiện đang diễn ra!** Chúc mọi người có chuyến bay vui vẻ! ✈️')
+      .setFooter({ text: 'Sự kiện đang diễn ra', iconURL: 'https://cdn-icons-png.flaticon.com/512/929/929430.png' });
+
+    await message.edit({
+      content: `🎯 **GROUP FLIGHT ĐANG DIỄN RA!** <@&${roles.basicMemberRoleId}>`,
+      embeds: [embed],
+      components: [],
+      allowedMentions: { parse: [] },
+    });
+
+    for (const userId of event.participants) {
+      try {
+        const user = await client.users.fetch(userId);
+        await user.send(
+          `🎯 **Group flight của bạn đã bắt đầu!**\n\nHãy tham gia ngay!\n🛫 **Departure:** ${event.dep}\n🛬 **Arrival:** ${event.arr}\n🧭 **Route:** ${event.route}\n\nHappy flying! ✈️`
+        );
+      } catch (err) {
+        console.error(`Không gửi DM cho ${userId}: ${err}`);
+      }
+    }
+    
+    // Đặt lịch xóa role sau khi sự kiện kết thúc (ví dụ: 3 giờ)
+    setTimeout(async () => {
+      // Xóa tất cả users khỏi event tracking
+      await removeAllUsersFromEvent(eventId);
+      
+      // Xóa event khỏi bộ nhớ
+      events.delete(eventId);
+      
+      console.log(`Event ${eventId} đã kết thúc và role đã được thu hồi`);
+    }, 3 * 60 * 60 * 1000); // 3 giờ
+  } catch (err) {
+    console.error(`Lỗi khi bắt đầu sự kiện ${eventId}: ${err}`);
+  }
+}
+
+async function handleSubmitProfile(interaction) {
+  const modal = new ModalBuilder().setCustomId('profile_modal').setTitle('Submit / Edit Profile');
+  
+  // Lấy dữ liệu cũ nếu có
+  const existingProfile = profiles[interaction.user.id] || {};
+
+  // 1. Tạo ô nhập Tên
+  const nameInput = new TextInputBuilder()
+    .setCustomId('name')
+    .setLabel('Tên')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+  // Chỉ điền sẵn nếu có tên cũ
+  if (existingProfile.name) nameInput.setValue(existingProfile.name);
+
+  // 2. Tạo ô nhập Tuổi
+  const ageInput = new TextInputBuilder()
+    .setCustomId('age')
+    .setLabel('Tuổi')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false);
+  // Chỉ điền sẵn nếu có tuổi cũ
+  if (existingProfile.age) ageInput.setValue(existingProfile.age);
+
+  // 3. Tạo ô nhập Bio
+  const bioInput = new TextInputBuilder()
+    .setCustomId('bio')
+    .setLabel('Bio')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false);
+  // Chỉ điền sẵn nếu có bio cũ
+  if (existingProfile.bio) bioInput.setValue(existingProfile.bio);
+
+  // Đóng gói tất cả vào Modal
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(nameInput),
+    new ActionRowBuilder().addComponents(ageInput),
+    new ActionRowBuilder().addComponents(bioInput)
+  );
+  
+  await interaction.showModal(modal);
+}
+
+async function handleAnnouncement(interaction) {
+  const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+  const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+  if (!hasDev && !hasAdmin) return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+
+  const channel = interaction.options.getChannel('channel');
+  const rawMessage = interaction.options.getString('message');
+  const timeStr = interaction.options.getString('time');
+
+  let targetTime = null;
+  if (timeStr) {
+    targetTime = parseUTCDateTime(timeStr);
+    if (isNaN(targetTime) || targetTime <= Date.now()) {
+      return interaction.reply({ content: '❌ Giờ không hợp lệ hoặc đã qua. Định dạng đúng: YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
     }
   }
-  return data;
+
+  // Đặt trạng thái "Đang suy nghĩ" vì AI cần vài giây để viết lại văn
+  await interaction.deferReply({ ephemeral: true });
+
+  let aiMessage = '';
+  try {
+    const prompt = `Bạn là một trợ lý quản lý cộng đồng. Hãy viết lại đoạn thông báo sau bằng tiếng Việt sao cho thật chuyên nghiệp, lịch sự, rõ ràng và hấp dẫn để đăng lên kênh Discord. 
+    Yêu cầu: Giữ nguyên các thông tin chính, link, thẻ ICAO, ngày giờ (nếu có). Trình bày ngắt dòng, gạch đầu dòng hợp lý.
+    Lưu ý: không giải thích gì hết dài dòng lèm bèm chào hỏi gì hết trình bày thẳng luôn.
+    
+    Nội dung gốc cần viết lại:
+    ${rawMessage}`;
+
+    const result = await geminiModel.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 1500, temperature: 0.6 },
+    });
+    
+    aiMessage = result.response.text().trim();
+  } catch (err) {
+    console.error("Lỗi khi Gemini viết lại thông báo:", err);
+    // Nếu AI lỗi, fallback dùng luôn bản gốc
+    aiMessage = rawMessage; 
+  }
+
+  const reqId = Date.now().toString();
+  // Lưu tạm vào RAM chờ user bấm nút
+  pendingAnnouncements.set(reqId, { 
+    channelId: channel.id, 
+    rawMessage: rawMessage, 
+    aiMessage: aiMessage, 
+    targetTime: targetTime 
+  });
+
+  const embed = new EmbedBuilder()
+    .setTitle('✨ Gợi ý từ Gemini AI')
+    .setDescription('Mình đã viết lại nội dung của bạn cho chuyên nghiệp hơn. Bạn muốn dùng bản nào để gửi đi?')
+    .addFields(
+      { name: '📝 Bản gốc của bạn', value: `\`\`\`\n${rawMessage}\n\`\`\`` },
+      { name: '🤖 Bản do AI nâng cấp', value: `\`\`\`\n${aiMessage}\n\`\`\`` },
+      { name: '⏰ Lịch trình', value: targetTime ? `<t:${Math.floor(targetTime/1000)}:F>` : 'Gửi ngay lập tức' }
+    )
+    .setColor(0x3498db);
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`ann_okay_${reqId}`).setLabel('✅ Gửi bản AI').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`ann_orig_${reqId}`).setLabel('✅ Gửi bản gốc').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`ann_reject_${reqId}`).setLabel('❌ Hủy gửi').setStyle(ButtonStyle.Danger)
+  );
+
+  await interaction.editReply({ content: `**Lưu ID lịch trình nếu cần hủy:** \`${reqId}\``, embeds: [embed], components: [row] });
+
+  await interaction.editReply({ embeds: [embed], components: [row] });
 }
 
-// ========== TẠO SHEET VATSIM LINKS ==========
-async function createVatsimLinksSheet() {
-  const exists = await sheetExists(VATSIM_LINKS_SHEET_NAME);
-  if (exists) return VATSIM_LINKS_SHEET_NAME;
+async function handleSetupAtcNoti(interaction) {
+  const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+  if (!hasAdmin && interaction.user.id !== OWNER_ID) {
+    return interaction.reply({ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
+  }
 
-  const sheets = await initGoogleSheets();
-  const headers = ['DiscordId', 'DiscordUsername', 'CID', 'ImageUrl']; // ĐÃ THÊM CỘT
+  const embed = new EmbedBuilder()
+    .setTitle('📡 Đăng ký nhận thông báo BOT')
+    .setDescription('Hãy **React với emoji 🤖 ở tin nhắn này** để tự động nhận role <@&' + ATC_NOTI_ROLE_ID + '>. Bạn sẽ được thông báo khi BOT có thông báo mới')
+    .setColor(0x3498db)
+    .setFooter({ text: 'Bỏ react để hủy đăng ký nhận thông báo' });
+
+  const msg = await interaction.channel.send({ embeds: [embed] });
+  await msg.react('🤖');
+
+  // --- THÊM PHẦN LƯU DATA VÀO JSON ---
+  reactionRoleData.atcNotiMsgId = msg.id;
+  reactionRoleData.channelId = msg.channel.id;
+  fs.writeFileSync(REACTION_ROLES_FILE, JSON.stringify(reactionRoleData, null, 2));
+  // ------------------------------------
+
+  await interaction.reply({ content: '✅ Đã khởi tạo tin nhắn lấy role và lưu vào cơ sở dữ liệu thành công!', ephemeral: true });
+}
+
+async function ensureVatsimMessageExists() {
+  // 1. Kiểm tra xem trong file JSON đã có danh sách ID chưa
+  if (vatsimMessageStore && vatsimMessageStore.messageIds && vatsimMessageStore.messageIds.length > 0) {
+    console.log(`✅ [VATSIM] Đã load ${vatsimMessageStore.messageIds.length} tin nhắn từ JSON, bỏ qua quét radar.`);
+    return; // Đã có data xịn từ file, không cần quét làm hỏng data
+  }
+
+  // 2. Nếu file JSON bị mất, tiến hành dọn dẹp và tạo mới hoàn toàn
+  try {
+    const channel = await client.channels.fetch(VATSIM_CHANNEL_ID);
+    const messages = await channel.messages.fetch({ limit: 50 });
+    
+    // Tìm TẤT CẢ các tin nhắn rác do bot gửi (Bao gồm cả các tin nhắn mở rộng không có tiêu đề)
+    const oldBotMsgs = messages.filter(m => m.author.id === client.user.id && m.embeds.length > 0);
+
+    // Xóa hết đám rác cũ đi để làm lại từ đầu cho sạch
+    for (const msg of oldBotMsgs.values()) {
+        await msg.delete().catch(() => {});
+    }
+
+    // Tạo 1 tin nhắn mồi mới tinh
+    const embed = new EmbedBuilder().setTitle('🌐 VATSIM Online Update').setDescription('Đang thiết lập kết nối API...').setTimestamp();
+    const sent = await channel.send({ embeds: [embed] });
+    
+    vatsimMessageStore = { messageIds: [sent.id], channelId: channel.id };
+    
+    const fs = require('fs'); // Đảm bảo gọi fs để lưu file
+    fs.writeFileSync(VATSIM_MSG_FILE, JSON.stringify(vatsimMessageStore, null, 2));
+    
+    console.log('🆕 [VATSIM] Đã dọn rác và khởi tạo tin nhắn gốc mới.');
+  } catch (err) {
+    console.error('❌ Không thể dọn dẹp và tạo tin nhắn VATSIM gốc:', err);
+  }
+}
+// ===================== LOGGING: MEMBER JOIN/LEAVE =====================
+client.on('guildMemberAdd', async (member) => {
+  // Existing role assignment code remains...
+  
+  // Log member join
+  const embed = createLogEmbed(
+    '📥 Member Joined',
+    `**User:** ${member.user.tag}\n**ID:** ${member.user.id}\n**Account created:** <t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`,
+    0x2ecc71 // Green
+  );
+  await sendLog(embed);
+});
+
+client.on('guildMemberRemove', async (member) => {
+  const embed = createLogEmbed(
+    '📤 Member Left',
+    `**User:** ${getUserIdentifier(member.user)}\n**Joined server:** <t:${Math.floor(member.joinedTimestamp / 1000)}:R>\n**Roles:** ${member.roles.cache.map(r => r.name).join(', ') || 'None'}`,
+    0xe74c3c
+  );
+  await sendLog(embed);
+});
+// ===================== LOGGING: ROLE CHANGES =====================
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+  if (!oldMember || !newMember) return;
+
+  // Chờ 1.5 giây để audit log được ghi
+  await new Promise(resolve => setTimeout(resolve, 1500));
+
+  try {
+    const fetchedLogs = await newMember.guild.fetchAuditLogs({ type: 25, limit: 5 });
+    // Tìm entry khớp với user và thời gian gần đây
+    const roleLog = fetchedLogs.entries.find(entry =>
+      entry.target.id === newMember.id &&
+      Math.abs(entry.createdTimestamp - Date.now()) < 6000
+    );
+
+    if (!roleLog) return; // Không tìm thấy, bỏ qua
+
+    const added = [];
+    const removed = [];
+
+    // Duyệt qua các changes trong audit log
+    for (const change of roleLog.changes || []) {
+      if (change.key === '$add') {
+        // Thêm role
+        if (change.new && Array.isArray(change.new)) {
+          for (const item of change.new) {
+            if (item.id && item.name) added.push(item);
+          }
+        }
+      } else if (change.key === '$remove') {
+        // Xóa role
+        if (change.old && Array.isArray(change.old)) {
+          for (const item of change.old) {
+            if (item.id && item.name) removed.push(item);
+          }
+        }
+      }
+    }
+
+    // Nếu không tìm thấy qua $add/$remove, thử cách khác: so sánh trực tiếp role IDs
+    if (added.length === 0 && removed.length === 0) {
+      // Fetch lại member để có dữ liệu mới nhất
+      const freshOld = await newMember.guild.members.fetch(oldMember.id).catch(() => oldMember);
+      const freshNew = await newMember.guild.members.fetch(newMember.id).catch(() => newMember);
+      
+      const oldRoleIds = new Set(freshOld.roles.cache.map(r => r.id));
+      const newRoleIds = new Set(freshNew.roles.cache.map(r => r.id));
+      
+      for (const id of newRoleIds) {
+        if (!oldRoleIds.has(id)) {
+          const role = freshNew.guild.roles.cache.get(id);
+          if (role) added.push({ id: role.id, name: role.name });
+        }
+      }
+      for (const id of oldRoleIds) {
+        if (!newRoleIds.has(id)) {
+          const role = freshOld.guild.roles.cache.get(id);
+          if (role) removed.push({ id: role.id, name: role.name });
+        }
+      }
+    }
+
+    if (added.length === 0 && removed.length === 0) return;
+
+    let description = `**User:** ${getUserIdentifier(newMember.user)}\n`;
+    if (added.length) {
+      description += `\n**➕ Roles Added:**\n${added.map(r => `• ${r.name} (${r.id})`).join('\n')}`;
+    }
+    if (removed.length) {
+      description += `\n\n**➖ Roles Removed:**\n${removed.map(r => `• ${r.name} (${r.id})`).join('\n')}`;
+    }
+
+    const embed = createLogEmbed('👥 Member Roles Updated', description, 0xf39c12);
+    if (roleLog.executor) {
+      embed.addFields({ name: '🛠️ Action by', value: getUserIdentifier(roleLog.executor), inline: false });
+    }
+
+    await sendLog(embed);
+  } catch (err) {
+    console.error('Error in guildMemberUpdate:', err);
+  }
+});
+
+// ===================== LOGGING: MESSAGE DELETE =====================
+client.on('messageDelete', async (message) => {
+  try {
+    if (message.author?.bot) return;
+    if (!message.guild) return;
+
+    if (message.partial) {
+      const embed = createLogEmbed('🗑️ Message Deleted (Uncached)',
+        `**Channel:** <#${message.channelId}>\n**Message ID:** ${message.id}\n\n⚠️ **Lưu ý:** Tin nhắn cũ gửi trước khi bot bật nên không lấy được dữ liệu.`,
+        0xe67e22
+      );
+      await sendLog(embed);
+      return;
+    }
+
+    let content = message.content || '';
+    if (content.length > 1000) content = content.slice(0, 1000) + '...';
+    if (!content && message.attachments?.size > 0) content = '[Chỉ chứa hình ảnh/file đính kèm]';
+    if (!content) content = '[Tin nhắn trống]';
+
+    const embed = createLogEmbed('🗑️ Message Deleted',
+      `**Author:** ${getUserIdentifier(message.author)}\n**Channel:** ${getChannelIdentifier(message.channel)}\n**Message ID:** ${message.id}\n\n**Content:**\n\`\`\`\n${content}\n\`\`\``,
+      0xe67e22
+    );
+
+    // Chỉ lưu Tên file và Link gốc, bỏ qua việc tải ảnh vật lý để cứu tốc độ
+    if (message.attachments?.size > 0) {
+      const attachmentsText = [...message.attachments.values()].map(a => `[${a.name}](${a.url})`).join('\n');
+      embed.addFields({ name: '📎 Tệp đính kèm (Link có thể đã hỏng do Discord xóa)', value: attachmentsText.substring(0, 1024), inline: false });
+    }
+
+    // Tra cứu siêu tốc Audit Log (chỉ lấy 1 dòng gần nhất)
+    try {
+      const fetchedLogs = await message.guild.fetchAuditLogs({ type: 72, limit: 1 });
+      const deleteLog = fetchedLogs.entries.first();
+      
+      if (deleteLog && deleteLog.target.id === message.author.id && Math.abs(deleteLog.createdTimestamp - Date.now()) < 5000) {
+        if (deleteLog.executor.id !== client.user.id) {
+          embed.addFields({ name: '🗑️ Deleted by', value: getUserIdentifier(deleteLog.executor), inline: false });
+        }
+      }
+    } catch (e) {}
+
+    await sendLog(embed);
+  } catch (err) {
+    console.error('Error in messageDelete log:', err);
+  }
+});
+
+// ===================== LOGGING: MESSAGE EDIT =====================
+client.on('messageUpdate', async (oldMessage, newMessage) => {
+  try {
+    if (oldMessage.partial) await oldMessage.fetch().catch(() => {});
+    if (newMessage.partial) await newMessage.fetch().catch(() => {});
+    
+    if (oldMessage.author?.bot) return;
+    if (!oldMessage.guild) return;
+    
+    const oldContent = oldMessage.content || '[No content or unable to fetch]';
+    const newContent = newMessage.content || '[No content]';
+    
+    if (oldContent === newContent) return;
+    
+    const truncatedOld = oldContent.length > 800 ? oldContent.slice(0, 800) + '...' : oldContent;
+    const truncatedNew = newContent.length > 800 ? newContent.slice(0, 800) + '...' : newContent;
+    
+    const authorName = oldMessage.author ? getUserIdentifier(oldMessage.author) : 'Unknown User';
+    
+    const embed = createLogEmbed(
+      '✏️ Message Edited',
+      `**Author:** ${authorName}\n**Channel:** ${getChannelIdentifier(oldMessage.channel)}\n**Jump URL:** [Click to view](${newMessage.url})\n\n**Before:**\n\`\`\`\n${truncatedOld}\n\`\`\`\n**After:**\n\`\`\`\n${truncatedNew}\n\`\`\``,
+      0x3498db
+    );
+    
+    await sendLog(embed);
+  } catch (err) {
+    console.error('Error in messageUpdate log:', err);
+  }
+});
+// ===================== LOGGING: CHANNEL CREATE/DELETE =====================
+client.on('channelCreate', async (channel) => {
+  if (!channel.guild) return;
+  const typeMap = { 0: 'Text', 2: 'Voice', 4: 'Category' };
+  const channelType = typeMap[channel.type] || 'Channel';
+
+  const embed = createLogEmbed(`➕ ${channelType} Created`, `**Name:** ${channel.name}\n**ID:** ${channel.id}\n**Type:** ${channelType}`, 0x2ecc71);
+
+  try {
+    const fetchedLogs = await channel.guild.fetchAuditLogs({ type: 10, limit: 5 });
+    const log = fetchedLogs.entries.find(e => e.target.id === channel.id && Math.abs(e.createdTimestamp - Date.now()) < 5000);
+    if (log?.executor) embed.addFields({ name: '🛠️ Created by', value: getUserIdentifier(log.executor), inline: false });
+  } catch (err) {}
+
+  await sendLog(embed);
+});
+
+client.on('channelDelete', async (channel) => {
+  if (!channel.guild) return;
+  const typeMap = { 0: 'Text', 2: 'Voice', 4: 'Category' };
+  const channelType = typeMap[channel.type] || 'Channel';
+
+  const embed = createLogEmbed(`➖ ${channelType} Deleted`, `**Name:** ${channel.name}\n**ID:** ${channel.id}\n**Type:** ${channelType}`, 0xe74c3c);
+
+  try {
+    const fetchedLogs = await channel.guild.fetchAuditLogs({ type: 11, limit: 5 });
+    const log = fetchedLogs.entries.find(e => e.target.id === channel.id && Math.abs(e.createdTimestamp - Date.now()) < 5000);
+    if (log?.executor) embed.addFields({ name: '🗑️ Deleted by', value: getUserIdentifier(log.executor), inline: false });
+  } catch (err) {}
+
+  await sendLog(embed);
+});
+// ===================== LOGGING: THREADS =====================
+client.on('threadCreate', async (thread) => {
+  if (!thread.guild) return;
+  const embed = createLogEmbed('🧵 Thread Created', `**Name:** ${thread.name}\n**ID:** ${thread.id}\n**Parent:** ${thread.parent?.name || 'Unknown'}`, 0x2ecc71);
+
+  try {
+    const fetchedLogs = await thread.guild.fetchAuditLogs({ type: 110, limit: 5 });
+    const log = fetchedLogs.entries.find(e => e.target.id === thread.id && Math.abs(e.createdTimestamp - Date.now()) < 5000);
+    if (log?.executor) embed.addFields({ name: '🛠️ Created by', value: getUserIdentifier(log.executor), inline: false });
+    else if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value: `<@${thread.ownerId}>`, inline: false });
+  } catch (err) {
+    if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value: `<@${thread.ownerId}>`, inline: false });
+  }
+
+  await sendLog(embed);
+});
+
+client.on('threadDelete', async (thread) => {
+  if (!thread.guild) return;
+  const embed = createLogEmbed('🧵 Thread Deleted', `**Name:** ${thread.name}\n**ID:** ${thread.id}\n**Parent:** ${thread.parent?.name || 'Unknown'}`, 0xe74c3c);
+
+  try {
+    const fetchedLogs = await thread.guild.fetchAuditLogs({ type: 111, limit: 5 });
+    const log = fetchedLogs.entries.find(e => e.target.id === thread.id && Math.abs(e.createdTimestamp - Date.now()) < 5000);
+    if (log?.executor) embed.addFields({ name: '🗑️ Deleted by', value: getUserIdentifier(log.executor), inline: false });
+  } catch (err) {}
+
+  await sendLog(embed);
+});
+
+
+// ===================== ATIS FETCH (UPGRADED SCRAPER) =====================
+
+// 1. Hàm định dạng văn bản ATIS cho dễ đọc
+function formatATISText(text) {
+  if (!text) return text;
+  let formatted = text;
+
+  // Xuống dòng sau cụm "ATIS [Chữ cái]"
+  formatted = formatted.replace(/(ATIS\s+[A-Z])\s+/gi, '$1\n');
+  // Xuống dòng sau dấu chấm đôi ".." hoặc "..."
+  formatted = formatted.replace(/\.{2,}\s*/g, '..\n');
+  // Xuống dòng sau dấu chấm đơn "." (khi phía sau là khoảng trắng + chữ/số)
+  formatted = formatted.replace(/\.\s+(?=[A-Z0-9])/g, '.\n');
+
+  return formatted.trim();
+}
+
+// 2. Hàm Auto-Convert từ D-ATIS sang METAR chuẩn (Hỗ trợ cả Raw METAR & Spoken Text)
+function convertAtisToMetar(atisText, icao) {
+  if (!atisText) return null;
+  let metarParts = [icao];
+
+  // 1. Ngày giờ (VD: 282230Z hoặc 0330Z)
+  const timeMatch = atisText.match(/(\d{6})Z/i) || atisText.match(/(\d{4})Z/i);
+  if (timeMatch && timeMatch[1].length === 6) {
+    metarParts.push(`${timeMatch[1]}Z`);
+  } else if (timeMatch && timeMatch[1].length === 4) {
+    const day = new Date().getUTCDate().toString().padStart(2, '0');
+    metarParts.push(`${day}${timeMatch[1]}Z`);
+  } else {
+    metarParts.push('000000Z');
+  }
+
+  // 2. Gió (Bắt cả "WIND 190/08KT" và "19008KT")
+  const windMatch = atisText.match(/(?:WIND\s+)?(VRB|\d{3})[/\s]*(\d{2})(?:G(\d{2}))?KT/i);
+  if (windMatch) {
+    const dir = windMatch[1];
+    const spd = windMatch[2];
+    const gust = windMatch[3] ? `G${windMatch[3]}` : '';
+    metarParts.push(`${dir}${spd}${gust}KT`);
+  }
+
+  // 3. Tầm nhìn (Bắt cả "VIS 9KM" và "9000" đứng liền sau gió)
+  const visMatchRaw = atisText.match(/KT\s+(9999|\d{4})\b/i); 
+  const visMatchSpoken = atisText.match(/VIS(?:IBILITY)?\s+(\d+)\s*(KM|M)?/i);
+  if (visMatchSpoken) {
+    const val = parseInt(visMatchSpoken[1]);
+    const unit = visMatchSpoken[2] ? visMatchSpoken[2].toUpperCase() : '';
+    if (unit === 'KM' || val < 100) {
+      metarParts.push(val >= 10 ? '9999' : (val * 1000).toString().padStart(4, '0'));
+    } else {
+      metarParts.push(val.toString().padStart(4, '0'));
+    }
+  } else if (visMatchRaw) {
+    metarParts.push(visMatchRaw[1]);
+  }
+
+  // 4. Hiện tượng thời tiết (VD: -TSRA, SHRA, BR, FG...)
+  const wxRegex = /(?:\s|^)(-|\+|VC)?(TSRA|SHRA|DZ|RA|SN|SG|IC|PE|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PO|SQ|FC|SS|DS|VCSH|VCTS|TS|SH)(?=\s|$)/gi;
+  let wxMatch;
+  while ((wxMatch = wxRegex.exec(atisText)) !== null) {
+    metarParts.push(wxMatch[0].trim().toUpperCase());
+  }
+
+  // 5. Mây (Bắt chính xác SCT015, FEW017CB...)
+  const cldRegex = /\b(FEW|SCT|BKN|OVC|CAVOK|NSC)\s*(\d{3})?\s*(CB|TCU)?(?:FT)?\b/gi;
+  let match;
+  while ((match = cldRegex.exec(atisText)) !== null) {
+    if (match[1].toUpperCase() === 'CAVOK' || match[1].toUpperCase() === 'NSC') {
+      metarParts.push(match[1].toUpperCase());
+    } else {
+      let type = match[1].toUpperCase();
+      let fl = match[2] ? match[2] : '000';
+      let ext = match[3] ? match[3].toUpperCase() : '';
+      metarParts.push(`${type}${fl}${ext}`);
+    }
+  }
+
+  // 6. Nhiệt độ & Điểm sương (Bắt cả "24/22" và "T24 DP22")
+  const tempMatchRaw = atisText.match(/\b(M?\d{2})\/(M?\d{2})\b/);
+  const tempMatchSpoken = atisText.match(/T(?:EMP)?\s*(M?\d+)[^\d]*?D(?:P|EW)?\s*(M?\d+)/i);
+  if (tempMatchRaw) {
+    metarParts.push(`${tempMatchRaw[1]}/${tempMatchRaw[2]}`);
+  } else if (tempMatchSpoken) {
+    let t = tempMatchSpoken[1].replace('M', '-');
+    let dp = tempMatchSpoken[2].replace('M', '-');
+    let tStr = parseInt(t) < 0 ? 'M' + Math.abs(parseInt(t)).toString().padStart(2, '0') : parseInt(t).toString().padStart(2, '0');
+    let dpStr = parseInt(dp) < 0 ? 'M' + Math.abs(parseInt(dp)).toString().padStart(2, '0') : parseInt(dp).toString().padStart(2, '0');
+    metarParts.push(`${tStr}/${dpStr}`);
+  }
+
+  // 7. Áp suất QNH (Bắt "Q1011" hoặc "QNH 1011")
+  const qnhMatch = atisText.match(/Q(?:NH)?\s*(\d{3,4})/i);
+  if (qnhMatch) {
+    metarParts.push(`Q${qnhMatch[1].padStart(4, '0')}`);
+  }
+
+  // 8. NOSIG / RMK
+  if (atisText.match(/\bNOSIG\b/i)) metarParts.push('NOSIG');
+  
+  // Tự động thêm RMK CB nếu trong mây có CB nhưng chuỗi chưa có chữ RMK
+  if (atisText.match(/CB/i) && !atisText.match(/\bRMK\b/i)) {
+    metarParts.push('RMK CB');
+  } else if (atisText.match(/\bRMK\b/i)) {
+    // Nếu ATC ghi sẵn RMK rồi thì lấy hết đoạn phía sau
+    const rmkMatch = atisText.match(/\bRMK\s+(.*?)(?=\s*(?:TRANSITION|EXPECT|FOR|ON|$))/i);
+    if (rmkMatch) metarParts.push(`RMK ${rmkMatch[1].trim()}`);
+  }
+
+  return metarParts.join(' ');
+}
+
+// 3. Crawler chính
+async function fetchATIS(icao) {
+  try {
+    const fetch = (await import('node-fetch')).default;
+    const url = `https://atis.guru/atis/${icao.toUpperCase()}`;
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache'
+      }
+    });
+
+    if (!response.ok) {
+      console.warn(`ATIS.guru fetch failed: ${response.status}`);
+      return null;
+    }
+
+    const html = await response.text();
+    const cheerio = require('cheerio');
+    const $ = cheerio.load(html);
+
+    let fullText = $('body').text().replace(/\s+/g, ' ');
+
+    let arrival = null;
+    let departure = null;
+    let metar = null;
+    
+    // Khai báo 2 biến để hứng cái Ngày giờ tuyệt đối
+    let arrTimestamp = 0;
+    let depTimestamp = 0;
+
+    const arrMatch = fullText.match(/Arrival ATIS\s*(.*?)(?=Departure ATIS|METAR|VATSIM|$)/i);
+    if (arrMatch) {
+      // Bóc lấy cái "2026-06-20 05:12 UTC" trước khi xóa nó đi
+      const tMatch = arrMatch[1].match(/^\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\sUTC/i);
+      if (tMatch) arrTimestamp = new Date(tMatch[1] + 'Z').getTime(); // Thêm 'Z' để máy tính hiểu là giờ UTC
+      
+      arrival = arrMatch[1].replace(/^\s*\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\sUTC\s*/i, '').trim();
+      fullText = fullText.replace(arrMatch[0], ''); 
+    }
+
+    const depMatch = fullText.match(/Departure ATIS\s*(.*?)(?=Arrival ATIS|METAR|VATSIM|$)/i);
+    if (depMatch) {
+      // Bóc lấy cái "2026-06-19 23:02 UTC" trước khi xóa nó đi
+      const tMatch = depMatch[1].match(/^\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\sUTC/i);
+      if (tMatch) depTimestamp = new Date(tMatch[1] + 'Z').getTime(); 
+      
+      departure = depMatch[1].replace(/^\s*\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\sUTC\s*/i, '').trim();
+      fullText = fullText.replace(depMatch[0], '');
+    }
+
+    // Fix lỗi quét dính chữ TAF
+    const metarRegex = new RegExp(`\\b${icao}\\s+\\d{6}Z.*?(TAF|$)`, 'i');
+    const metarMatch = fullText.match(metarRegex);
+    
+    if (metarMatch) {
+      metar = metarMatch[0].replace(/TAF$/i, '').trim();
+      metar = metar.replace(/NOSIGTAF$/i, 'NOSIG');
+    } else {
+      const rawAtisToConvert = arrival || departure;
+      if (rawAtisToConvert) {
+        metar = convertAtisToMetar(rawAtisToConvert, icao.toUpperCase());
+      }
+    }
+
+    return {
+      arrival: arrival && arrival.length > 10 ? arrival : null,
+      arrTimestamp: arrTimestamp, // Gửi kèm thời gian tuyệt đối của Arrival
+      departure: departure && departure.length > 10 ? departure : null,
+      depTimestamp: depTimestamp, // Gửi kèm thời gian tuyệt đối của Departure
+      metar: metar && metar.length > 10 ? metar : null
+    };
+    
+  } catch (err) {
+    console.error(`Error fetching ATIS from guru for ${icao}:`, err.message);
+    return null;
+  }
+}
+
+// ===================== HELPER: KÉO METAR TỪ CHECKWX =====================
+async function fetchMetarFromCheckWX(icao) {
+  if (!CHECKWX_API_KEY) return null;
+  try {
+    const fetch = (await import('node-fetch')).default;
+    const response = await fetch(`https://api.checkwx.com/metar/${icao}`, {
+      headers: { 'X-API-Key': CHECKWX_API_KEY }
+    });
+    
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    if (data && data.data && data.data.length > 0) {
+      return data.data[0]; // Trả về raw text METAR
+    }
+    return null;
+  } catch (err) {
+    console.error(`Lỗi CheckWX METAR cho ${icao}:`, err.message);
+    return null;
+  }
+}
+
+// ===================== COMMAND: METAR =====================
+async function handleMetar(interaction) {
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply(); 
+  
+  try {
+    // 1. Ưu tiên lấy từ ATIS.guru
+    const atisData = await fetchATIS(icao);
+    
+    let metarText = atisData ? atisData.metar : null;
+    let hasAtis = atisData && (atisData.arrival || atisData.departure);
+
+    // 2. Fallback CheckWX
+    if (!metarText && !hasAtis) {
+      metarText = await fetchMetarFromCheckWX(icao);
+    }
+    
+    let replyContent = '';
+
+    // 3. Xử lý hiển thị METAR
+    if (metarText) {
+      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`${metarText}\`\`\``;
+    } else {
+      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`❌ Không tìm thấy METAR trên cả atis.guru lẫn CheckWX.\`\`\``;
+    }
+    
+    // 4. Xử lý hiển thị D-ATIS
+    if (hasAtis) {
+      
+      // =========================================================
+      // LUẬT ĐẶC CÁCH VCLvACC (VIỆT NAM, CAMPUCHIA, LÀO)
+      // Các sân bay VV, VD, VL thường chỉ dùng chung Arrival ATIS
+      // -> Chém luôn Departure ATIS để tránh rác!
+      // =========================================================
+      if (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL')) {
+        atisData.departure = null;
+      }
+
+      // =========================================================
+      // LUẬT KIỂM TRA THÔNG MINH (TÍNH BẰNG NGÀY GIỜ TUYỆT ĐỐI)
+      // Dành cho các sân bay quốc tế khác ngoài VCL
+      // =========================================================
+      if (atisData.arrival && atisData.departure) {
+        const now = Date.now();
+        
+        // Tính số phút trôi qua kể từ lúc phát ATIS (Bao gồm cả Ngày/Tháng/Năm)
+        const arrAge = atisData.arrTimestamp ? (now - atisData.arrTimestamp) / 60000 : 0;
+        const depAge = atisData.depTimestamp ? (now - atisData.depTimestamp) / 60000 : 0;
+
+        // Nếu chênh lệch tuổi thọ giữa 2 bản tin lớn hơn 90 phút
+        if (Math.abs(arrAge - depAge) > 90) {
+          if (arrAge > depAge) {
+            atisData.arrival = null; // Arrival cũ nát hơn -> Chém!
+          } else {
+            atisData.departure = null; // Departure cũ nát hơn -> Chém!
+          }
+        }
+      }
+
+      // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr
+      if (atisData.arrival && atisData.departure && atisData.arrival === atisData.departure) {
+        const formatted = formatATISText(atisData.arrival);
+        replyContent += `\n📻 **D-ATIS(${icao}):**\n\`\`\`${formatted}\`\`\``;
+      } 
+      // Trường hợp 2: Tách biệt rõ ràng
+      else {
+        if (atisData.arrival) {
+          const formattedArr = formatATISText(atisData.arrival);
+          replyContent += `\n🛬 **Arrival ATIS (${icao}):**\n\`\`\`${formattedArr}\`\`\``;
+        }
+        
+        if (atisData.departure) {
+          const formattedDep = formatATISText(atisData.departure);
+          replyContent += `\n🛫 **Departure ATIS (${icao}):**\n\`\`\`${formattedDep}\`\`\``;
+        }
+      }
+    } else {
+      replyContent += `\n⚠️ Hiện tại không có dữ liệu D-ATIS cho ${icao}. Pilot vui lòng tự đọc METAR ở trên nhé!`;
+    }
+    
+    await interaction.editReply({ content: replyContent });
+    
+  } catch (err) {
+    console.error('METAR/ATIS error:', err);
+    await interaction.editReply({ content: '❌ Đã có lỗi khi lấy dữ liệu METAR/ATIS. Bạn thử lại sau nhé!' });
+  }
+}
+
+// ===================== ACTIVE RUNWAY CALCULATOR (HYBRID: API + LOCAL DB) =====================
+async function handleRunway(interaction) {
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply();
 
   try {
-    await sheets.spreadsheets.batchUpdate({
-      spreadsheetId: SPREADSHEET_ID,
-      requestBody: {
-        requests: [{ addSheet: { properties: { title: VATSIM_LINKS_SHEET_NAME } } }],
-      },
-    });
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${VATSIM_LINKS_SHEET_NAME}!A1:D1`, // MỞ RỘNG TỪ B SANG D
-      valueInputOption: 'RAW',
-      requestBody: { values: [headers] },
-    });
-    console.log(`✅ Created sheet: ${VATSIM_LINKS_SHEET_NAME}`);
-    return VATSIM_LINKS_SHEET_NAME;
-  } catch (err) {
-    console.error('Error creating VatsimLinks sheet:', err);
-    throw err;
+    // 1. LẤY METAR ĐỂ TÍNH GIÓ 
+    let metar = null;
+    const atisData = await fetchATIS(icao);
+    
+    if (atisData && atisData.metar) {
+      metar = atisData.metar; 
+    } else {
+      metar = await fetchMetarFromCheckWX(icao);
+    }
+
+    if (!metar) {
+      return await interaction.editReply({ content: `❌ Không lấy được dữ liệu METAR cho sân bay ${icao} trên toàn bộ hệ thống để tính toán gió.` });
+    }
+    
+    // Tìm hướng gió và tốc độ gió trong METAR (VD: 25015G25KT, VRB02KT)
+    const windMatch = metar.match(/(VRB|\d{3})(\d{2,3})(?:G\d{2,3})?KT/);
+    if (!windMatch) {
+      return await interaction.editReply({ content: `❌ Không tìm thấy thông số gió hợp lệ trong METAR của ${icao}.\n\`METAR: ${metar}\`` });
+    }
+
+    const windDirStr = windMatch[1];
+    const windSpeed = parseInt(windMatch[2], 10);
+
+    let embed = new EmbedBuilder()
+      .setTitle(`🛫 Active Runway Indicator - ${icao}`)
+      .setDescription(`Dựa trên METAR gần nhất:\n\`\`\`${metar}\`\`\``)
+      .setColor(0x3498db)
+      .setTimestamp();
+
+    // Nếu gió đổi hướng liên tục (VRB) hoặc quá nhẹ (<3 KT)
+    if (windDirStr === 'VRB' || windSpeed < 3) {
+      embed.addFields({ name: '🌬️ Gió', value: 'Gió nhẹ hoặc đổi hướng liên tục (Calm/Variable).', inline: false });
+      embed.addFields({ name: '✅ Đề xuất', value: 'Có thể sử dụng đường băng tùy ý hoặc theo quy trình tiêu chuẩn của ATC/Sân bay.', inline: false });
+      return await interaction.editReply({ embeds: [embed] });
+    }
+
+    const windDir = parseInt(windDirStr, 10);
+    embed.addFields({ name: '🌬️ Gió hiện tại', value: `Hướng: **${windDir}°** | Tốc độ: **${windSpeed} KT**`, inline: false });
+
+    // ==========================================
+    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỰ ĐỘNG TỪ API
+    // ==========================================
+    let runways = [];
+    try {
+      const fetch = (await import('node-fetch')).default;
+      const res = await fetch(`https://api.checkwx.com/station/${icao}`, {
+        headers: { 'X-API-Key': CHECKWX_API_KEY }
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        // Cào đường băng từ API
+        if (data && data.data && data.data.length > 0 && data.data[0].runways) {
+          data.data[0].runways.forEach(rw => {
+            if (rw.ident1) {
+              const num1 = parseInt(rw.ident1.replace(/\D/g, ''), 10);
+              if (!isNaN(num1)) runways.push({ id: rw.ident1, heading: num1 * 10 });
+            }
+            if (rw.ident2) {
+              const num2 = parseInt(rw.ident2.replace(/\D/g, ''), 10);
+              if (!isNaN(num2)) runways.push({ id: rw.ident2, heading: num2 * 10 });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.error('Lỗi khi kéo dữ liệu sân bay toàn cầu:', e);
+    }
+
+    // ==========================================
+    // 3. HỆ THỐNG DỰ PHÒNG (DATABASE NỘI BỘ) - Cứu cánh khi API ngáo
+    // ==========================================
+    if (runways.length === 0) {
+      const fallbackRunways = {
+        'VVTS': [{ id: '07', heading: 70 }, { id: '25', heading: 250 }],
+        'VVNB': [{ id: '11', heading: 110 }, { id: '29', heading: 290 }],
+        'VVDN': [{ id: '17', heading: 170 }, { id: '35', heading: 350 }],
+        'VVCR': [{ id: '02', heading: 20 }, { id: '20', heading: 200 }],
+        'VVPQ': [{ id: '10', heading: 100 }, { id: '28', heading: 280 }],
+        'VVCI': [{ id: '07', heading: 70 }, { id: '25', heading: 250 }], // Đã fix 07/25
+        'VTBS': [{ id: '01', heading: 10 }, { id: '19', heading: 190 }],
+        'WSSS': [{ id: '02', heading: 20 }, { id: '20', heading: 200 }],
+        'VCAI': [{ id: '09', heading: 90 }, { id: '27', heading: 270 }]
+      };
+      
+      // Nếu có trong sổ tay nội bộ thì lôi ra xài
+      if (fallbackRunways[icao]) {
+        runways = fallbackRunways[icao];
+      }
+    }
+
+    // ==========================================
+    // 4. TÍNH TOÁN
+    // ==========================================
+    if (runways.length === 0) {
+      embed.addFields({ 
+        name: '⚠️ Lưu ý', 
+        value: `Sân bay **${icao}** không có dữ liệu đường băng trong hệ thống API toàn cầu lẫn Database nội bộ. Tuy nhiên, dựa vào METAR, gió đang thổi từ hướng **${windDir}°**, bạn có thể tự đối chiếu với Chart nhé!` 
+      });
+    } else {
+      let bestRunway = null;
+      let minDiff = 180;
+
+      // Tìm đường băng đón gió trực diện nhất (Headwind)
+      runways.forEach(rw => {
+        let diff = Math.abs(windDir - rw.heading);
+        if (diff > 180) diff = 360 - diff; 
+        
+        if (diff < minDiff) {
+          minDiff = diff;
+          bestRunway = rw;
+        }
+      });
+
+      // Tính Component (Dùng lượng giác để bóc tách gió ngược và ngang)
+      const angleRad = minDiff * (Math.PI / 180);
+      const headwind = Math.abs(Math.round(Math.cos(angleRad) * windSpeed));
+      const crosswind = Math.abs(Math.round(Math.sin(angleRad) * windSpeed));
+
+      embed.addFields({
+        name: '🎯 Đường băng thuận lợi nhất',
+        value: `**Runway ${bestRunway.id}** (Lệch gió so với trục đường băng: ${minDiff}°)`,
+        inline: false
+      });
+      embed.addFields({
+        name: '✈️ Phân tích thành phần gió',
+        value: `Gió ngược (Headwind): **${headwind} KT**\nGió ngang (Crosswind): **${crosswind} KT**`,
+        inline: false
+      });
+      embed.setFooter({ text: 'Lưu ý: Luôn tuân theo huấn lệnh của ATC (nếu có).' });
+    }
+
+    await interaction.editReply({ embeds: [embed] });
+  } catch (error) {
+    console.error('Runway calc error:', error);
+    await interaction.editReply({ content: '❌ Có lỗi xảy ra khi tính toán đường băng.' });
   }
 }
 
-// ========== ĐỌC DỮ LIỆU VATSIM LINKS ==========
-async function loadVatsimLinksSheet() {
-  const exists = await sheetExists(VATSIM_LINKS_SHEET_NAME);
-  if (!exists) {
-    await createVatsimLinksSheet();
-    return {};
+// ===================== TAF DECODER (CHECKWX API - SUPER DETAILED) =====================
+async function handleTaf(interaction) {
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply();
+
+  if (!CHECKWX_API_KEY) {
+    return interaction.editReply({ content: '❌ Thiếu cấu hình CHECKWX_API_KEY trong biến môi trường. Admin cần kiểm tra lại!' });
   }
 
-  const sheets = await initGoogleSheets();
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${VATSIM_LINKS_SHEET_NAME}!A2:D`, // ĐỌC ĐẾN CỘT D
-  });
-  
-  const rows = response.data.values || [];
-  const data = {};
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // Gọi API của CheckWX bản Decoded (Nó đã bóc tách sẵn mọi thứ y hệt metar-taf.com)
+    const response = await fetch(`https://api.checkwx.com/taf/${icao}/decoded`, {
+      headers: { 'X-API-Key': CHECKWX_API_KEY }
+    });
 
-  for (const row of rows) {
-    const [discordId, username, cid, imageUrl] = row;
-    if (discordId && cid) {
-      data[discordId] = {
-        cid: parseInt(cid),
-        username: username || '',
-        imageUrl: imageUrl || ''
+    if (!response.ok) {
+      return await interaction.editReply({ content: `❌ Lỗi khi lấy TAF từ server (Mã lỗi: ${response.status}).` });
+    }
+
+    const data = await response.json();
+
+    if (!data || data.results === 0 || !data.data || data.data.length === 0) {
+      return await interaction.editReply({ content: `❌ Không tìm thấy dữ liệu TAF cho sân bay **${icao}**.` });
+    }
+
+    const tafData = data.data[0];
+    
+    // Tự động phân tích thời gian hiệu lực tổng của TAF
+    const validFrom = tafData.timestamp?.from ? `Từ ${tafData.timestamp.from}` : '';
+    const validTo = tafData.timestamp?.to ? `Đến ${tafData.timestamp.to}` : '';
+
+    const embed = new EmbedBuilder()
+      .setTitle(`🌦️ TAF Decoder - ${icao}`)
+      .setDescription(`**Hiệu lực:** ${validFrom} ➔ ${validTo}\n\n**Bản gốc (Raw TAF):**\n\`\`\`${tafData.raw_text}\`\`\``)
+      .setColor(0x00A8FF) // Màu xanh dương chuyên nghiệp
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/1163/1163624.png')
+      .setTimestamp()
+      .setFooter({ text: 'Dữ liệu được bóc tách từ CheckWX Aviation API' });
+
+    if (tafData.forecast && tafData.forecast.length > 0) {
+      const MAX_FORECASTS = 6; // Hiển thị chi tiết 6 mốc thay đổi thời tiết
+      
+      tafData.forecast.slice(0, MAX_FORECASTS).forEach((fcst, index) => {
+        let fromTime = fcst.timestamp?.forecast_from || fcst.timestamp?.from;
+        let toTime = fcst.timestamp?.forecast_to || fcst.timestamp?.to;
+        let timeStr = (!fromTime && !toTime) ? 'Toàn bộ thời gian' : `${fromTime || '???'} ➔ ${toTime || '???'}`;
+        
+        let details = [];
+
+        // 1. Phân tích Gió chi tiết
+        if (fcst.wind) {
+          let windDir = fcst.wind.degrees ? `${fcst.wind.degrees}°` : 'VRB (Đổi hướng)';
+          let windStr = `**Gió:** ${windDir} ở mức **${fcst.wind.speed_kts || 0} KT**`;
+          if (fcst.wind.gust_kts) windStr += ` *(Giật mạnh lên tới ${fcst.wind.gust_kts} KT)*`;
+          details.push(`🌬️ ${windStr}`);
+        }
+        
+        // 2. Tầm nhìn
+        if (fcst.visibility?.meters) {
+          let vis = fcst.visibility.meters;
+          let visStr = vis >= 9999 ? '10km+ (Tốt)' : `${vis} mét`;
+          details.push(`👁️ **Tầm nhìn:** ${visStr}`);
+        }
+        
+        // 3. Hiện tượng thời tiết (Mưa, bão, sương mù...)
+        if (fcst.conditions && fcst.conditions.length > 0) {
+          const wx = fcst.conditions.map(c => c.text || c.code).join(', ');
+          details.push(`🌧️ **Thời tiết:** ${wx}`);
+        }
+        
+        // 4. Các tầng mây chi tiết
+        if (fcst.clouds && fcst.clouds.length > 0) {
+          const cloudDetails = fcst.clouds.map(c => {
+            let height = c.base_feet_agl || c.feet || c.base_feet || c.base;
+            if (!height && c.code) {
+              const match = c.code.match(/\d{3}/);
+              if (match) height = parseInt(match[0]) * 100;
+            }
+            const heightText = height ? `${height} ft` : 'Sát mặt đất';
+            return `**${c.text || c.code}** (${heightText})`;
+          });
+          details.push(`☁️ **Mây:** ${cloudDetails.join(' | ')}`);
+        } else {
+          details.push(`☁️ **Mây:** Trời quang (CAVOK/NSC)`);
+        }
+
+        // Đặt tên khối thay đổi cho sang chảnh
+        let indicatorCode = fcst.change?.indicator?.code || fcst.change?.indicator?.text || fcst.change?.indicator || 'INITIAL';
+        
+        // Dịch nghĩa các mã TAF
+        const indicatorMap = {
+          'TEMPO': '🟡 Biến động tạm thời (TEMPO)',
+          'BECMG': '🔵 Thay đổi dần thành (BECMG)',
+          'FM': '🟢 Bắt đầu từ (FM)',
+          'PROB30': '🟠 Xác suất 30% xảy ra (PROB30)',
+          'PROB40': '🔴 Xác suất 40% xảy ra (PROB40)',
+          'INITIAL': '✅ Dự báo ban đầu'
+        };
+        let niceIndicator = indicatorMap[indicatorCode] || `🔹 ${indicatorCode}`;
+
+        embed.addFields({
+          name: `${niceIndicator} [${timeStr}]`,
+          value: details.length > 0 ? details.join('\n') : '> Thời tiết không có hiện tượng cản trở.',
+          inline: false
+        });
+      });
+
+      if (tafData.forecast.length > MAX_FORECASTS) {
+        embed.addFields({
+          name: '...',
+          value: `*Còn ${tafData.forecast.length - MAX_FORECASTS} mốc thời gian phụ nữa được ẩn đi cho gọn.*`,
+          inline: false
+        });
+      }
+    }
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (error) {
+    console.error('TAF fetch error:', error);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi gọi CheckWX API để giải mã TAF. Vui lòng thử lại sau!' });
+  }
+}
+
+// ===================== REACTION ROLES =====================
+client.on('messageReactionAdd', async (reaction, user) => {
+  if (user.bot) return;
+  // Kéo tin nhắn về nếu nó là dạng partial (chưa có trong cache)
+  if (reaction.partial) {
+    try {
+      await reaction.fetch();
+    } catch (error) {
+      console.error('Không thể fetch message reaction:', error);
+      return;
+    }
+  }
+
+  // So sánh ID tin nhắn với ID đã lưu trong JSON
+  if (reaction.emoji.name === '🤖' && reaction.message.id === reactionRoleData.atcNotiMsgId) {
+    try {
+      const member = await reaction.message.guild.members.fetch(user.id);
+      if (member) {
+        await member.roles.add(ATC_NOTI_ROLE_ID);
+        console.log(`Đã cấp role BOT_Notification cho ${user.tag}`);
+      }
+    } catch (err) {
+      console.error('Lỗi khi cấp role BOT_Notification:', err);
+    }
+  }
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+  if (user.bot) return;
+  // Kéo tin nhắn về nếu nó là dạng partial
+  if (reaction.partial) {
+    try {
+      await reaction.fetch();
+    } catch (error) {
+      console.error('Không thể fetch message reaction:', error);
+      return;
+    }
+  }
+
+  // So sánh ID tin nhắn với ID đã lưu trong JSON
+  if (reaction.emoji.name === '🤖' && reaction.message.id === reactionRoleData.atcNotiMsgId) {
+    try {
+      const member = await reaction.message.guild.members.fetch(user.id);
+      if (member) {
+        await member.roles.remove(ATC_NOTI_ROLE_ID);
+        console.log(`Đã gỡ role ATC_Notification khỏi ${user.tag}`);
+      }
+    } catch (err) {
+      console.error('Lỗi khi xóa role ATC_Notification:', err);
+    }
+  }
+});
+
+// ===================== VATSIM STATS & ID CARD FUNCTIONS =====================
+
+/**
+ * Helper: Lấy dữ liệu VATSIM Stats qua API
+ */
+async function fetchVatsimStatsById(cid) {
+  try {
+    const fetch = (await import('node-fetch')).default;
+    
+    // 1. Lấy thông tin cơ bản
+    const infoUrl = `https://api.vatsim.net/api/ratings/${cid}/`;
+    const infoRes = await fetch(infoUrl);
+    if (!infoRes.ok) return null; // CID không tồn tại
+    const infoData = await infoRes.json();
+
+    // 2. Lấy thống kê giờ bay & ATC
+    const statsUrl = `https://api.vatsim.net/v2/members/${cid}/stats`;
+    const statsRes = await fetch(statsUrl);
+    
+    let pilotHours = 0;
+    let atcHours = 0; 
+    let atcBreakdown = {}; // Chứa chi tiết giờ S1, S2...
+    
+    if (statsRes.ok) {
+      const statsData = await statsRes.json();
+      pilotHours = statsData.pilot || 0; 
+      atcHours = statsData.atc || 0;     
+      
+      // Lấy chi tiết giờ theo từng cấp bậc ATC
+      atcBreakdown = {
+        s1: statsData.s1 || 0,
+        s2: statsData.s2 || 0,
+        s3: statsData.s3 || 0,
+        c1: statsData.c1 || 0,
+        c3: statsData.c3 || 0,
+        i1: statsData.i1 || 0,
+        i3: statsData.i3 || 0
       };
     }
+
+    return {
+      id: infoData.id,
+      rating: infoData.rating,
+      pilotrating: infoData.pilotrating,
+      region: infoData.region,
+      division: infoData.division,
+      subdivision: infoData.subdivision,
+      pilot_hours: pilotHours, 
+      atc_hours: atcHours,       
+      reg_date: infoData.reg_date,
+      atc_breakdown: atcBreakdown
+    };
+  } catch (err) {
+    console.error(`Lỗi lấy stats cho CID ${cid}:`, err.message);
+    return null;
   }
-  return data;
 }
 
-// ========== LƯU DỮ LIỆU VATSIM LINKS ==========
-async function saveVatsimLinksSheet(data) {
-  const sheets = await initGoogleSheets();
-  const sheetExistsFlag = await sheetExists(VATSIM_LINKS_SHEET_NAME);
-  if (!sheetExistsFlag) await createVatsimLinksSheet();
+/**
+ * Xử lý lệnh: /stats
+ */
+async function handleStats(interaction) {
+  await interaction.deferReply();
+  const cid = interaction.options.getInteger('vatsim_id', true);
 
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: SPREADSHEET_ID,
-    fields: 'sheets.properties',
-  });
-  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === VATSIM_LINKS_SHEET_NAME);
-  const sheetId = sheet.properties.sheetId;
+  // Lấy dữ liệu
+  const stats = await fetchVatsimStatsById(cid);
 
-  // Xóa dữ liệu cũ
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [{
-          deleteRange: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 4 }, // XÓA SẠCH 4 CỘT
-            shiftDimension: 'ROWS',
-          },
-      }],
-    },
-  });
+  if (!stats) {
+    return interaction.editReply(`❌ Không tìm thấy dữ liệu trên VATSIM cho CID **${cid}**.`);
+  }
 
-  const rows = [];
-  for (const [discordId, info] of Object.entries(data)) {
-    // Tương thích ngược: Nếu info là số (bản cũ), chuyển thành object
-    if (typeof info === 'number') {
-      rows.push([discordId, '', info, '']);
-    } else {
-      rows.push([discordId, info.username || '', info.cid || '', info.imageUrl || '']);
+  // Chuyển đổi Rating ATC
+  const vatsimRatingsSpoken = {
+    0: 'Susp', 1: 'OBS', 2: 'S1', 3: 'S2', 4: 'S3', 5: 'C1', 
+    6: 'C2', 7: 'C3', 8: 'I1', 9: 'I2', 10: 'I3', 11: 'SUP', 12: 'ADM'
+  };
+  const ratingStr = vatsimRatingsSpoken[stats.rating] || `R${stats.rating}`;
+
+  // Chuyển đổi Rating Pilot (VATSIM dùng bitmask, nhưng ta làm tròn thành Px cho chuẩn)
+  const pilotRatingMap = { 0: 'P0', 1: 'P1', 3: 'P2', 7: 'P3', 15: 'P4', 31: 'P5', 63: 'P6' };
+  const pRatingStr = pilotRatingMap[stats.pilotrating] || `P${stats.pilotrating}`;
+
+  // Xây dựng Giao Diện (Embed)
+  const embed = new EmbedBuilder()
+    .setTitle(`🔍 ${stats.id} - MEMBER INFO`)
+    .setColor(0x2b2d31) // Màu nền tối giống trong ảnh
+    .addFields(
+      // Hàng 1
+      { name: '📡 PID', value: `${stats.id}`, inline: true },
+      { name: '🗓️ REGISTER DATE', value: formatVatsimDate(stats.reg_date), inline: true },
+      { name: '\u200b', value: '\u200b', inline: true }, // Cột tàng hình để ép xuống dòng
+      
+      // Hàng 2
+      { name: '🔵 ATC RATING', value: ratingStr, inline: true },
+      { name: '✈️ PILOT RATING', value: pRatingStr, inline: true },
+      { name: '\u200b', value: '\u200b', inline: true },
+      
+      // Hàng 3
+      { name: '🌐 REGION', value: stats.region || 'N/A', inline: true },
+      { name: '🌐 DIVISION', value: stats.division || 'N/A', inline: true },
+      { name: '🌐 SUBDIVISION', value: stats.subdivision || 'N/A', inline: true },
+      
+      // Hàng 4 (Stats Time)
+      { name: '✈️ FLIGHT TIME', value: stats.pilot_hours.toFixed(2), inline: true },
+      { name: '📡 ATC TIME', value: stats.atc_hours.toFixed(2), inline: true },
+      { name: '\u200b', value: '\u200b', inline: true }
+    )
+    .setFooter({ 
+      text: `${interaction.user.username} • Via VATSIM API`, 
+      iconURL: interaction.user.displayAvatarURL() 
+    })
+    .setTimestamp();
+
+  // Thêm chi tiết giờ ATC (S1, S2...) nếu họ có làm ATC
+  if (stats.atc_hours > 0) {
+    const breakdownFields = [];
+    
+    // Duyệt qua từng cấp bậc, nếu có giờ thì mới hiển thị
+    for (const [pos, hours] of Object.entries(stats.atc_breakdown)) {
+      if (hours > 0) {
+        breakdownFields.push({ 
+          name: `🔵 ${pos.toUpperCase()}`, 
+          value: hours.toFixed(2), 
+          inline: true 
+        });
+      }
+    }
+
+    // Nếu có chi tiết, nhét thêm vào cuối Embed (tối đa 3 cột 1 hàng)
+    if (breakdownFields.length > 0) {
+      embed.addFields(breakdownFields);
     }
   }
 
-  if (rows.length === 0) return;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${VATSIM_LINKS_SHEET_NAME}!A2`,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  });
+  await interaction.editReply({ embeds: [embed] });
 }
 
-// ========== EXPORTS ==========
-module.exports = {
-  initGoogleSheets,
-  saveControllerLeaderboard,
-  savePilotLeaderboard,
-  loadControllerLeaderboard,
-  loadPilotLeaderboard,
-  createControllerSheet,
-  createPilotSheet,
-  sheetExists,
-  loadPendingUsersSheet, 
-  savePendingUsersSheet,  
-  loadSimbriefUsersSheet,
-  saveSimbriefUsersSheet,
-  loadProfilesSheet,   
-  saveProfilesSheet,
-  loadVatsimLinksSheet,
-  saveVatsimLinksSheet
-};
+async function ensureACDMMessageExists() {
+  if (!ACDM_CHANNEL_ID) return;
+  try {
+    const channel = await client.channels.fetch(ACDM_CHANNEL_ID);
+    // Quét 50 tin nhắn gần nhất trong kênh ACDM
+    const messages = await channel.messages.fetch({ limit: 50 });
+    
+    // Tìm tin nhắn do chính Bot gửi có tiêu đề ACDM Dashboard
+    const oldBotMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('ACDM Dashboard'));
+    
+    if (oldBotMsg) {
+      acdmMessageStore = { messageIds: [oldBotMsg.id], channelId: channel.id };
+      console.log(`✅ [ACDM] Đã tìm lại được tin nhắn cũ (ID: ${oldBotMsg.id}) bằng cách quét kênh!`);
+      return;
+    }
+  } catch (err) {
+      console.warn('⚠️ Lỗi khi quét tìm tin nhắn ACDM cũ:', err.message);
+  }
+
+  // Nếu không tìm thấy thì mới tạo mới
+  try {
+    const channel = await client.channels.fetch(ACDM_CHANNEL_ID);
+    const embed = new EmbedBuilder().setTitle('🛫 VCLvACC ACDM Dashboard').setDescription('Đang thiết lập kết nối API...').setTimestamp();
+    const sent = await channel.send({ embeds: [embed] });
+    
+    acdmMessageStore = { messageIds: [sent.id], channelId: channel.id };
+    console.log('🆕 [ACDM] Không thấy tin nhắn cũ, đã khởi tạo tin nhắn mới.');
+  } catch (err) {
+      console.error('❌ [ACDM] Lỗi khi tạo tin nhắn Dashboard gốc:', err);
+  }
+}
+
+// ===================== COMMAND: EVENT =====================
+async function handleEvent(interaction) {
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply();
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // Lấy dữ liệu toàn bộ event từ VATSIM
+    const response = await fetch('https://my.vatsim.net/api/v1/events/all');
+    
+    if (!response.ok) {
+      return await interaction.editReply({ content: '❌ Không thể kết nối đến hệ thống sự kiện của VATSIM.' });
+    }
+
+    const data = await response.json();
+    const events = data.data || [];
+
+    // Lọc ra các sự kiện có chứa ICAO mà user nhập vào
+    const airportEvents = events.filter(ev => {
+      if (!ev.airports || !Array.isArray(ev.airports)) return false;
+      
+      return ev.airports.some(a => {
+        // Xử lý an toàn cho cả trường hợp API trả về mảng chuỗi hoặc mảng object
+        if (typeof a === 'string') return a.toUpperCase() === icao;
+        if (a && a.icao) return a.icao.toUpperCase() === icao;
+        return false;
+      });
+    });
+
+    if (airportEvents.length === 0) {
+      return await interaction.editReply({ content: `❌ Hiện tại không có sự kiện nào sắp diễn ra tại sân bay **${icao}**.` });
+    }
+
+    const embeds = [];
+    // Cắt lấy 5 sự kiện gần nhất để tin nhắn không bị quá dài
+    const topEvents = airportEvents.slice(0, 5); 
+
+    // Tách mỗi sự kiện thành 1 Embed riêng biệt để chèn được ảnh lớn (banner)
+    topEvents.forEach((ev, index) => {
+      const startTime = new Date(ev.start_time);
+      const endTime = new Date(ev.end_time);
+      
+      const embed = new EmbedBuilder()
+        .setTitle(`📌 ${ev.name}`)
+        .setColor(0x9b59b6)
+        .addFields({
+          name: '⏰ Thời gian',
+          value: `**Bắt đầu:** <t:${Math.floor(startTime.getTime() / 1000)}:F>\n**Kết thúc:** <t:${Math.floor(endTime.getTime() / 1000)}:F>`,
+          inline: false
+        });
+
+      // Nếu API trả về link URL của sự kiện, khi user nhấn vào tiêu đề sẽ nhảy thẳng sang trang VATSIM
+      if (ev.link) {
+        embed.setURL(ev.link);
+      }
+
+      // Gắn ảnh poster của sự kiện
+      if (ev.banner) {
+        embed.setImage(ev.banner);
+      } else {
+        // Dự phòng: Nếu sự kiện nào lười không có banner, dùng thumbnail này cho đỡ trống
+        embed.setThumbnail('https://cdn-icons-png.flaticon.com/512/3652/3652191.png');
+      }
+
+      // Embed đầu tiên sẽ có dòng chữ mô tả tổng quát trên cùng
+      if (index === 0) {
+        embed.setAuthor({ 
+          name: `📅 Các sự kiện VATSIM tại ${icao}`, 
+          iconURL: 'https://cdn-icons-png.flaticon.com/512/3652/3652191.png' 
+        });
+      }
+
+      // Embed cuối cùng sẽ đóng vai trò chốt footer và báo số lượng sự kiện còn dư
+      if (index === topEvents.length - 1) {
+        let footerText = 'Dữ liệu từ my.vatsim.net';
+        if (airportEvents.length > 5) {
+          footerText += ` • Còn ${airportEvents.length - 5} sự kiện khác bị ẩn đi.`;
+        }
+        embed.setFooter({ text: footerText });
+        embed.setTimestamp();
+      }
+
+      embeds.push(embed);
+    });
+
+    // Quăng cả mảng embeds vào bot (gửi tối đa 10 Embeds/tin nhắn)
+    await interaction.editReply({ embeds: embeds });
+
+  } catch (error) {
+    console.error('Lỗi khi fetch sự kiện VATSIM:', error);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi tra cứu sự kiện.' });
+  }
+}
+// ===================== HELPER: CÀO ROUTE TỪ WEB =====================
+async function fetchRouteFromWeb(dep, arr) {
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // URL trang web chứa route
+    const url = 'https://panel.vclvacc.net/flight/info/routes/list';
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+      }
+    });
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const cheerio = require('cheerio');
+    const $ = cheerio.load(html);
+
+    let foundRoutes = [];
+
+    // Tìm trong bảng (table), duyệt qua từng hàng (tr)
+    $('table tbody tr').each((index, element) => {
+      // Cột 1 (eq 0) là Dep, Cột 2 (eq 1) là Arr, Cột 3 (eq 2) là Route
+      const rowDep = $(element).find('td').eq(0).text().trim().toUpperCase();
+      const rowArr = $(element).find('td').eq(1).text().trim().toUpperCase();
+
+      if (rowDep === dep && rowArr === arr) {
+        const routeText = $(element).find('td').eq(2).text().trim();
+        if (routeText) foundRoutes.push(routeText);
+      }
+    });
+
+    return foundRoutes.length > 0 ? foundRoutes : null;
+  } catch (err) {
+    console.error(`Lỗi khi cào route từ web cho ${dep}-${arr}:`, err.message);
+    return null;
+  }
+}
+// ===================== COMMAND: ROUTE =====================
+async function handleRoute(interaction) {
+  const dep = interaction.options.getString('dep').toUpperCase();
+  const arr = interaction.options.getString('arr').toUpperCase();
+  const routeKey = `${dep}-${arr}`;
+
+  await interaction.deferReply();
+
+  try {
+    let routesList = null;
+    let source = 'Website VCLvACC';
+
+    // 1. ƯU TIÊN TÌM TRÊN WEB TRƯỚC
+    routesList = await fetchRouteFromWeb(dep, arr);
+
+    // 2. NẾU WEB KHÔNG CÓ (HOẶC LỖI) -> TÌM TRONG FILE JSON
+    if (!routesList || routesList.length === 0) {
+      const ROUTES_FILE = path.join(__dirname, 'routes.json');
+      const routesData = fs.existsSync(ROUTES_FILE) ? JSON.parse(fs.readFileSync(ROUTES_FILE, 'utf8')) : {};
+      
+      if (routesData[routeKey] && routesData[routeKey].length > 0) {
+        routesList = routesData[routeKey];
+        source = 'File Dữ Liệu Nội Bộ';
+      }
+    }
+
+    // 3. NẾU CẢ WEB VÀ JSON ĐỀU KHÔNG CÓ
+    if (!routesList || routesList.length === 0) {
+      return await interaction.editReply({ 
+        content: `❌ Hiện tại hệ thống chưa có gợi ý route cho chặng bay **${dep} ➔ ${arr}**.\nBạn có thể tự tra cứu thêm trên SimBrief hoặc Chart nhé!` 
+      });
+    }
+
+    // ================= BẮT ĐẦU CHỈNH SỬA GIAO DIỆN =================
+    const embed = new EmbedBuilder()
+      .setColor(0x3B3F45) // Đổi màu sắc cho giống viền nền của hình ảnh (tùy chọn)
+      .setAuthor({ name: `🛰️ Route Info - ${dep} > ${arr}` }) // Thay cho title để format đẹp như hình
+      .addFields(
+        { name: '🛫 Departure', value: dep, inline: true },
+        { name: '🛬 Arrival', value: arr, inline: true }
+      );
+
+    // Xử lý chèn Route vào code block
+    if (Array.isArray(routesList)) {
+      routesList.forEach((rt, index) => {
+        embed.addFields({
+          name: `🗺️ Flight Route${routesList.length > 1 ? ` (Phương án ${index + 1})` : ''}`,
+          value: `\`\`\`\n${rt}\n\`\`\``,
+          inline: false
+        });
+      });
+    } else {
+      embed.addFields({
+        name: '🗺️ Flight Route',
+        value: `\`\`\`\n${routesList}\n\`\`\``,
+        inline: false
+      });
+    }
+
+    // Xử lý Last Update (Hiển thị ngày hiện tại nếu data từ file JSON hoặc Live từ Web)
+    const today = new Date();
+    const dateString = `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`;
+    
+    embed.addFields({
+      name: '📊 Last Update',
+      value: source === 'tk.chill' ? 'tk.chill' : dateString,
+      inline: false
+    });
+    // ================= KẾT THÚC CHỈNH SỬA GIAO DIỆN =================
+
+    // Lấy route đầu tiên để làm link Import
+    const primaryRoute = Array.isArray(routesList) ? routesList[0] : routesList;
+    const encodedRoute = encodeURIComponent(primaryRoute);
+
+    // Tạo URL Prefile cho SimBrief và VATSIM
+    const simbriefUrl = `https://dispatch.simbrief.com/options/custom?orig=${dep}&dest=${arr}&route=${encodedRoute}`;
+    const vatsimUrl = `https://my.vatsim.net/pilots/flightplan?departure=${dep}&arrival=${arr}&route=${encodedRoute}`;
+
+    // Tạo hàng chứa các nút bấm
+    const actionRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setLabel('Import to SimBrief')
+        .setStyle(ButtonStyle.Link)
+        .setURL(simbriefUrl)
+        .setEmoji('📝'),
+      new ButtonBuilder()
+        .setLabel('Import to VATSIM')
+        .setStyle(ButtonStyle.Link)
+        .setURL(vatsimUrl)
+        .setEmoji('🌐')
+    );
+
+    // Gửi phản hồi kèm theo Embed và Buttons
+    await interaction.editReply({ embeds: [embed], components: [actionRow] });
+  } catch (error) {
+    console.error('Lỗi lệnh route:', error);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi đọc/tải dữ liệu route.' });
+  }
+}
+
+// ===================== COMMAND: EDIT & CANCEL ANNOUNCEMENT =====================
+async function handleEditAnnoun(interaction) {
+  const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+  const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+  if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
+    return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+  }
+
+  const id = interaction.options.getString('id');
+  const newContent = interaction.options.getString('content');
+  const channelOpt = interaction.options.getChannel('channel') || interaction.channel;
+
+  await interaction.deferReply({ ephemeral: true });
+
+  // 1. Tìm xem có nằm trong danh sách đang chờ gửi (hẹn giờ) không
+  const scheduledIndex = scheduledAnnouncements.findIndex(a => a.id === id);
+  if (scheduledIndex !== -1) {
+    scheduledAnnouncements[scheduledIndex].content = newContent;
+    await db.saveAnnouncements(scheduledAnnouncements);
+    return interaction.editReply({ content: '✅ Đã cập nhật nội dung cho thông báo đã lên lịch!' });
+  }
+
+  // 2. Nếu không, cố gắng tìm và sửa tin nhắn đã gửi ở trong kênh
+  try {
+    const message = await channelOpt.messages.fetch(id);
+    if (message) {
+      await message.edit({ content: newContent });
+      return interaction.editReply({ content: '✅ Đã chỉnh sửa tin nhắn thành công!' });
+    }
+  } catch (err) {
+    return interaction.editReply({ content: `❌ Không tìm thấy tin nhắn với ID \`${id}\` trong kênh <#${channelOpt.id}>, hoặc nó không phải tin nhắn hẹn giờ. Nếu đây là tin nhắn đã gửi ở kênh khác, vui lòng chọn đúng mục "channel" trong lệnh.` });
+  }
+}
+
+async function handleCancelAnnoun(interaction) {
+  const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+  const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+  if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
+    return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+  }
+
+  const id = interaction.options.getString('id');
+  const initialLength = scheduledAnnouncements.length;
+  scheduledAnnouncements = scheduledAnnouncements.filter(a => a.id !== id);
+
+  if (scheduledAnnouncements.length < initialLength) {
+    await db.saveAnnouncements(scheduledAnnouncements);
+    return interaction.reply({ content: `✅ Đã hủy lịch trình gửi thông báo (ID: \`${id}\`)!`, ephemeral: true });
+  } else {
+    return interaction.reply({ content: `❌ Không tìm thấy lịch trình nào với ID: \`${id}\` (Có thể nó đã được gửi đi rồi)`, ephemeral: true });
+  }
+}
+
+// ===================== VATSEA RANK COMMAND =====================
+async function handleVatseaRankCommand(interaction) {
+  await interaction.deferReply();
+
+  const startStr = interaction.options.getString('start');
+  const endStr = interaction.options.getString('end');
+  
+  const now = new Date();
+  let startTime = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+  let endTime = now;
+
+  if (startStr) {
+    startTime = new Date(startStr);
+    if (isNaN(startTime.getTime())) {
+      return interaction.editReply({ content: '❌ Lỗi: Thời gian bắt đầu sai định dạng (Vui lòng dùng chuẩn ISO như `2023-10-01T00:00:00Z`).' });
+    }
+  }
+
+  if (endStr) {
+    endTime = new Date(endStr);
+    if (isNaN(endTime.getTime())) {
+      return interaction.editReply({ content: '❌ Lỗi: Thời gian kết thúc sai định dạng.' });
+    }
+  }
+
+  if (endTime < startTime) {
+    return interaction.editReply({ content: '❌ Thời gian kết thúc không thể đứng trước thời gian bắt đầu.' });
+  }
+
+  try {
+    const embed = await updateVatseaLeaderboardEmbed(startTime, endTime);
+    await interaction.editReply({ content: '✅ Đã cập nhật thành công bảng xếp hạng VATSEA!', embeds: [embed] });
+  } catch (error) {
+    await interaction.editReply({ content: `❌ Đã xảy ra lỗi khi tạo bảng xếp hạng VATSEA: ${error.message}` });
+  }
+}
+
+// ===================== COMMAND: NOTAM =====================
+async function handleNotam(interaction) {
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply();
+
+  if (!CHECKWX_API_KEY) {
+    return interaction.editReply({ content: '❌ Thiếu cấu hình CHECKWX_API_KEY trong biến môi trường. Admin cần kiểm tra lại!' });
+  }
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // [ĐÃ SỬA LỖI 404 TẠI ĐÂY] Endpoint đúng là notam, không phải notams
+    const response = await fetch(`https://api.checkwx.com/notam/${icao}`, {
+      headers: { 'X-API-Key': CHECKWX_API_KEY }
+    });
+
+    if (!response.ok) {
+      return await interaction.editReply({ content: `❌ Lỗi kết nối đến máy chủ CheckWX (Mã lỗi: ${response.status}).` });
+    }
+
+    const data = await response.json();
+
+    if (!data || data.results === 0 || !data.data || data.data.length === 0) {
+      return await interaction.editReply({ content: `✅ Hiện tại không có NOTAM (thông báo hàng không) nào được ban hành cho sân bay **${icao}**.` });
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle(`⚠️ Thông Báo Hàng Không (NOTAM) - ${icao}`)
+      .setColor(0xe74c3c)
+      .setTimestamp()
+      .setFooter({ text: 'Powered by CheckWX API' });
+
+    // Một sân bay có thể có rất nhiều NOTAM, chỉ hiển thị 5 cái mới/quan trọng nhất
+    const MAX_NOTAMS = Math.min(data.data.length, 5);
+    for (let i = 0; i < MAX_NOTAMS; i++) {
+      // Ưu tiên dùng dữ liệu decoded, nếu không thì lấy raw_text
+      const notamText = data.data[i].decoded || data.data[i].raw_text || 'Không có nội dung';
+      
+      // Xử lý nếu một NOTAM quá dài (chống lỗi giới hạn 1024 ký tự của Discord)
+      const safeText = notamText.length > 1000 ? notamText.slice(0, 1000) + '...' : notamText;
+      
+      embed.addFields({ 
+        name: `📌 NOTAM #${i + 1}`, 
+        value: `\`\`\`\n${safeText}\n\`\`\``, 
+        inline: false 
+      });
+    }
+
+    if (data.data.length > MAX_NOTAMS) {
+      embed.addFields({ 
+        name: '...', 
+        value: `*Còn ${data.data.length - MAX_NOTAMS} thông báo khác bị ẩn đi để tránh quá tải tin nhắn.*`, 
+        inline: false 
+      });
+    }
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (error) {
+    console.error('NOTAM fetch error:', error);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu NOTAM. Vui lòng thử lại sau!' });
+  }
+}
+
+// ===================== COMMAND: SIMBRIEF FETCHER =====================
+async function handleSimbrief(interaction) {
+  let username = interaction.options.getString('username');
+  const discordId = interaction.user.id;
+
+  await interaction.deferReply();
+
+  // 1. Kiểm tra xem user có nhập username không, nếu không thì lấy từ Google Sheets
+  if (!username) {
+    if (simbriefUsersData[discordId]) {
+      username = simbriefUsersData[discordId];
+    } else {
+      return await interaction.editReply({ 
+        content: '❌ Bạn chưa nhập username SimBrief. Lần đầu tiên sử dụng lệnh, vui lòng gõ tên username để bot ghi nhớ lại nhé!' 
+      });
+    }
+  } else {
+    // 2. Nếu có nhập thủ công, tiến hành cập nhật vào hệ thống lưu trữ
+    if (simbriefUsersData[discordId] !== username) {
+      simbriefUsersData[discordId] = username;
+      try {
+        await saveSimbriefUsersSheet(simbriefUsersData);
+      } catch (err) {
+        console.error('Lỗi khi đẩy Simbrief username lên Sheets:', err);
+      }
+    }
+  }
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // API SimBrief trả về dữ liệu chuẩn JSON khi thêm &json=1
+    const response = await fetch(`https://www.simbrief.com/api/xml.fetcher.php?username=${encodeURIComponent(username)}&json=1`);
+
+    if (!response.ok) {
+      return await interaction.editReply({ content: '❌ Không thể kết nối đến máy chủ SimBrief.' });
+    }
+
+    const data = await response.json();
+
+    // Giữ nguyên phần code còn lại của bạn...
+    if (data.fetch?.status !== 'Success') {
+      return await interaction.editReply({ 
+        content: `❌ **Lỗi:** Không tìm thấy kế hoạch bay nào của \`${username}\`.\n⚠️ *Lưu ý: Bạn phải nhấn nút "Generate Flight" trên web SimBrief trước thì bot mới đọc được nhé!*` 
+      });
+    }
+
+    // Bóc tách dữ liệu
+    const dep = data.origin?.icao_code || 'N/A';
+    const arr = data.destination?.icao_code || 'N/A';
+    const acft = data.aircraft?.icaocode || 'N/A';
+    const airline = data.general?.icao_airline || '';
+    const fltNum = data.general?.flight_number || '';
+    const callsign = airline + fltNum;
+    
+    // Xử lý Cruise Alt
+    let crzAlt = data.general?.initial_alt || 'N/A';
+    if (!crzAlt.startsWith('FL') && !isNaN(crzAlt)) {
+      crzAlt = `FL${crzAlt.substring(0, 3)}`; // Convert "35000" thành "FL350"
+    }
+
+    const route = data.general?.route || 'N/A';
+    const zfw = data.weights?.est_zfw || 0;
+    const blockFuel = data.fuel?.plan_ramp || 0;
+    const ci = data.general?.costindex || 'AUTO';
+
+    const embed = new EmbedBuilder()
+      .setTitle(`✈️ Kế Hoạch Bay (OFP) - ${username}`)
+      .setDescription(`**${dep} ➔ ${arr}** | Callsign: **${callsign || 'N/A'}**`)
+      .setColor(0x3498db)
+      .addFields(
+        { name: '🛩️ Aircraft', value: `**${acft}**`, inline: true },
+        { name: '🛫 Cruise Alt', value: `**${crzAlt}**`, inline: true },
+        { name: '📈 Cost Index', value: `**${ci}**`, inline: true },
+        { name: '⚖️ ZFW', value: `**${zfw}** kgs`, inline: true },
+        { name: '⛽ Block Fuel', value: `**${blockFuel}** kgs`, inline: true },
+        { name: '🧭 Route', value: `\`\`\`\n${route}\n\`\`\``, inline: false }
+      )
+      .setFooter({ text: 'Dữ liệu trực tiếp từ SimBrief', iconURL: 'https://www.simbrief.com/logo/simbrief_logo_icon.png' })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (error) {
+    console.error('SimBrief fetch error:', error);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra. Username không tồn tại hoặc API SimBrief bị sập.' });
+  }
+}
+
+// ===================== COMMAND: ONLINE ATC =====================
+async function handleOnlineAtc(interaction) {
+  // Lấy mã ICAO do người dùng nhập và viết hoa lên (VD: vvts -> VVTS)
+  const icao = interaction.options.getString('icao').toUpperCase();
+  
+  // Báo cho Discord biết bot đang xử lý để không bị lỗi timeout 3 giây
+  await interaction.deferReply();
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // Gọi thẳng API dữ liệu tổng của VATSIM để lấy thông tin mới nhất (Real-time)
+    const response = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
+
+    if (!response.ok) {
+      return await interaction.editReply({ content: '❌ Không thể kết nối đến máy chủ VATSIM lúc này.' });
+    }
+
+    const data = await response.json();
+    // Giả sử 'data.controllers' là mảng danh sách ATC bạn lấy từ VATSIM API
+    const onlineATCs = data.controllers.filter(controller => {
+        
+        // 1. Điều kiện 1: Callsign thuộc khu vực VCL (Việt Nam, Campuchia, Lào)
+        const isVCL = controller.callsign.startsWith('VV') || 
+                      controller.callsign.startsWith('VD') || 
+                      controller.callsign.startsWith('VL');
+
+        // 2. Điều kiện 2: KHÔNG PHẢI OBS (Rating phải lớn hơn 1)
+        // VATSIM quy định Rating 1 là OBS, từ 2 trở lên mới là ATC thật (S1, S2, S3...)
+        // Hoặc bạn có thể dùng thêm 'controller.facility > 0' vì facility 0 cũng là OBS
+        const isNotOBS = controller.rating > 1 && !controller.callsign.includes('OBS');
+
+        // Chỉ lấy những người thỏa mãn CẢ HAI điều kiện trên
+        return isVCL && isNotOBS;
+    });
+
+    // Nếu không có ai online
+    if (airportATCs.length === 0) {
+      return await interaction.editReply({ content: `📡 Hiện tại không có ATC nào đang online tại sân bay **${icao}**.` });
+    }
+
+    // Xây dựng Embed hiển thị danh sách
+    const embed = new EmbedBuilder()
+      .setTitle(`📡 ATC Đang Online - ${icao}`)
+      .setColor(0x2ecc71)
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/8144/8144342.png')
+      .setTimestamp()
+      .setFooter({ text: 'Dữ liệu trực tiếp từ VATSIM' });
+
+    // Bộ dịch Rating
+    const vatsimRatings = {
+      0: 'Susp', 1: 'OBS', 2: 'S1', 3: 'S2', 4: 'S3', 5: 'C1', 6: 'C2', 7: 'C3', 8: 'I1', 9: 'I2', 10: 'I3', 11: 'SUP', 12: 'ADM'
+    };
+
+    airportATCs.forEach(c => {
+      const rating = vatsimRatings[c.rating] || `R${c.rating}`;
+      const logonUnix = Math.floor(new Date(c.logon_time).getTime() / 1000);
+      
+      // Xử lý tần số nếu chưa set
+      const freq = (c.frequency && c.frequency !== '199.998' && c.frequency !== 199.998) 
+        ? c.frequency 
+        : 'Đang thiết lập...';
+
+      embed.addFields({
+        name: `📻 ${c.callsign}`,
+        value: `👤 **Controller:** ${c.name || 'Ẩn danh'}\n🎖️ **Rating:** ${rating}\n📶 **Tần số:** ${freq}\n⏰ **Online từ:** <t:${logonUnix}:R>`,
+        inline: false
+      });
+    });
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (error) {
+    console.error('Lỗi khi tra cứu ATC online:', error);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu từ VATSIM.' });
+  }
+}
+
+// ===================== TK.CHILL MUSIC SYSTEM (EXCLUSIVE DASHBOARD) =====================
+
+// ===================== HÀM TÍNH TOÁN THANH TRƯỢT =====================
+function parseDurationToSec(durStr) {
+    if (!durStr) return 0;
+    const parts = durStr.split(':').map(Number);
+    if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
+    if (parts.length === 2) return parts[0]*60 + parts[1];
+    return 0;
+}
+
+function formatSecToTime(sec) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function buildProgressBar(elapsedSec, totalSec) {
+    if (totalSec === 0) return `🔘▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬`;
+    const barLength = 20;
+    const progress = Math.min(elapsedSec / totalSec, 1);
+    let pos = Math.round(progress * barLength);
+    if (pos >= barLength) pos = barLength - 1; 
+
+    let bar = '';
+    for (let i = 0; i < barLength; i++) {
+        if (i === pos) bar += '🔘';
+        else bar += '▬';
+    }
+    return bar;
+}
+
+// ===================== GIAO DIỆN PREMIUM (2 HÀNG NÚT CÓ LOOP) =====================
+function createMusicDashboard(queue) {
+  if (!queue || queue.songs.length === 0) {
+      return {
+          embeds: [
+              new EmbedBuilder()
+              .setColor(0x2b2d31)
+              .setAuthor({ name: 'TK.CHILL PLAYER', iconURL: 'https://cdn-icons-png.flaticon.com/512/3844/3844724.png' })
+              .setDescription('💤 **Hàng chờ trống!** Bot đang nằm chờ ở đây. Hãy dùng lệnh `/play` để thêm nhạc tiếp nhé...')
+          ],
+          components: [] 
+      };
+  }
+
+  const currentSong = queue.songs[0];
+  const volPercent = Math.round((queue.volume || 1.0) * 100);
+
+  // TÍNH TOÁN TIẾN TRÌNH NHẠC
+  let elapsedSec = 0;
+  if (queue.resource) {
+      elapsedSec = Math.floor(queue.resource.playbackDuration / 1000);
+  }
+  const totalSec = parseDurationToSec(currentSong.durationRaw);
+  const progressBar = buildProgressBar(elapsedSec, totalSec);
+  const elapsedStr = formatSecToTime(elapsedSec);
+  
+  // Trạng thái lặp
+  const loopText = queue.loop ? '🔂 **Đang lặp:** BẬT' : '🔁 **Đang lặp:** TẮT';
+
+  const embed = new EmbedBuilder()
+    .setAuthor({ name: 'NOW PLAYING', iconURL: 'https://cdn-icons-png.flaticon.com/512/659/659056.png' })
+    .setTitle(currentSong.title)
+    .setURL(currentSong.url)
+    .setDescription(`${progressBar} \`[${elapsedStr} / ${currentSong.durationRaw}]\`\n\n> 👤 **Yêu cầu bởi:** <@${currentSong.requester}>\n> 🔊 **Âm lượng:** \`${volPercent}%\`\n> ${loopText}`)
+    .setImage(currentSong.thumbnail)
+    .setColor(0x2b2d31)
+    .setFooter({ text: `Hàng chờ: ${queue.songs.length - 1} bài • Độc quyền Tk.Chill` });
+
+  // HÀNG NÚT 1: CHUYỂN BÀI & LẶP (4 nút)
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('music_pause').setEmoji(queue.playing ? '⏸️' : '▶️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('music_skip').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('music_stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('music_loop').setEmoji(queue.loop ? '🔂' : '🔁').setStyle(queue.loop ? ButtonStyle.Success : ButtonStyle.Secondary)
+  );
+
+  // HÀNG NÚT 2: ÂM LƯỢNG (2 nút)
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('music_voldown').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('music_volup').setEmoji('🔊').setStyle(ButtonStyle.Secondary)
+  );
+
+  return { embeds: [embed], components: [row1, row2] };
+}
+
+// ===================== CỖ MÁY XỬ LÝ NHẠC (LAZY LOAD) =====================
+async function playNextSong(guildId) {
+  const queue = musicQueues.get(guildId);
+  if (!queue) return;
+
+  if (queue.progressInterval) clearInterval(queue.progressInterval);
+
+  if (queue.songs.length === 0) {
+      queue.playing = false; 
+      if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+      return;
+  }
+
+  const song = queue.songs[0];
+  try {
+    // ================= KHU VỰC LAZY LOAD (GIẢI MÃ ÂM THANH) =================
+    if (!song.url && song.resolveQuery) {
+        if (queue.dashboardMsg) await queue.dashboardMsg.edit({ 
+            embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription(`🔍 Đang tải luồng âm thanh: **${song.title.replace('🔎 Đang tìm: ', '')}**...`)], 
+            components: [] 
+        }).catch(()=>{});
+
+        // Ném tên bài hát qua kho SoundCloud để lấy link ẩn
+        const searchResults = await play.search(song.resolveQuery, { limit: 1, source: { soundcloud: 'tracks' } });
+        if (!searchResults || searchResults.length === 0) {
+            if (queue.textChannel) queue.textChannel.send(`⚠️ Bỏ qua bài **${song.title.replace('🔎 Đang tìm: ', '')}** vì không tìm thấy âm thanh thay thế.`).then(m => setTimeout(()=>m.delete().catch(()=>{}), 5000));
+            queue.songs.shift();
+            return playNextSong(guildId);
+        }
+        
+        const track = searchResults[0];
+        song.title = track.name; // Cập nhật lại tên chuẩn
+        song.url = track.url;
+        song.thumbnail = song.thumbnail || track.thumbnail;
+        
+        const mins = Math.floor(track.durationInSec / 60);
+        const secs = track.durationInSec % 60;
+        song.durationRaw = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+    // =========================================================================
+
+    // ================= KHU VỰC TẢI ÂM THANH (CHỐNG CẮT 30 GIÂY) =================
+    // Xóa bỏ đoạn ép chất lượng, để thư viện tự tải bản đầy đủ mượt nhất
+    const stream = await play.stream(song.url);
+    
+    const resource = createAudioResource(stream.stream, { 
+        inputType: stream.type, 
+        inlineVolume: true, // Vẫn giữ nút tăng giảm âm lượng
+        silencePaddingFrames: 5 
+    });
+    
+    // Nạp âm lượng mặc định
+    resource.volume.setVolume(queue.volume ?? 0.6);
+    queue.resource = resource;
+    // =========================================================================
+
+    queue.player.play(resource);
+    queue.playing = true;
+
+    const dashboardData = createMusicDashboard(queue);
+    if (queue.dashboardMsg) {
+      await queue.dashboardMsg.edit(dashboardData).catch(()=>{});
+    } else {
+      queue.dashboardMsg = await queue.textChannel.send(dashboardData);
+    }
+
+    queue.progressInterval = setInterval(async () => {
+        if (queue && queue.playing && queue.dashboardMsg && queue.songs.length > 0) {
+            await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+        }
+    }, 15000);
+
+  } catch (error) {
+    console.error(`❌ Lỗi phát bài:`, error.message);
+    queue.songs.shift(); 
+    playNextSong(guildId); 
+  }
+}
+
+// ===================== XỬ LÝ LỆNH /PLAY (HỖ TRỢ FULL PLAYLIST + LAZY LOAD) =====================
+async function handlePlayMusic(interaction) {
+  const query = interaction.options.getString('query');
+  const voiceChannel = interaction.member.voice.channel;
+
+  if (!voiceChannel) {
+    return interaction.reply({ content: '❌ Bạn phải vào một kênh thoại (Voice Channel) trước mới nghe nhạc được chứ!', ephemeral: true });
+  }
+
+  await interaction.deferReply();
+  let songsToAdd = []; // Mảng chứa các bài hát sẽ thêm vào
+
+  try {
+    const isLink = query.startsWith('http');
+    const fetch = (await import('node-fetch')).default;
+    
+    if (isLink) {
+        // -------------------------------------------------------------
+        // TRƯỜNG HỢP 1: YOUTUBE (TRACK & PLAYLIST)
+        // -------------------------------------------------------------
+        if (query.includes('youtube.com') || query.includes('youtu.be')) {
+            if (query.includes('list=')) { // Nếu là Playlist
+                const ytData = await play.playlist_info(query, { incomplete: true });
+                const tracks = await ytData.all_videos();
+                for (const t of tracks) {
+                    songsToAdd.push({
+                        title: t.title,
+                        resolveQuery: `${t.title} ${t.channel?.name || ''}`.trim(),
+                        thumbnail: t.thumbnails?.[0]?.url,
+                        durationRaw: t.durationRaw || '0:00',
+                        requester: interaction.user.id,
+                        url: null // Đánh dấu là chưa lấy âm thanh (Lazy Load)
+                    });
+                }
+            } else { // Nếu là Bài đơn
+                const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(query)}&format=json`;
+                const oembedRes = await fetch(oembedUrl);
+                if (!oembedRes.ok) return interaction.editReply('❌ Không thể đọc được link YouTube này.');
+                const oembedData = await oembedRes.json();
+                songsToAdd.push({
+                    title: oembedData.title,
+                    resolveQuery: `${oembedData.title} ${oembedData.author_name || ''}`.trim(),
+                    thumbnail: oembedData.thumbnail_url,
+                    durationRaw: '0:00',
+                    requester: interaction.user.id,
+                    url: null
+                });
+            }
+        } 
+        // -------------------------------------------------------------
+        // TRƯỜNG HỢP 2: SPOTIFY (TRACK, ALBUM, PLAYLIST) - LÕI MỚI CHỐNG LỖI 400
+        // -------------------------------------------------------------
+        else if (query.includes('spotify.com')) { 
+            try {
+                // Nhúng lõi spotify-url-info (Cào trực tiếp web, bypass API Key)
+                const { getTracks } = require('spotify-url-info')(fetch);
+                const tracks = await getTracks(query);
+                
+                for (const t of tracks) {
+                    // Chuyển đổi mili-giây sang định dạng phút:giây chuẩn
+                    const durationMs = t.duration_ms || 0;
+                    const mins = Math.floor(durationMs / 60000);
+                    const secs = Math.floor((durationMs % 60000) / 1000);
+                    
+                    songsToAdd.push({
+                        title: `${t.name} - ${t.artists ? t.artists.map(a => a.name).join(', ') : ''}`,
+                        resolveQuery: `${t.name} ${t.artists ? t.artists[0]?.name : ''}`.trim(),
+                        thumbnail: t.coverArt?.sources?.[0]?.url || null,
+                        durationRaw: durationMs > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : '0:00',
+                        requester: interaction.user.id,
+                        url: null // Bàn giao lại cho hệ thống Lazy Load (SoundCloud) tự đi tìm audio
+                    });
+                }
+            } catch (spErr) {
+                console.error('Lỗi lõi Spotify mới:', spErr);
+                return interaction.editReply('❌ Bot không thể đọc được link Spotify này (Có thể playlist đang ở chế độ Riêng tư hoặc sai link).');
+            }
+        }
+        // -------------------------------------------------------------
+        // TRƯỜNG HỢP 3: APPLE MUSIC (MỔ BỤNG MỌI THẺ JSON VÀ BẮT LỖI PRIVATE)
+        // -------------------------------------------------------------
+        else if (query.includes('music.apple.com')) {
+            try {
+                const fetch = (await import('node-fetch')).default;
+                const cheerio = require('cheerio');
+                
+                const response = await fetch(query, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                });
+                
+                if (!response.ok) throw new Error('Không thể truy cập Apple Music');
+                
+                const html = await response.text();
+                const $ = cheerio.load(html);
+                
+                let trackList = [];
+                const thumbnail = $('meta[property="og:image"]').attr('content') || null;
+
+                // CỖ MÁY ĐÀO XỚI JSON ĐA NĂNG (Quét mọi ngóc ngách của Apple)
+                const findTracks = (obj) => {
+                    if (!obj) return;
+                    if (Array.isArray(obj)) {
+                        obj.forEach(findTracks);
+                    } else if (typeof obj === 'object') {
+                        // Nếu object chứa danh sách bài hát
+                        if (Array.isArray(obj.items) && obj.items.length > 0 && obj.items[0].title && (obj.itemKind === 'trackLockup' || (obj.id && typeof obj.id === 'string' && obj.id.includes('track-list')))) {
+                            obj.items.forEach(item => {
+                                if (item.title && !trackList.some(t => t.title === item.title)) {
+                                    let artist = item.artistName || '';
+                                    if (!artist && item.subtitleLinks) {
+                                        artist = item.subtitleLinks.map(l => l.title).join(', ');
+                                    }
+                                    let durationStr = '0:00';
+                                    if (item.duration) {
+                                        const mins = Math.floor(item.duration / 60000);
+                                        const secs = Math.floor((item.duration % 60000) / 1000);
+                                        durationStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+                                    }
+                                    trackList.push({
+                                        title: `${item.title} - ${artist}`.replace(/ - $/,'').trim(),
+                                        resolveQuery: `${item.title} ${artist}`.trim(),
+                                        thumbnail: thumbnail,
+                                        durationRaw: durationStr,
+                                        requester: interaction.user.id,
+                                        url: null
+                                    });
+                                }
+                            });
+                        }
+                        // Quét tiếp vào các lớp sâu hơn
+                        Object.values(obj).forEach(findTracks);
+                    }
+                };
+
+                // Lật tung TẤT CẢ các thẻ script chứa JSON trên trang web
+                $('script[type="application/json"], script[type="application/ld+json"]').each((i, el) => {
+                    try {
+                        const parsedJSON = JSON.parse($(el).text());
+                        findTracks(parsedJSON);
+                    } catch(e) {}
+                });
+
+                // XỬ LÝ KẾT QUẢ
+                if (trackList.length > 0) {
+                    songsToAdd.push(...trackList);
+                } else {
+                    // NẾU KHÔNG TÌM THẤY BÀI NÀO TRONG PLAYLIST
+                    if (query.includes('/playlist/') || query.includes('/album/')) {
+                        return interaction.editReply('❌ **Apple Music chặn Bot đọc Playlist này!**\nLý do: Đây là Playlist **Cộng tác (Collaborative)** hoặc **Riêng tư**. Vui lòng tắt tính năng Cộng tác và chuyển thành Công khai (Public) nhé!');
+                    } else {
+                        // CỨU CÁNH CHO BÀI HÁT ĐƠN
+                        let title = $('meta[property="og:title"]').attr('content') || $('title').text();
+                        title = title.replace(/ - Single by.*/i, '').replace(/ - EP by.*/i, '').replace(/ on Apple Music/i, '').trim();
+                        
+                        songsToAdd.push({
+                            title: title,
+                            resolveQuery: title,
+                            thumbnail: thumbnail,
+                            durationRaw: '0:00',
+                            requester: interaction.user.id,
+                            url: null
+                        });
+                    }
+                }
+            } catch (apErr) {
+                console.error('Lỗi xử lý Apple Music:', apErr);
+                return interaction.editReply('❌ Bot không thể đọc được link Apple Music này do lỗi kết nối.');
+            }
+        }
+        // -------------------------------------------------------------
+        // TRƯỜNG HỢP 4: SOUNDCLOUD CHUẨN
+        // -------------------------------------------------------------
+        else if (query.includes('soundcloud.com')) {
+            const sc_type = await play.so_validate(query);
+            if (sc_type === 'playlist') {
+                const scData = await play.soundcloud(query);
+                const tracks = await scData.all_tracks();
+                for (const t of tracks) {
+                    const mins = Math.floor(t.durationInSec / 60);
+                    const secs = t.durationInSec % 60;
+                    songsToAdd.push({
+                        title: t.name,
+                        url: t.url,
+                        thumbnail: t.thumbnail,
+                        durationRaw: `${mins}:${secs.toString().padStart(2, '0')}`,
+                        requester: interaction.user.id
+                    });
+                }
+            } else {
+                const scInfo = await play.soundcloud(query);
+                const mins = Math.floor(scInfo.durationInSec / 60);
+                const secs = scInfo.durationInSec % 60;
+                songsToAdd.push({
+                    title: scInfo.name,
+                    url: scInfo.url,
+                    thumbnail: scInfo.thumbnail,
+                    durationRaw: `${mins}:${secs.toString().padStart(2, '0')}`,
+                    requester: interaction.user.id
+                });
+            }
+        } else {
+            return interaction.editReply('❌ **Đường link không hợp lệ!** Bot chỉ hỗ trợ YouTube, Spotify, Apple Music và SoundCloud.');
+        }
+    } else {
+        // TÌM KIẾM BẰNG TEXT -> Đẩy qua Lazy Load cho nhanh
+        songsToAdd.push({
+            title: `🔎 Đang tìm: ${query}...`,
+            resolveQuery: query,
+            thumbnail: null,
+            durationRaw: '0:00',
+            requester: interaction.user.id,
+            url: null
+        });
+    }
+
+    if (songsToAdd.length === 0) return interaction.editReply('❌ Không tìm thấy bài hát nào từ yêu cầu của bạn.');
+
+    let queue = musicQueues.get(interaction.guild.id);
+
+    // TẠO HÀNG CHỜ NẾU CHƯA CÓ
+    if (!queue) {
+        queue = {
+            textChannel: interaction.channel,
+            voiceChannel: voiceChannel,
+            connection: null,
+            player: createAudioPlayer(),
+            songs: [],
+            playing: false,
+            volume: 0.6,
+            dashboardMsg: null,
+            loop: false,       // <-- THÊM CỜ LOOP VÀO ĐÂY
+            forceSkip: false   // <-- Cờ ép qua bài (dù đang bật loop)
+        };
+        musicQueues.set(interaction.guild.id, queue);
+        
+        // Kết nối bot vào Voice Channel
+        queue.connection = joinVoiceChannel({
+            channelId: voiceChannel.id,
+            guildId: interaction.guild.id,
+            adapterCreator: interaction.guild.voiceAdapterCreator,
+        });
+        queue.connection.subscribe(queue.player);
+
+        // LOGIC CHUYỂN BÀI / LẶP LẠI BÀI THÔNG MINH
+        queue.player.on(AudioPlayerStatus.Idle, () => {
+            // Nếu không bật Lặp, HOẶC người dùng cố tình bấm Nút Skip -> thì vứt bài cũ đi
+            if (!queue.loop || queue.forceSkip) {
+                queue.songs.shift(); 
+            }
+            queue.forceSkip = false; // Reset lại cờ ép qua bài
+            
+            playNextSong(interaction.guild.id);
+        });
+    }
+
+    // TÍNH NĂNG MENU CHỌN BÀI / PLAYLIST (HỖ TRỢ LÊN ĐẾN 100 BÀI)
+    if (songsToAdd.length > 1) {
+        // Lưu tạm vào bộ nhớ chờ user bấm nút
+        const searchId = Date.now().toString();
+        temporarySearchResults.set(searchId, songsToAdd);
+
+        // Chỉ hiển thị 25 bài đầu tiên lên Menu Dropdown (Giới hạn của Discord)
+        const options = songsToAdd.slice(0, 25).map((song, index) => ({
+            label: song.title.length > 50 ? song.title.substring(0, 47) + '...' : song.title,
+            value: `${searchId}_${index}` 
+        }));
+
+        const menu = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('select_song')
+                .setPlaceholder('Chọn 1 bài để phát ngay...')
+                .addOptions(options)
+        );
+
+        const btnAll = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`play_all_${searchId}`)
+                .setLabel(`Phát toàn bộ ${songsToAdd.length} bài vào hàng chờ`)
+                .setStyle(ButtonStyle.Primary)
+        );
+
+        await interaction.editReply({
+            content: `🔍 Tìm thấy **${songsToAdd.length}** bài hát! Bạn muốn phát bài nào hay nạp tất cả?`,
+            components: [menu, btnAll]
+        });
+    } 
+    // TRƯỜNG HỢP TÌM THẤY CHỈ ĐÚNG 1 BÀI
+    else {
+        queue.songs.push(songsToAdd[0]);
+        await interaction.editReply(`✅ Đã thêm vào hàng chờ: **${songsToAdd[0].title.replace('🔎 Đang tìm: ', '')}**`);
+        setTimeout(() => interaction.deleteReply().catch(()=>{}), 5000);
+        
+        // Nếu bot đang ngủ (chưa hát bài nào), thì gọi dậy hát luôn
+        if (queue.songs.length === 1 || !queue.playing) {
+            playNextSong(interaction.guild.id);
+        } else {
+            if (queue.dashboardMsg) await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+        }
+    }
+
+  } catch (error) {
+    console.error('Lỗi khi tải nhạc:', error);
+    await interaction.editReply('❌ Có vẻ Playlist này để chế độ riêng tư hoặc API đang quá tải. Thử lại sau nhé!');
+  }
+} // <--- Đóng hàm handlePlayMusic tại đây
+
+// ===================== XỬ LÝ LỆNH /QUEUE =====================
+async function handleQueue(interaction) {
+  // Lấy dữ liệu hàng chờ của server hiện tại
+  const queue = musicQueues.get(interaction.guild.id);
+
+  // Nếu không có nhạc hoặc chỉ có mỗi 1 bài đang hát (hàng chờ = 0)
+  if (!queue || queue.songs.length <= 1) {
+      return interaction.reply({ 
+          content: '📭 **Hàng chờ hiện tại đang trống!** Hãy dùng lệnh `/play` để thêm nhạc vào nhé.', 
+          ephemeral: true 
+      });
+  }
+
+  // Báo cho Discord biết bot đang xử lý để không bị lỗi đỏ
+  await interaction.deferReply();
+
+  const currentSong = queue.songs[0];
+  // Cắt lấy 10 bài tiếp theo thôi để tránh tin nhắn bị quá dài (Discord giới hạn)
+  const upcomingSongs = queue.songs.slice(1, 11); 
+
+  const embed = new EmbedBuilder()
+      .setAuthor({ name: '📜 DANH SÁCH HÀNG CHỜ', iconURL: 'https://cdn-icons-png.flaticon.com/512/3281/3281289.png' })
+      .setColor(0x2b2d31)
+      .setThumbnail(currentSong.thumbnail)
+      .setDescription(`**🎵 Đang phát:**\n[${currentSong.title}](${currentSong.url})\n👤 Yêu cầu bởi: <@${currentSong.requester}>\n\n**🔜 Sắp phát tiếp theo:**`);
+
+  // Duyệt qua 10 bài tiếp theo và in ra
+  upcomingSongs.forEach((song, index) => {
+      embed.addFields({
+          name: `\`${index + 1}.\` ${song.title}`,
+          value: `⏱️ \`${song.durationRaw}\` | 👤 <@${song.requester}>`,
+          inline: false
+      });
+  });
+
+  // Nếu hàng chờ dài hơn 10 bài, báo cho người dùng biết còn bài bị ẩn
+  if (queue.songs.length > 11) {
+      embed.setFooter({ text: `...và ${queue.songs.length - 11} bài hát khác đang chờ được phát.` });
+  } else {
+      embed.setFooter({ text: `Tổng cộng có ${queue.songs.length - 1} bài trong hàng chờ.` });
+  }
+
+  await interaction.editReply({ embeds: [embed] });
+}
+
+// ===================== XỬ LÝ LỆNH /CLEAR =====================
+async function handleClearQueue(interaction) {
+    const queue = musicQueues.get(interaction.guild.id);
+
+    // Nếu không có hàng chờ hoặc chỉ có mỗi 1 bài đang hát thì không có gì để xóa
+    if (!queue || queue.songs.length <= 1) {
+        return interaction.reply({ 
+            content: '❌ Hàng chờ đang trống sẵn rồi, không có gì để dọn đâu!', 
+            ephemeral: true 
+        });
+    }
+
+    const removeCount = queue.songs.length - 1;
+    
+    // Giữ lại bài ở vị trí số 0 (đang phát), chém bay màu toàn bộ bài từ vị trí số 1 trở đi
+    queue.songs.splice(1);
+
+    await interaction.reply({ content: `🧹 Đã dọn dẹp sạch sẽ **${removeCount}** bài hát khỏi hàng chờ!` });
+    
+    // Cập nhật lại cái bảng điều khiển Dashboard ngay lập tức cho con số nó nhảy về 0
+    if (queue.dashboardMsg) {
+        await queue.dashboardMsg.edit(createMusicDashboard(queue)).catch(()=>{});
+    }
+}
+
+async function handleSetupVatsimVerify(interaction) {
+  // Bọc thép an toàn: Kiểm tra cả cache lẫn dạng mảng thô của Discord API
+  const memberRoles = interaction.member?.roles;
+  const hasAdmin = memberRoles?.cache?.has(roles.adminRoleId) || (Array.isArray(memberRoles) && memberRoles.includes(roles.adminRoleId));
+
+  if (!hasAdmin && interaction.user.id !== OWNER_ID) {
+    return interaction.reply({ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle('🔗 LIÊN KẾT TÀI KHOẢN VATSIM')
+    .setDescription('Nhấn vào nút bên dưới và nhập **VATSIM ID (CID)** của bạn để hệ thống kiểm tra dữ liệu bay và tự động cấp Role.\n\n✈️ **VATSIM Pilot:** Yêu cầu bay trên 10 giờ.\n📡 **VATSIM ATC:** Yêu cầu Rating từ S1 trở lên (Không tính OBS).')
+    .setColor(0x3498db);
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('btn_verify_pilot').setLabel('Xin Role Pilot').setStyle(ButtonStyle.Primary).setEmoji('✈️'),
+    new ButtonBuilder().setCustomId('btn_verify_atc').setLabel('Xin Role ATC').setStyle(ButtonStyle.Success).setEmoji('📡')
+  );
+
+  await interaction.channel.send({ embeds: [embed], components: [row] });
+  await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
+}
+
+
+// ===================== LOGIN =====================
+client.login(TOKEN);
+
+// === WEB SERVER & PING CHÉO ===
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot 1 is alive!');
+}).listen(port, () => {
+    console.log(`HTTP server running on port ${port}`);
+});
+
+const BOT2_URL = process.env.BOT2_URL; 
+
+if (BOT2_URL) {
+    setInterval(async () => {
+        try {
+            const response = await fetch(BOT2_URL);
+            console.log(`[Ping Chéo] Đã chọc Bot 2, Status: ${response.status}`);
+        } catch (error) {
+            console.error(`[Ping Chéo] Lỗi khi chọc Bot 2:`, error.message);
+        }
+    }, 14 * 60 * 1000);
+} else {
+    console.log("⚠️ Chưa cài BOT2_URL, tính năng Ping chéo đang tắt.");
+}
