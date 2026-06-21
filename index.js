@@ -4011,14 +4011,19 @@ client.on('messageCreate', async (message) => {
           return message.reply('❌ Vui lòng gõ mã CID của bạn kèm theo bức ảnh trong cùng một tin nhắn!');
       }
 
-      const processingMsg = await message.reply('⏳ Đang quét bức ảnh của bạn...');
+      const processingMsg = await message.reply('⏳ Đang dùng AI (Gemini) để quét bức ảnh của bạn...');
 
       try {
-          // 1. CHỐNG TRỘM: Kiểm tra Sổ đỏ Google Sheets trước
-          if (vatsimLinksCache[message.author.id] && vatsimLinksCache[message.author.id] !== userCid) {
-              return processingMsg.edit(`❌ Bạn đã liên kết với CID **${vatsimLinksCache[message.author.id]}** rồi. Mỗi tài khoản Discord chỉ được 1 CID!`);
+          // ========================================================
+          // 1. CHỐNG TRỘM: Tải lại Sổ đỏ từ Google Sheets theo thời gian thực
+          // Lệnh này ép bot phải ngó lên Google Sheets xem Admin có xóa ai không
+          // ========================================================
+          const currentVatsimLinks = await loadVatsimLinksSheet();
+
+          if (currentVatsimLinks[message.author.id] && currentVatsimLinks[message.author.id] !== userCid) {
+              return processingMsg.edit(`❌ Bạn đã liên kết với CID **${currentVatsimLinks[message.author.id]}** rồi. Mỗi tài khoản Discord chỉ được 1 CID!`);
           }
-          if (Object.values(vatsimLinksCache).includes(userCid) && vatsimLinksCache[message.author.id] !== userCid) {
+          if (Object.values(currentVatsimLinks).includes(userCid) && currentVatsimLinks[message.author.id] !== userCid) {
               return processingMsg.edit(`❌ CID **${userCid}** đã được một người khác trong Server sử dụng. Nếu bạn bị giả mạo, hãy báo Admin.`);
           }
 
@@ -4042,7 +4047,7 @@ client.on('messageCreate', async (message) => {
           }
 
           // 4. KIỂM TRA VATSIM API NHƯ CŨ
-          await processingMsg.edit(`✅ BOT xác nhận ảnh hợp lệ! Đang kéo dữ liệu từ hệ thống VATSIM...`);
+          await processingMsg.edit(`✅ Bot xác nhận ảnh hợp lệ! Đang kéo dữ liệu từ hệ thống VATSIM...`);
           const stats = await fetchVatsimStatsById(userCid);
           
           if (!stats) return processingMsg.edit(`❌ Không tìm thấy thông tin trên VATSIM cho CID **${userCid}**.`);
@@ -4074,8 +4079,9 @@ client.on('messageCreate', async (message) => {
 
           // 6. LƯU VÀO GOOGLE SHEETS ĐỂ KHÓA CHỐNG TRỘM
           if (success) {
-              vatsimLinksCache[message.author.id] = userCid;
-              await saveVatsimLinksSheet(vatsimLinksCache).catch(e => console.log('Lỗi lưu sheet CID:', e));
+              // Cập nhật lại bản mới nhất rồi lưu ngược lên Google Sheets
+              currentVatsimLinks[message.author.id] = userCid;
+              await saveVatsimLinksSheet(currentVatsimLinks).catch(e => console.log('Lỗi lưu sheet CID:', e));
           }
 
           pendingVerifyDMs.delete(message.author.id); // Dọn dẹp RAM
