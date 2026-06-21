@@ -4144,32 +4144,51 @@ client.on('messageCreate', async (message) => {
   // KHAI BÁO 1 LẦN DUY NHẤT Ở ĐÂY ĐỂ DÙNG CHUNG CHO CẢ QUOTE LẪN AI CHAT
   const isMentionedExplicitly = message.content.includes(`<@${client.user.id}>`) || message.content.includes(`<@!${client.user.id}>`);
 
-  // ================= TÍNH NĂNG TẠO QUOTE KHI REPLY + PING BOT =================
+  // ================= TÍNH NĂNG TẠO QUOTE KHI REPLY + PING BOT (CHẠY NGẦM) =================
   if (isMentionedExplicitly && message.reference && message.content.toLowerCase().includes('quote')) {
-      let processingMsg = null;
       try {
-          // Lấy tin nhắn gốc mà người dùng đang Reply
+          // Lấy tin nhắn gốc
           const targetMessage = await message.channel.messages.fetch(message.reference.messageId);
           
           if (!targetMessage.content && targetMessage.attachments.size === 0) {
               return message.reply('❌ Tin nhắn bạn reply không có nội dung chữ để tạo quote!');
           }
 
-          processingMsg = await message.reply('📸 Đang chụp ảnh trích dẫn, chờ xíu nha...');
+          // 1. Phản hồi ngay lập tức để Discord không báo lỗi Timeout
+          const processingMsg = await message.reply('📸 Đang đưa dữ liệu vào buồng tối xử lý ngầm. Bạn cứ chat bình thường nhé, lát có ảnh bot tự gửi lên...');
           
-          // Vẽ ảnh
-          const buffer = await generateQuoteImage(targetMessage);
-          const attachment = new AttachmentBuilder(buffer, { name: 'tk_quote.png' });
-          
-          // Thay vì để content rỗng '', mình nhét 1 câu nhỏ vào để chống lỗi Discord API
-          await processingMsg.edit({ content: '✨ Tuyệt tác của bạn đây:', files: [attachment] });
+          // =========================================================
+          // 2. TÁCH LUỒNG (BACKGROUND JOB)
+          // Bọc quá trình render ảnh vào một hàm tự gọi (IIFE) và KHÔNG dùng 'await' ở ngoài.
+          // Nghĩa là Bot ném cục việc này ra một góc cho Nodejs tự làm, còn Bot đi làm việc khác.
+          // =========================================================
+          (async () => {
+              try {
+                  const buffer = await generateQuoteImage(targetMessage);
+                  const attachment = new AttachmentBuilder(buffer, { name: 'tk_quote.png' });
+                  
+                  // 3. Gửi hẳn một tin nhắn MỚI (Tránh dùng edit vì Discord rất hay cúp cầu dao khi edit file nặng)
+                  await message.channel.send({ 
+                      content: `✨ <@${message.author.id}>, tuyệt tác Quote của bạn đã ra lò:`, 
+                      files: [attachment],
+                      reply: { messageReference: targetMessage.id } // Mũi tên Reply trỏ thẳng vào tin gốc cho ngầu
+                  });
+
+                  // 4. Quăng xong ảnh rồi thì xóa cái tin báo "đang chờ" đi cho sạch rác
+                  await processingMsg.delete().catch(()=>{});
+
+              } catch (err) {
+                  console.error('Lỗi khi chạy ngầm tạo quote:', err);
+                  await processingMsg.edit('❌ Buồng tối bị lỗi! Rửa ảnh thất bại do server quá tải.').catch(()=>{});
+              }
+          })(); // <-- Dấu ngoặc này để hàm tự kích hoạt chạy ngầm
+
       } catch (err) {
-          console.error('Lỗi khi tạo quote từ reply:', err);
-          if (processingMsg) {
-              await processingMsg.edit('❌ Lỗi khi vẽ ảnh quote! (Có thể do mạng hoặc ảnh đại diện bị lỗi)').catch(()=>{});
-          }
+          console.error('Lỗi lấy tin nhắn gốc:', err);
+          message.reply('❌ Lỗi không xác định được tin nhắn gốc!');
       }
-      return; // Dừng lại ở đây, không gọi Gemini AI Chat nữa
+      
+      return; // Chặn không cho AI Chat (Gemini) nhảy vào giành giật tin nhắn
   }
 
   // ================= TÍNH NĂNG 1: RÀNG BUỘC AI CHAT =================
