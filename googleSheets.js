@@ -722,6 +722,65 @@ async function loadVatsimLinksSheet() {
   return data;
 }
 
+// ========== TẠO SHEET VATSIM LINKS ==========
+async function createVatsimLinksSheet() {
+  const exists = await sheetExists(VATSIM_LINKS_SHEET_NAME);
+  if (exists) return VATSIM_LINKS_SHEET_NAME;
+
+  const sheets = await initGoogleSheets();
+  const headers = ['DiscordId', 'DiscordUsername', 'CID', 'ImageUrl']; // ĐÃ THÊM CỘT
+
+  try {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: VATSIM_LINKS_SHEET_NAME } } }],
+      },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${VATSIM_LINKS_SHEET_NAME}!A1:D1`, // MỞ RỘNG TỪ B SANG D
+      valueInputOption: 'RAW',
+      requestBody: { values: [headers] },
+    });
+    console.log(`✅ Created sheet: ${VATSIM_LINKS_SHEET_NAME}`);
+    return VATSIM_LINKS_SHEET_NAME;
+  } catch (err) {
+    console.error('Error creating VatsimLinks sheet:', err);
+    throw err;
+  }
+}
+
+// ========== ĐỌC DỮ LIỆU VATSIM LINKS ==========
+async function loadVatsimLinksSheet() {
+  const exists = await sheetExists(VATSIM_LINKS_SHEET_NAME);
+  if (!exists) {
+    await createVatsimLinksSheet();
+    return {};
+  }
+
+  const sheets = await initGoogleSheets();
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${VATSIM_LINKS_SHEET_NAME}!A2:D`, // ĐỌC ĐẾN CỘT D
+  });
+  
+  const rows = response.data.values || [];
+  const data = {};
+
+  for (const row of rows) {
+    const [discordId, username, cid, imageUrl] = row;
+    if (discordId && cid) {
+      data[discordId] = {
+        cid: parseInt(cid),
+        username: username || '',
+        imageUrl: imageUrl || ''
+      };
+    }
+  }
+  return data;
+}
+
 // ========== LƯU DỮ LIỆU VATSIM LINKS ==========
 async function saveVatsimLinksSheet(data) {
   const sheets = await initGoogleSheets();
@@ -741,7 +800,7 @@ async function saveVatsimLinksSheet(data) {
     requestBody: {
       requests: [{
           deleteRange: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 2 },
+            range: { sheetId, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 4 }, // XÓA SẠCH 4 CỘT
             shiftDimension: 'ROWS',
           },
       }],
@@ -749,8 +808,13 @@ async function saveVatsimLinksSheet(data) {
   });
 
   const rows = [];
-  for (const [discordId, cid] of Object.entries(data)) {
-    rows.push([discordId, cid]);
+  for (const [discordId, info] of Object.entries(data)) {
+    // Tương thích ngược: Nếu info là số (bản cũ), chuyển thành object
+    if (typeof info === 'number') {
+      rows.push([discordId, '', info, '']);
+    } else {
+      rows.push([discordId, info.username || '', info.cid || '', info.imageUrl || '']);
+    }
   }
 
   if (rows.length === 0) return;
