@@ -4125,7 +4125,6 @@ client.on('messageCreate', async (message) => {
   if (isEveryoneOrHere) {
     const hasAdmin = message.member?.roles.cache.has(roles.adminRoleId);
     const hasDev = message.member?.roles.cache.has(roles.devRoleId);
-    // Thay ID_ROLE_STAFF và ID_ROLE_BOT_NGAO bằng ID thật trong server của bạn
     const hasStaff = message.member?.roles.cache.has('1493908725231128617'); 
     const hasBotNgao = message.member?.roles.cache.has('1366035755079696405');
     const isOwner = message.author.id === OWNER_ID;
@@ -4134,17 +4133,18 @@ client.on('messageCreate', async (message) => {
     if (!hasAdmin && !hasDev && !hasStaff && !hasBotNgao && !isOwner) {
       await message.delete().catch(() => {});
       
-      // Gửi cảnh báo vào kênh tkchill-admin-bot (thay ID kênh tương ứng)
       const adminChannel = message.guild.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
       if (adminChannel) {
         adminChannel.send(`🚨 **CẢNH BÁO BẢO MẬT:** Người dùng ${message.author} (\`${message.author.id}\`) vừa cố gắng tag \`@everyone\` hoặc \`@here\` trái phép ở kênh ${message.channel}.\n🛑 Tin nhắn đã bị xóa tự động vì nghi ngờ tài khoản bị hack.\n💬 **Nội dung:** ${message.content}`);
       }
-      return; // Dừng việc xử lý các lệnh khác
+      return; 
     }
   }
-  // ================= TÍNH NĂNG TẠO QUOTE KHI REPLY + PING BOT =================
+
+  // KHAI BÁO 1 LẦN DUY NHẤT Ở ĐÂY ĐỂ DÙNG CHUNG CHO CẢ QUOTE LẪN AI CHAT
   const isMentionedExplicitly = message.content.includes(`<@${client.user.id}>`) || message.content.includes(`<@!${client.user.id}>`);
-  
+
+  // ================= TÍNH NĂNG TẠO QUOTE KHI REPLY + PING BOT =================
   if (isMentionedExplicitly && message.reference && message.content.toLowerCase().includes('quote')) {
       try {
           // Lấy tin nhắn gốc mà người dùng đang Reply
@@ -4164,25 +4164,20 @@ client.on('messageCreate', async (message) => {
           console.error('Lỗi khi tạo quote từ reply:', err);
           message.reply('❌ Lỗi khi vẽ ảnh quote!');
       }
-      return; // Dừng lại ở đây, không chuyển đoạn chat này cho Gemini đọc nữa
+      return; // Cực kỳ quan trọng: Làm xong Quote thì dừng lại, không cho AI Chat chen vào nhảy số nữa!
   }
 
   // ================= TÍNH NĂNG 1: RÀNG BUỘC AI CHAT =================
-  // Chỉ nhận diện là ping khi tag thẳng ID bot, không tính việc reply tin nhắn thông thường
-  const isMentionedExplicitly = message.content.includes(`<@${client.user.id}>`) || message.content.includes(`<@!${client.user.id}>`);
-
-  // Nếu ở trong kênh AI thì cứ thoải mái trả lời
   if (message.channel.id === AI_CHANNEL_ID) {
     await handleGeminiResponse(message, true);
     return;
   }
 
-  // Ở kênh ngoài, CHỈ trả lời khi được ping trực tiếp thẳng mặt
   if (isMentionedExplicitly) {
     await handleGeminiResponse(message, false);
   }
 
-  // Debug command for owner (giữ nguyên của bạn)
+  // Debug command for owner
   if (message.content === '!debug_pilot_leaderboard' && message.author.id === OWNER_ID) {
     const embed = new EmbedBuilder()
       .setTitle('Debug Pilot Leaderboard Data')
@@ -4203,7 +4198,6 @@ client.on('messageCreate', async (message) => {
     }
     await message.channel.send({ embeds: [embed] });
   }
-
 });
 
 // ===================== /TIME =====================
