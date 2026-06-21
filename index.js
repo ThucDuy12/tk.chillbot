@@ -4003,7 +4003,7 @@ client.on('messageCreate', async (message) => {
           return message.reply('❌ Bạn chưa đính kèm ảnh chụp màn hình profile VATSIM!');
       }
 
-      const processingMsg = await message.reply('⏳ Đang yêu cầu AI quét ảnh của bạn. Xin vui lòng chờ...');
+      const processingMsg = await message.reply('⏳ Đang yêu cầu BOT quét ảnh của bạn. Xin vui lòng chờ...');
 
       try {
           const attachment = message.attachments.first();
@@ -4091,7 +4091,7 @@ client.on('messageCreate', async (message) => {
 
           // 6. UPLOAD ẢNH LÊN IMGBB LẤY LINK VĨNH VIỄN
           // ========================================================
-          await processingMsg.edit(`✅ Đã cấp Role thành công! Đang lưu hồ sơ ảnh vĩnh viễn...`);
+          await processingMsg.edit(`✅ Đã cấp Role thành công!`);
           
           let permanentImageUrl = attachment.url; // Mặc định là link Discord (phòng hờ ImgBB sập)
           try {
@@ -5801,7 +5801,7 @@ client.on('messageDelete', async (message) => {
       }
       
       const attachmentsText = attachmentLinks.join('\n');
-      embed.addFields({ name: '📎 Tệp đính kèm (Đã backup vĩnh viễn)', value: attachmentsText.substring(0, 1024), inline: false });
+      embed.addFields({ name: '📎 Tệp đính kèm', value: attachmentsText.substring(0, 1024), inline: false });
       
       // Bonus: Treo thẳng cái ảnh bị xóa bự chà bá lên Log cho Admin dễ soi
       if (firstPermanentImg) {
