@@ -7125,18 +7125,21 @@ async function handleOnlineAtc(interaction) {
     }
 
     const data = await response.json();
-    const controllers = data.controllers || [];
+    // Giả sử 'data.controllers' là mảng danh sách ATC bạn lấy từ VATSIM API
+    const onlineATCs = data.controllers.filter(controller => {
+        
+        // 1. Điều kiện 1: Callsign thuộc khu vực VCL (Việt Nam, Campuchia, Lào)
+        const isVCL = controller.callsign.startsWith('VV') || 
+                      controller.callsign.startsWith('VD') || 
+                      controller.callsign.startsWith('VL');
 
-    // Lọc ra các ATC thuộc sân bay đó
-    // Tiêu chuẩn: Callsign bắt đầu bằng "ICAO_" (VD: VVTS_TWR) và không phải là OBS
-    const airportATCs = controllers.filter(c => {
-      if (!c.callsign) return false;
-      const cs = c.callsign.toUpperCase();
-      
-      const isMatch = cs.startsWith(`${icao}_`);
-      const isNotObserver = !cs.includes('OBS') && c.rating > 1; // Bỏ qua người đang học việc/ngồi ngó
-      
-      return isMatch && isNotObserver;
+        // 2. Điều kiện 2: KHÔNG PHẢI OBS (Rating phải lớn hơn 1)
+        // VATSIM quy định Rating 1 là OBS, từ 2 trở lên mới là ATC thật (S1, S2, S3...)
+        // Hoặc bạn có thể dùng thêm 'controller.facility > 0' vì facility 0 cũng là OBS
+        const isNotOBS = controller.rating > 1 && !controller.callsign.includes('OBS');
+
+        // Chỉ lấy những người thỏa mãn CẢ HAI điều kiện trên
+        return isVCL && isNotOBS;
     });
 
     // Nếu không có ai online
