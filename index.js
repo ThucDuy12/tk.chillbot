@@ -5924,14 +5924,36 @@ async function handleMetar(interaction) {
   const icao = interaction.options.getString('icao').toUpperCase();
   await interaction.deferReply(); 
   
+  // Helper tính tuổi của bản tin ATIS (bằng phút)
+  function getAtisAgeMinutes(atisText) {
+    if (!atisText) return 0;
+    // Bắt chuỗi giờ chuẩn của VATSIM, VD: 1600Z, 0532Z
+    const match = atisText.match(/\b(\d{2})(\d{2})Z\b/i);
+    if (!match) return 0;
+    
+    const now = new Date();
+    const currentTotalMins = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const atisTotalMins = parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+    
+    let age = currentTotalMins - atisTotalMins;
+    
+    // Xử lý trường hợp vắt qua ngày mới (ví dụ: Hiện tại 00:10Z, ATIS phát lúc 23:50Z)
+    if (age < -12 * 60) {
+      age += 24 * 60;
+    } else if (age < 0) {
+      age = 0; // Nếu bị âm ít (do ATC lỡ set giờ tương lai vài phút), coi như mới cứng (0 phút)
+    }
+    return age;
+  }
+
   try {
-    // 1. Ưu tiên lấy từ ATIS.guru (Hàm fetchATIS đã bao gồm tính năng tự convert ATIS sang METAR)
+    // 1. Ưu tiên lấy từ ATIS.guru
     const atisData = await fetchATIS(icao);
     
     let metarText = atisData ? atisData.metar : null;
     let hasAtis = atisData && (atisData.arrival || atisData.departure);
 
-    // 2. Fallback CheckWX: Chỉ gọi khi hoàn toàn trắng tay (Không D-ATIS và Không METAR)
+    // 2. Fallback CheckWX
     if (!metarText && !hasAtis) {
       metarText = await fetchMetarFromCheckWX(icao);
     }
@@ -5947,28 +5969,36 @@ async function handleMetar(interaction) {
     
     // 4. Xử lý hiển thị D-ATIS (Tách riêng, Gộp chung, hoặc Ẩn đi)
     if (hasAtis) {
+      
       // =========================================================
-      // LUẬT ĐẶC CÁCH CHO VVTS: Chỉ dùng Arrival ATIS như đời thực
-      // Ép bot vứt bỏ Departure ATIS (nếu có) để tránh hiển thị rác
+      // LUẬT KIỂM TRA THÔNG MINH (ANTI-GHOST ATIS TOÀN CẦU)
       // =========================================================
-      if (icao === 'VVTS') {
-        atisData.departure = null;
+      if (atisData.arrival && atisData.departure) {
+        const arrAge = getAtisAgeMinutes(atisData.arrival);
+        const depAge = getAtisAgeMinutes(atisData.departure);
+
+        // Nếu chênh lệch tuổi thọ giữa 2 bản tin lớn hơn 90 phút
+        if (Math.abs(arrAge - depAge) > 90) {
+          if (arrAge > depAge) {
+            atisData.arrival = null; // Arrival cũ nát hơn -> Chém!
+          } else {
+            atisData.departure = null; // Departure cũ nát hơn -> Chém!
+          }
+        }
       }
 
       // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr (nội dung y hệt nhau)
       if (atisData.arrival && atisData.departure && atisData.arrival === atisData.departure) {
         const formatted = formatATISText(atisData.arrival);
-        replyContent += `\n📻 **D-ATIS Chung (${icao}):**\n\`\`\`${formatted}\`\`\``;
+        replyContent += `\n📻 **D-ATIS (${icao}):**\n\`\`\`${formatted}\`\`\``;
       } 
-      // Trường hợp 2: Tách biệt rõ ràng hoặc chỉ có 1 trong 2
+      // Trường hợp 2: Tách biệt rõ ràng hoặc chỉ còn 1 cái sau khi chém rác
       else {
-        // Chỉ hiện Arrival nếu thực sự có dữ liệu
         if (atisData.arrival) {
           const formattedArr = formatATISText(atisData.arrival);
           replyContent += `\n🛬 **Arrival ATIS (${icao}):**\n\`\`\`${formattedArr}\`\`\``;
         }
         
-        // Chỉ hiện Departure nếu thực sự có dữ liệu (đã bị chặn ở VVTS)
         if (atisData.departure) {
           const formattedDep = formatATISText(atisData.departure);
           replyContent += `\n🛫 **Departure ATIS (${icao}):**\n\`\`\`${formattedDep}\`\`\``;
