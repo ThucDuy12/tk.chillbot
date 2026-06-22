@@ -338,23 +338,24 @@ async function loadAllLeaderboards() {
 
 // ===================== CLIENT =====================
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.GuildScheduledEvents,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMessageReactions, // THÊM DÒNG NÀY
-  ],
-  partials: [
-    Partials.Message,
-    Partials.Channel,
-    Partials.GuildMember,
-    Partials.MessageReaction, // THÊM DÒNG NÀY
-    Partials.User,            // THÊM DÒNG NÀY
-  ],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.GuildScheduledEvents,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildInvites, // <--- THÊM DÒNG NÀY VÀO ĐÂY
+  ],
+  partials: [
+    Partials.Message,
+    Partials.Channel,
+    Partials.GuildMember,
+    Partials.MessageReaction,
+    Partials.User,            
+  ],
 });
 
 // store active group-flight events
@@ -3517,43 +3518,51 @@ client.once('ready', async () => {
   }
 });
 
-// ===================== MEMBER ADD (AUTO ROLE & LOG) =====================
+// ===================== MEMBER JOIN / LEAVE (AUTO ROLE & LOG) =====================
 client.on('guildMemberAdd', async (member) => {
-  if (member.user.bot) return; // Bỏ qua nếu người mới join là một con Bot khác
+  if (member.user.bot) return;
 
-  // 1. Tự động cấp Role Pending (Thêm delay 2 giây để tránh lỗi kẹt API của Discord)
+  // 1. Tự động cấp Role Pending
   if (member.guild.id === GUILD_ID && roles.pendingRoleId) {
     setTimeout(async () => {
       try {
         await member.roles.add(roles.pendingRoleId);
-        
-        // --- THÊM LOGIC LƯU DATA VÀ GỬI LỜI CHÀO ---
         pendingUsersData[member.id] = {
           joinDate: member.joinedTimestamp || Date.now(), 
           notified5Days: false,
-          notified7Days: false // Đổi tên cho đồng bộ
+          notified7Days: false 
         };
         savePendingUsers();
 
         try {
           await member.send("Welcome to tk.chill server, hãy vào kênh <#1405214914662109294> để lấy role Member và trò chuyện cùng mọi người nhá. **Lưu ý nếu bạn không xin role 1 tuần kể từ ngày bạn vào server thì bot sẽ tự kick bạn ra**");
         } catch (dmErr) {
-          console.log(`[Auto-Role] Không thể gửi DM cho ${member.user.tag} (họ chặn tin nhắn người lạ)`);
+          console.log(`[Auto-Role] Không thể gửi DM cho ${member.user.tag}`);
         }
-        // ------------------------------------------
-
-        console.log(`✅ [Auto-Role] Đã tự động cấp role Welcome/Pending cho người mới: ${member.user.tag}`);
-      } catch (err) {
-        console.error(`❌ [Auto-Role] Lỗi khi cấp role cho ${member.user.tag}:`, err.message);
-      }
-    }, 2000); // Trễ 2000ms (2 giây)
+      } catch (err) {}
+    }, 2000); 
   }
   
-  // 2. Gửi Log báo cáo
+  // 2. Gửi Log báo cáo (1 lần duy nhất)
   const embed = createLogEmbed(
     '📥 Member Joined',
     `**User:** ${getUserIdentifier(member.user)}\n**ID:** ${member.user.id}\n**Account created:** <t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`,
-    0x2ecc71 // Màu xanh lá
+    0x2ecc71
+  );
+  await sendLog(embed);
+});
+
+client.on('guildMemberRemove', async (member) => {
+  // Lấy danh sách role, loại bỏ role @everyone (vì ai cũng có)
+  const roleList = member.roles.cache
+    .filter(r => r.id !== member.guild.id)
+    .map(r => `<@&${r.id}>`)
+    .join(', ') || 'Không có role nào';
+
+  const embed = createLogEmbed(
+    '📤 Member Left',
+    `**User:** ${getUserIdentifier(member.user)}\n**Joined server:** <t:${Math.floor(member.joinedTimestamp / 1000)}:R>\n**Roles trước khi out:**\n${roleList}`,
+    0xe74c3c
   );
   await sendLog(embed);
 });
@@ -4003,7 +4012,7 @@ client.on('messageCreate', async (message) => {
           return message.reply('❌ Bạn chưa đính kèm ảnh chụp màn hình profile VATSIM!');
       }
 
-      const processingMsg = await message.reply('⏳ Đang yêu cầu BOT quét ảnh của bạn. Xin vui lòng chờ...');
+      const processingMsg = await message.reply('⏳ Đang yêu cầu AI quét ảnh của bạn. Xin vui lòng chờ...');
 
       try {
           const attachment = message.attachments.first();
@@ -4013,37 +4022,50 @@ client.on('messageCreate', async (message) => {
           const base64Image = imgBuffer.toString('base64');
 
           // =========================================================================
-          // CÂU LỆNH THẦN CHÚ ÉP GEMINI LÀM CẢNH SÁT KIỂM DUYỆT ẢNH FAKE
+          // CÂU LỆNH THẦN CHÚ ÉP GEMINI ÉP KIỂM DUYỆT ẢNH VÀ TRẢ VỀ JSON CHI TIẾT
           // =========================================================================
-          const prompt = "Bạn là một hệ thống kiểm duyệt chống giả mạo. Bức ảnh này PHẢI LÀ giao diện chuẩn của trang cá nhân VATSIM (my.vatsim.net). " +
-                         "Dấu hiệu hợp lệ: Bố cục có hình đại diện, có chữ 'VATSIM ID', 'Rating', 'Region', 'Division'. " +
-                         "Nếu hình ảnh có dấu hiệu KHÔNG PHẢI giao diện web VATSIM, hoặc là ảnh chế, chỉ gửi text, gửi hình phong cảnh, hãy trả về đúng một chữ: FAKE. " +
-                         "Nếu bức ảnh đúng là giao diện hợp lệ, hãy trích xuất mã số VATSIM ID (CID - gồm 6 hoặc 7 chữ số) và trả về ĐÚNG MỘT DÒNG chứa mã số đó.";
-                         
+          const prompt = `Bạn là một hệ thống kiểm duyệt chống giả mạo. Bức ảnh này PHẢI LÀ giao diện chuẩn của trang cá nhân VATSIM (my.vatsim.net).
+Nhiệm vụ của bạn là trích xuất chính xác thông tin trên ảnh và trả về ĐÚNG ĐỊNH DẠNG JSON. Không giải thích thêm.
+Nếu ảnh là phong cảnh, meme, không có giao diện VATSIM, hãy trả về: {"fake": true}
+Nếu ảnh hợp lệ, hãy trả về JSON:
+{
+  "fake": false,
+  "cid": 1234567,
+  "region": "Region ghi trên ảnh (nếu có)",
+  "division": "Division ghi trên ảnh (nếu có)"
+}`;
+                          
           const imagePart = { inlineData: { data: base64Image, mimeType: attachment.contentType } };
 
           const aiResult = await geminiModel.generateContent([prompt, imagePart]);
           const aiExtractedText = aiResult.response.text().trim();
 
+          // Xử lý dữ liệu JSON do AI trả về
+          let aiData;
+          try {
+              const cleanText = aiExtractedText.replace(/```json/g, '').replace(/```/g, '').trim();
+              aiData = JSON.parse(cleanText);
+          } catch(e) {
+              return processingMsg.edit("❌ Bot không thể đọc dữ liệu từ ảnh do ảnh bị mờ, nhòe hoặc lỗi cấu trúc. Vui lòng chụp rõ nét hơn.");
+          }
+
           // Kiểm tra xem AI có chê ảnh fake không
-          if (aiExtractedText.includes('FAKE') || aiExtractedText.includes('NOT_FOUND')) {
+          if (aiData.fake || !aiData.cid) {
               return processingMsg.edit(`❌ **BOT TỪ CHỐI XÁC THỰC!**\nBức ảnh này không giống giao diện chuẩn của trang my.vatsim.net hoặc cắt ghép quá sơ sài. Vui lòng chụp full màn hình rõ nét!`);
           }
 
-          // Rút mã CID từ kết quả của AI
-          const aiCid = parseInt(aiExtractedText.replace(/[^0-9]/g, ''));
+          const aiCid = parseInt(aiData.cid);
           if (isNaN(aiCid) || aiCid < 10000) {
               return processingMsg.edit(`❌ **Xác thực thất bại!**\nBOT không thể tìm thấy mã số CID hợp lệ trong bức ảnh này. Vui lòng chụp lại rõ ràng hơn.`);
           }
 
-          await processingMsg.edit(`🔍 BOT đã quét được CID: **${aiCid}**. Đang kiểm tra an ninh Sổ Đỏ...`);
+          await processingMsg.edit(`🔍 BOT đã quét được CID: **${aiCid}**. Đang kiểm tra an ninh Sổ Đỏ và Đối chiếu chéo (Cross-check)...`);
 
           // ========================================================
-          // CHỐNG TRỘM: KIỂM TRA SỔ ĐỎ
+          // CHỐNG TRỘM 1: KIỂM TRA SỔ ĐỎ XEM CID NÀY ĐÃ AI GIỮ CHƯA
           // ========================================================
           const currentVatsimLinks = await loadVatsimLinksSheet();
           
-          // Helper móc CID an toàn (Vì giờ data nó lưu nguyên cục object {cid, username, imageurl})
           const getCid = (val) => typeof val === 'object' ? val.cid : val;
           const existingData = currentVatsimLinks[message.author.id];
           const existingCid = existingData ? getCid(existingData) : null;
@@ -4058,13 +4080,39 @@ client.on('messageCreate', async (message) => {
           }
 
           // ========================================================
-          // KÉO DỮ LIỆU VATSIM API VÀ CẤP ROLE
+          // CHỐNG TRỘM 2: ĐỐI CHIẾU CHÉO (CROSS-CHECK) F12 INSPECT
           // ========================================================
-          await processingMsg.edit(`✅ An ninh thông qua! Đang đối chiếu máy chủ VATSIM...`);
           const stats = await fetchVatsimStatsById(aiCid);
           
           if (!stats) return processingMsg.edit(`❌ CID **${aiCid}** không tồn tại trên hệ thống dữ liệu VATSIM.`);
           if (stats.rating === 0) return processingMsg.edit(`❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.`);
+
+          // Hàm bình chuẩn hóa chuỗi (Viết thường, xóa khoảng trắng) để đối chiếu OCR sai số nhẹ
+          const normalize = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          
+          const imgRegion = normalize(aiData.region);
+          const apiRegion = normalize(stats.region);
+          const imgDivision = normalize(aiData.division);
+          const apiDivision = normalize(stats.division);
+          
+          // Kiểm tra xem Region/Division trên ảnh có khớp với dữ liệu thật của API không
+          if ((apiRegion && imgRegion && !imgRegion.includes(apiRegion) && !apiRegion.includes(imgRegion)) ||
+              (apiDivision && imgDivision && !imgDivision.includes(apiDivision) && !apiDivision.includes(imgDivision))) {
+              
+              // CẢNH BÁO F12 PHÁT HIỆN
+              await sendLog(createLogEmbed(
+                  '🚨 Gian lận Xác Thực VATSIM', 
+                  `**User:** ${getUserIdentifier(message.author)}\n**CID Khai báo:** ${aiCid}\n\n**Lý do từ chối:** Có dấu hiệu dùng F12 (Inspect Element) để đổi mã CID.\n- Region trên ảnh: \`${aiData.region}\` | Thực tế: \`${stats.region}\`\n- Division trên ảnh: \`${aiData.division}\` | Thực tế: \`${stats.division}\``, 
+                  0xff0000
+              ));
+
+              return processingMsg.edit(`🚨 **PHÁT HIỆN GIAN LẬN!**\nThông tin Region/Division trên ảnh không khớp với dữ liệu gốc của CID **${aiCid}** trên máy chủ VATSIM.\nVui lòng không sử dụng F12 (Inspect Element) để thay đổi mã nguồn trang web! Hành vi này đã được báo cáo cho Admin.`);
+          }
+
+          // ========================================================
+          // KẾT THÚC ĐỐI CHIẾU - BẮT ĐẦU CẤP ROLE
+          // ========================================================
+          await processingMsg.edit(`✅ An ninh thông qua, dữ liệu khớp 100%! Đang tiến hành cấp Role...`);
 
           const guild = await client.guilds.fetch(verifySession.guildId);
           const member = await guild.members.fetch(message.author.id);
@@ -4089,40 +4137,29 @@ client.on('messageCreate', async (message) => {
               }
           }
 
-          // 6. UPLOAD ẢNH LÊN IMGBB LẤY LINK VĨNH VIỄN
           // ========================================================
-          await processingMsg.edit(`✅ Đã cấp Role thành công!`);
+          // UPLOAD ẢNH LÊN IMGBB LẤY LINK VĨNH VIỄN & LƯU GOOGLE SHEETS
+          // ========================================================
+          await processingMsg.edit(`✅ Quá trình duyệt hoàn tất! Đang lưu hồ sơ ảnh vĩnh viễn...`);
           
-          let permanentImageUrl = attachment.url; // Mặc định là link Discord (phòng hờ ImgBB sập)
+          let permanentImageUrl = attachment.url; 
           try {
               if (process.env.IMGBB_API_KEY) {
-                  // base64Image là cái biến mình đã tải sẵn ở bước 2 cho AI đọc đó, giờ xài lại luôn
                   const params = new URLSearchParams();
                   params.append('image', base64Image);
-                  
-                  const imgbbRes = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
-                      method: 'POST',
-                      body: params
-                  });
-                  
+                  const fetch = require('node-fetch');
+                  const imgbbRes = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, { method: 'POST', body: params });
                   const imgbbData = await imgbbRes.json();
                   if (imgbbData && imgbbData.data && imgbbData.data.url) {
-                      // Thay link Discord tự hủy bằng link ImgBB vĩnh viễn
                       permanentImageUrl = imgbbData.data.url; 
                   }
               }
-          } catch (imgErr) {
-              console.error('Lỗi up ảnh lên ImgBB:', imgErr);
-          }
+          } catch (imgErr) { console.error('Lỗi up ảnh lên ImgBB:', imgErr); }
 
-          // ========================================================
-          // 7. LƯU VÀO GOOGLE SHEETS ĐỂ KHÓA CHỐNG TRỘM
-          // ========================================================
           if (success) {
               currentVatsimLinks[message.author.id] = {
                   cid: aiCid,
                   username: message.author.username,
-                  // Dùng công thức =IMAGE() để Google Sheets tự hiển thị ảnh ra ô tính
                   imageUrl: `=IMAGE("${permanentImageUrl}")` 
               };
               await saveVatsimLinksSheet(currentVatsimLinks).catch(e => console.log('Lỗi lưu sheet CID:', e));
@@ -4133,7 +4170,7 @@ client.on('messageCreate', async (message) => {
 
       } catch (err) {
           console.error("Lỗi xác thực DM:", err);
-          return processingMsg.edit("❌ Đã có lỗi xảy ra trong quá trình quét AI hoặc kéo dữ liệu. Vui lòng thử lại sau.");
+          return processingMsg.edit("❌ Đã có lỗi xảy ra trong quá trình quét AI hoặc kéo dữ liệu. Vui lòng chụp lại ảnh khác và thử lại!");
       }
   }
 
@@ -5062,6 +5099,13 @@ async function handleButton(interaction) {
       
       await interaction.deferReply({ ephemeral: true });
 
+      // === LOG: BÁO CÁO CÓ NGƯỜI BẤM NÚT ===
+      await sendLog(createLogEmbed(
+          '🔘 Xác thực VATSIM', 
+          `**User:** ${getUserIdentifier(interaction.user)}\n**Hành động:** Vừa bấm nút xin role **${roleType.toUpperCase()}**`, 
+          0x3498db
+      ));
+
       try {
           // Đưa user vào danh sách chờ nhận DM
           pendingVerifyDMs.set(interaction.user.id, {
@@ -5076,13 +5120,28 @@ async function handleButton(interaction) {
               `Để hoàn tất, hãy gửi cho mình **1 tấm ảnh chụp màn hình** trang Profile VATSIM chính thức (my.vatsim.net).\n` +
               `⚠️ **LƯU Ý QUAN TRỌNG:**\n` +
               `- Ảnh phải thể hiện rõ giao diện trang web, có chữ VATSIM ID, Tên, Rating...\n` +
-              `- KHÔNG cần gõ mã số, hệ thống AI sẽ tự động soi ảnh của bạn.\n\n` +
+              `- KHÔNG cần gõ mã số, hệ thống BOT sẽ tự động soi ảnh của bạn.\n\n` +
               `*(Bạn có 5 phút để gửi ảnh, hãy thả ảnh vào đây nhé!)*`
           );
+
+          // === LOG: BÁO CÁO GỬI DM THÀNH CÔNG ===
+          await sendLog(createLogEmbed(
+              '✉️ DM Sent (Thành công)', 
+              `**User:** ${getUserIdentifier(interaction.user)}\nBot đã gửi DM yêu cầu ảnh thành công. Đang chờ người dùng phản hồi...`, 
+              0x2ecc71
+          ));
 
           return interaction.editReply({ content: '✅ Bot đã nhắn tin riêng (DM) cho bạn để xác thực. Vui lòng kiểm tra mục tin nhắn trực tiếp!' });
       } catch (err) {
           pendingVerifyDMs.delete(interaction.user.id);
+          
+          // === LOG: BÁO CÁO GỬI DM THẤT BẠI ===
+          await sendLog(createLogEmbed(
+              '⚠️ DM Failed (Thất bại)', 
+              `**User:** ${getUserIdentifier(interaction.user)}\nBot KHÔNG THỂ gửi tin nhắn riêng cho người này vì họ đã tắt tính năng nhận tin nhắn từ người lạ.`, 
+              0xe74c3c
+          ));
+
           return interaction.editReply({ content: '❌ Bot không thể nhắn tin DM cho bạn. **Vui lòng vào Cài đặt Quyền riêng tư của Server và Bật "Cho phép tin nhắn trực tiếp"**, sau đó thử lại!' });
       }
   }
@@ -5631,27 +5690,6 @@ async function ensureVatsimMessageExists() {
     console.error('❌ Không thể dọn dẹp và tạo tin nhắn VATSIM gốc:', err);
   }
 }
-// ===================== LOGGING: MEMBER JOIN/LEAVE =====================
-client.on('guildMemberAdd', async (member) => {
-  // Existing role assignment code remains...
-  
-  // Log member join
-  const embed = createLogEmbed(
-    '📥 Member Joined',
-    `**User:** ${member.user.tag}\n**ID:** ${member.user.id}\n**Account created:** <t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`,
-    0x2ecc71 // Green
-  );
-  await sendLog(embed);
-});
-
-client.on('guildMemberRemove', async (member) => {
-  const embed = createLogEmbed(
-    '📤 Member Left',
-    `**User:** ${getUserIdentifier(member.user)}\n**Joined server:** <t:${Math.floor(member.joinedTimestamp / 1000)}:R>\n**Roles:** ${member.roles.cache.map(r => r.name).join(', ') || 'None'}`,
-    0xe74c3c
-  );
-  await sendLog(embed);
-});
 // ===================== LOGGING: ROLE CHANGES =====================
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
   if (!oldMember || !newMember) return;
@@ -5716,21 +5754,29 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
     if (added.length === 0 && removed.length === 0) return;
 
-    let description = `**User:** ${getUserIdentifier(newMember.user)}\n`;
-    if (added.length) {
-      description += `\n**➕ Roles Added:**\n${added.map(r => `• ${r.name} (${r.id})`).join('\n')}`;
-    }
-    if (removed.length) {
-      description += `\n\n**➖ Roles Removed:**\n${removed.map(r => `• ${r.name} (${r.id})`).join('\n')}`;
-    }
+    let description = `**User:** ${getUserIdentifier(newMember.user)}\n`;
+    if (added.length) {
+      description += `\n**➕ Role Added:**\n${added.map(r => `• <@&${r.id}>`).join('\n')}`;
+    }
+    if (removed.length) {
+      description += `\n**➖ Role Removed:**\n${removed.map(r => `• <@&${r.id}>`).join('\n')}`;
+    }
 
-    const embed = createLogEmbed('👥 Member Roles Updated', description, 0xf39c12);
-    if (roleLog.executor) {
-      embed.addFields({ name: '🛠️ Action by', value: getUserIdentifier(roleLog.executor), inline: false });
-    }
+    // Lấy danh sách các Role HIỆN TẠI của user sau khi đã update
+    const currentRoles = newMember.roles.cache
+      .filter(r => r.id !== newMember.guild.id) // Bỏ qua @everyone
+      .map(r => `<@&${r.id}>`)
+      .join(', ') || 'Không có role nào';
+      
+    description += `\n\n**📋 Role hiện tại:**\n${currentRoles}`;
 
-    await sendLog(embed);
-  } catch (err) {
+    const embed = createLogEmbed('👥 Member Roles Updated', description, 0xf39c12);
+    if (roleLog.executor) {
+      embed.addFields({ name: '🛠️ Action by', value: getUserIdentifier(roleLog.executor), inline: false });
+    }
+
+    await sendLog(embed);
+  } catch (err) {
     console.error('Error in guildMemberUpdate:', err);
   }
 });
@@ -5920,6 +5966,20 @@ client.on('threadDelete', async (thread) => {
   await sendLog(embed);
 });
 
+// ===================== LOGGING: INVITE CREATED =====================
+client.on('inviteCreate', async (invite) => {
+  if (!invite.guild) return;
+  
+  const maxUses = invite.maxUses === 0 ? 'Vô hạn' : invite.maxUses;
+  const expires = invite.expiresTimestamp ? `<t:${Math.floor(invite.expiresTimestamp / 1000)}:R>` : 'Vĩnh viễn';
+
+  const embed = createLogEmbed(
+    '🔗 Invite Link Created', 
+    `**Người tạo:** ${getUserIdentifier(invite.inviter)}\n**Kênh:** ${getChannelIdentifier(invite.channel)}\n**Link Code:** \`${invite.code}\`\n**URL:** ${invite.url}\n**Lượt dùng tối đa:** ${maxUses}\n**Hết hạn:** ${expires}`, 
+    0x9b59b6
+  );
+  await sendLog(embed);
+});
 
 // ===================== ATIS FETCH (UPGRADED SCRAPER) =====================
 
