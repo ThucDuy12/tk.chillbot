@@ -5690,95 +5690,60 @@ async function ensureVatsimMessageExists() {
     console.error('❌ Không thể dọn dẹp và tạo tin nhắn VATSIM gốc:', err);
   }
 }
-// ===================== LOGGING: ROLE CHANGES =====================
+
+// ===================== LOGGING: ROLE CHANGES (SIÊU CHUẨN XÁC) =====================
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
-  if (!oldMember || !newMember) return;
+  if (!oldMember || !newMember) return;
 
-  // Chờ 1.5 giây để audit log được ghi
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  // 1. So sánh trực tiếp bộ nhớ đệm (Cache) - Không bao giờ sai lệch
+  const oldRoles = oldMember.roles.cache;
+  const newRoles = newMember.roles.cache;
+  
+  // Nếu số lượng role không đổi (đổi tên, đổi avatar...) thì bỏ qua
+  if (oldRoles.size === newRoles.size) return; 
+  
+  // Tìm ra những role vừa được add và vừa bị remove
+  const addedRoles = newRoles.filter(role => !oldRoles.has(role.id));
+  const removedRoles = oldRoles.filter(role => !newRoles.has(role.id));
+  
+  if (addedRoles.size === 0 && removedRoles.size === 0) return;
 
-  try {
-    const fetchedLogs = await newMember.guild.fetchAuditLogs({ type: 25, limit: 5 });
-    // Tìm entry khớp với user và thời gian gần đây
-    const roleLog = fetchedLogs.entries.find(entry =>
-      entry.target.id === newMember.id &&
-      Math.abs(entry.createdTimestamp - Date.now()) < 6000
-    );
+  let description = `**User:** ${getUserIdentifier(newMember.user)}\n`;
+  
+  if (addedRoles.size > 0) {
+    description += `\n**➕ Role Added:**\n${addedRoles.map(r => `• <@&${r.id}>`).join('\n')}`;
+  }
+  if (removedRoles.size > 0) {
+    description += `\n**➖ Role Removed:**\n${removedRoles.map(r => `• <@&${r.id}>`).join('\n')}`;
+  }
 
-    if (!roleLog) return; // Không tìm thấy, bỏ qua
+  // Lấy danh sách Role HIỆN TẠI
+  const currentRoles = newMember.roles.cache
+    .filter(r => r.id !== newMember.guild.id) // Bỏ qua @everyone
+    .map(r => `<@&${r.id}>`)
+    .join(', ') || 'Không có role nào';
+    
+  description += `\n\n**📋 Role hiện tại:**\n${currentRoles}`;
 
-    const added = [];
-    const removed = [];
+  const embed = createLogEmbed('👥 Member Roles Updated', description, 0xf39c12);
 
-    // Duyệt qua các changes trong audit log
-    for (const change of roleLog.changes || []) {
-      if (change.key === '$add') {
-        // Thêm role
-        if (change.new && Array.isArray(change.new)) {
-          for (const item of change.new) {
-            if (item.id && item.name) added.push(item);
-          }
-        }
-      } else if (change.key === '$remove') {
-        // Xóa role
-        if (change.old && Array.isArray(change.old)) {
-          for (const item of change.old) {
-            if (item.id && item.name) removed.push(item);
-          }
-        }
-      }
-    }
-
-    // Nếu không tìm thấy qua $add/$remove, thử cách khác: so sánh trực tiếp role IDs
-    if (added.length === 0 && removed.length === 0) {
-      // Fetch lại member để có dữ liệu mới nhất
-      const freshOld = await newMember.guild.members.fetch(oldMember.id).catch(() => oldMember);
-      const freshNew = await newMember.guild.members.fetch(newMember.id).catch(() => newMember);
-      
-      const oldRoleIds = new Set(freshOld.roles.cache.map(r => r.id));
-      const newRoleIds = new Set(freshNew.roles.cache.map(r => r.id));
-      
-      for (const id of newRoleIds) {
-        if (!oldRoleIds.has(id)) {
-          const role = freshNew.guild.roles.cache.get(id);
-          if (role) added.push({ id: role.id, name: role.name });
-        }
-      }
-      for (const id of oldRoleIds) {
-        if (!newRoleIds.has(id)) {
-          const role = freshOld.guild.roles.cache.get(id);
-          if (role) removed.push({ id: role.id, name: role.name });
-        }
-      }
-    }
-
-    if (added.length === 0 && removed.length === 0) return;
-
-    let description = `**User:** ${getUserIdentifier(newMember.user)}\n`;
-    if (added.length) {
-      description += `\n**➕ Role Added:**\n${added.map(r => `• <@&${r.id}>`).join('\n')}`;
+  // 2. Chờ xíu để tra Audit Log xem thằng nào táy máy tay chân
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    const fetchedLogs = await newMember.guild.fetchAuditLogs({ type: 25, limit: 1 });
+    const roleLog = fetchedLogs.entries.first();
+    
+    // Nếu log khớp với user này và vừa xảy ra trong vòng 5 giây
+    if (roleLog && roleLog.target.id === newMember.id && Math.abs(roleLog.createdTimestamp - Date.now()) < 5000) {
+      if (roleLog.executor) {
+        embed.addFields({ name: '🛠️ Action by', value: getUserIdentifier(roleLog.executor), inline: false });
+      }
     }
-    if (removed.length) {
-      description += `\n**➖ Role Removed:**\n${removed.map(r => `• <@&${r.id}>`).join('\n')}`;
-    }
-
-    // Lấy danh sách các Role HIỆN TẠI của user sau khi đã update
-    const currentRoles = newMember.roles.cache
-      .filter(r => r.id !== newMember.guild.id) // Bỏ qua @everyone
-      .map(r => `<@&${r.id}>`)
-      .join(', ') || 'Không có role nào';
-      
-    description += `\n\n**📋 Role hiện tại:**\n${currentRoles}`;
-
-    const embed = createLogEmbed('👥 Member Roles Updated', description, 0xf39c12);
-    if (roleLog.executor) {
-      embed.addFields({ name: '🛠️ Action by', value: getUserIdentifier(roleLog.executor), inline: false });
-    }
-
-    await sendLog(embed);
   } catch (err) {
-    console.error('Error in guildMemberUpdate:', err);
-  }
+    console.error('Lỗi rà soát Audit Log:', err.message);
+  }
+
+  await sendLog(embed);
 });
 
 // ===================== LOGGING: MESSAGE DELETE =====================
