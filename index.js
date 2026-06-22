@@ -147,6 +147,7 @@ async function savePendingUsers() {
 }
 
 
+
 // Bộ nhớ tạm để lưu ảnh khi user mở Form (Modal)
 const userSellImages = new Map();
 
@@ -291,8 +292,6 @@ let pilotLeaderboardData = { month: null, year: null, pilots: {} };
 let isLeaderboardLoaded = false;
 let scheduledAnnouncements = [];
 const pendingAnnouncements = new Map(); // Bộ nhớ tạm để lưu tin nhắn chờ user bấm nút Okay/Reject
-
-
 
 let reactionRoleData = fs.existsSync(REACTION_ROLES_FILE) 
   ? JSON.parse(fs.readFileSync(REACTION_ROLES_FILE, 'utf8')) 
@@ -5132,6 +5131,29 @@ async function handleButton(interaction) {
           0x3498db
       ));
 
+      // ID Role thật của sếp
+      const PILOT_ROLE_ID = '1517724342270558218'; 
+      const ATC_ROLE_ID = '1393133850640781383';
+      const member = interaction.member;
+
+      // --- LOGIC VƯỢT RÀO (BYPASS) ---
+      // 1. Nếu đang xin role Pilot, MÀ trong người đã có sẵn role ATC -> Duyệt luôn!
+      if (roleType === 'pilot' && member.roles.cache.has(ATC_ROLE_ID)) {
+          await member.roles.add(PILOT_ROLE_ID).catch(()=>{});
+          return interaction.editReply({ 
+              content: '✅ **Thành công!** Hệ thống nhận thấy bạn đã xác thực hồ sơ VATSIM trước đó. Đã cấp thêm role **Pilot** cho bạn!' 
+          });
+      }
+
+      // 2. Nếu đang xin role ATC, MÀ trong người đã có sẵn role Pilot -> Duyệt luôn!
+      if (roleType === 'atc' && member.roles.cache.has(PILOT_ROLE_ID)) {
+          await member.roles.add(ATC_ROLE_ID).catch(()=>{});
+          return interaction.editReply({ 
+              content: '✅ **Thành công!** Hệ thống nhận thấy bạn đã xác thực hồ sơ VATSIM trước đó. Đã cấp thêm role **ATC** cho bạn!' 
+          });
+      }
+      // -------------------------------
+
       try {
           // 1. Dọn dẹp đồng hồ cũ nếu user bấm nút nhiều lần liên tục
           if (pendingVerifyDMs.has(interaction.user.id)) {
@@ -5149,7 +5171,7 @@ async function handleButton(interaction) {
           // 3. Lưu phiên làm việc mới kèm theo cái đồng hồ
           pendingVerifyDMs.set(interaction.user.id, {
               guildId: interaction.guild.id,
-              roleType: interaction.customId.includes('pilot') ? 'pilot' : 'atc', // (Sếp chỉnh lại chỗ này cho khớp với biến lấy roleType của sếp nhé)
+              roleType: roleType,
               expires: Date.now() + 5 * 60 * 1000,
               timeoutId: expireTimer
           });
@@ -7900,6 +7922,161 @@ async function handleSetupVatsimVerify(interaction) {
   await interaction.channel.send({ embeds: [embed], components: [row] });
   await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
 }
+
+// ===================== SIÊU LOGGING: BẮT TRỌN MỌI CHUYỂN ĐỘNG CỦA SERVER =====================
+
+// 1. LOG ĐỔI TÊN NICKNAME (Biệt danh trong Server)
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+    // Discord.js cho phép nhiều event guildMemberUpdate chạy cùng lúc nên không sợ đụng cái log role hồi nãy
+    if (oldMember.nickname !== newMember.nickname) {
+        const oldNick = oldMember.nickname || oldMember.user.username;
+        const newNick = newMember.nickname || newMember.user.username;
+        const embed = createLogEmbed(
+            '🏷️ Nickname Updated',
+            `**User:** ${getUserIdentifier(newMember.user)}\n**Từ:** \`${oldNick}\`\n**Thành:** \`${newNick}\``,
+            0x3498db
+        );
+        await sendLog(embed);
+    }
+});
+
+// 2. LOG ĐỔI TÊN USERNAME GLOBALLY (Tên tài khoản Discord gốc)
+client.on('userUpdate', async (oldUser, newUser) => {
+    if (oldUser.username !== newUser.username) {
+        const embed = createLogEmbed(
+            '👤 Username Updated',
+            `**User:** <@${newUser.id}>\n**Từ:** \`${oldUser.username}\`\n**Thành:** \`${newUser.username}\``,
+            0x2980b9
+        );
+        await sendLog(embed);
+    }
+});
+
+// 3. LOG KÊNH (Tạo mới, Xóa, Đổi tên)
+
+client.on('channelUpdate', async (oldChannel, newChannel) => {
+    if (!oldChannel.guild) return;
+    // Log nếu đổi tên kênh
+    if (oldChannel.name !== newChannel.name) {
+        const embed = createLogEmbed(
+            '📝 Channel Renamed',
+            `**Kênh:** <#${newChannel.id}>\n**Từ:** \`${oldChannel.name}\`\n**Thành:** \`${newChannel.name}\``,
+            0xf1c40f
+        );
+        await sendLog(embed);
+    }
+});
+
+// 4. LOG ĐIỀU CHỈNH ROLE (Tạo, Xóa, Đổi Tên Role)
+client.on('roleCreate', async (role) => {
+    const embed = createLogEmbed('🛡️ Role Created', `**Role:** <@&${role.id}> (\`${role.name}\`)`, 0x2ecc71);
+    await sendLog(embed);
+});
+
+client.on('roleDelete', async (role) => {
+    const embed = createLogEmbed('🗑️ Role Deleted', `**Role bị xóa:** \`${role.name}\``, 0xe74c3c);
+    await sendLog(embed);
+});
+
+client.on('roleUpdate', async (oldRole, newRole) => {
+    if (oldRole.name !== newRole.name) {
+        const embed = createLogEmbed(
+            '✏️ Role Renamed',
+            `**Role:** <@&${newRole.id}>\n**Từ:** \`${oldRole.name}\`\n**Thành:** \`${newRole.name}\``,
+            0xf1c40f
+        );
+        await sendLog(embed);
+    }
+});
+
+// 5. LOG SERVER CẬP NHẬT (Đổi tên Server)
+client.on('guildUpdate', async (oldGuild, newGuild) => {
+    if (oldGuild.name !== newGuild.name) {
+        const embed = createLogEmbed(
+            '🏢 Server Renamed',
+            `**Từ:** \`${oldGuild.name}\`\n**Thành:** \`${newGuild.name}\``,
+            0x9b59b6
+        );
+        await sendLog(embed);
+    }
+});
+
+// 6. LOG TIMEOUT (BỊ MUTE & ĐƯỢC GỠ MUTE)
+client.on('guildMemberUpdate', async (oldMember, newMember) => {
+    // So sánh thời gian hết hạn Timeout giữa cũ và mới
+    const oldTime = oldMember.communicationDisabledUntilTimestamp;
+    const newTime = newMember.communicationDisabledUntilTimestamp;
+
+    if (oldTime === newTime) return; // Không liên quan đến Timeout thì bỏ qua
+
+    let action = '';
+    let color = 0;
+    let description = `**User:** ${getUserIdentifier(newMember.user)}\n`;
+
+    if (newTime && newTime > Date.now()) {
+        // Bị Timeout
+        action = '🔇 Member Timed Out';
+        color = 0xe74c3c; // Đỏ báo động
+        // Chuyển timestamp thành định dạng hiển thị giờ giấc của Discord
+        description += `**Thời hạn đến:** <t:${Math.floor(newTime / 1000)}:F>\n**Tự động gỡ sau:** <t:${Math.floor(newTime / 1000)}:R>`;
+    } else if (oldTime && (!newTime || newTime <= Date.now())) {
+        // Được gỡ Timeout sớm (hoặc tự hết hạn)
+        action = '🔊 Member Timeout Removed';
+        color = 0x2ecc71; // Xanh an toàn
+        description += `**Trạng thái:** Đã được gỡ Timeout và có thể chat/voice trở lại.`;
+    } else {
+        return;
+    }
+
+    const embed = createLogEmbed(action, description, color);
+
+    // Truy vết hung thủ trong Audit Log (Loại 24: MEMBER_UPDATE)
+    try {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        const fetchedLogs = await newMember.guild.fetchAuditLogs({ type: 24, limit: 1 }); 
+        const auditEntry = fetchedLogs.entries.first();
+
+        // Kiểm tra log có phải cập nhật user này trong vòng 5 giây qua không
+        if (auditEntry && auditEntry.target.id === newMember.id && Math.abs(auditEntry.createdTimestamp - Date.now()) < 5000) {
+            if (auditEntry.executor) {
+                embed.addFields({ name: '👮 Xử lý bởi', value: getUserIdentifier(auditEntry.executor), inline: false });
+            }
+            if (auditEntry.reason) {
+                embed.addFields({ name: '📝 Lý do (Theo Audit Log)', value: auditEntry.reason, inline: false });
+            }
+        }
+    } catch (err) {
+        console.error('Lỗi tra Audit Log Timeout:', err.message);
+    }
+
+    await sendLog(embed);
+});
+
+// 7. LOG BỊ KICK KHỎI VOICE CHANNEL (SÚT BAY MÀU)
+client.on('voiceStateUpdate', async (oldState, newState) => {
+    // Điều kiện: Đang ở trong voice (old có channel) NHƯNG giờ bị văng ra (new không có channel)
+    if (oldState.channelId && !newState.channelId) {
+        try {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            // Truy vết Audit Log (Loại 27: MEMBER_DISCONNECT) - Discord chỉ ghi log loại 27 này NẾU user bị người khác sút ra
+            const fetchedLogs = await oldState.guild.fetchAuditLogs({ type: 27, limit: 1 });
+            const disconnectLog = fetchedLogs.entries.first();
+
+            // Nếu tìm thấy log ngắt kết nối của user này trong vòng 5 giây -> Đích thị là bị ai đó sút, không phải tự out!
+            if (disconnectLog && disconnectLog.target.id === oldState.member.id && Math.abs(disconnectLog.createdTimestamp - Date.now()) < 5000) {
+                const embed = createLogEmbed(
+                    '🥾 Kicked from Voice Channel',
+                    `**User bị sút:** ${getUserIdentifier(oldState.member.user)}\n**Kênh đang ngồi:** <#${oldState.channelId}>\n**Sút bởi 👮:** ${getUserIdentifier(disconnectLog.executor)}`,
+                    0xe67e22 // Màu cam
+                );
+                await sendLog(embed);
+            }
+        } catch (err) {
+            console.error('Lỗi tra Audit Log Kick Voice:', err.message);
+        }
+    }
+});
 
 // ===================== LOGIN =====================
 client.login(TOKEN);
