@@ -4012,7 +4012,7 @@ client.on('messageCreate', async (message) => {
           return message.reply('❌ Bạn chưa đính kèm ảnh chụp màn hình profile VATSIM!');
       }
 
-      const processingMsg = await message.reply('⏳ Đang yêu cầu AI quét ảnh của bạn. Xin vui lòng chờ...');
+      const processingMsg = await message.reply('⏳ Đang yêu cầu BOT quét ảnh của bạn. Xin vui lòng chờ...');
 
       try {
           const attachment = message.attachments.first();
@@ -4158,7 +4158,7 @@ client.on('messageCreate', async (message) => {
           // ========================================================
           // UPLOAD ẢNH LÊN IMGBB LẤY LINK VĨNH VIỄN & LƯU GOOGLE SHEETS
           // ========================================================
-          await processingMsg.edit(`✅ Quá trình duyệt hoàn tất! Đang lưu hồ sơ ảnh vĩnh viễn...`);
+          await processingMsg.edit(`✅ Quá trình duyệt hoàn tất!`);
           
           let permanentImageUrl = attachment.url; 
           try {
@@ -4174,6 +4174,7 @@ client.on('messageCreate', async (message) => {
               }
           } catch (imgErr) { console.error('Lỗi up ảnh lên ImgBB:', imgErr); }
 
+          // LOGIC MỚI: CHỈ XÓA PHIÊN KHI THÀNH CÔNG, THẤT BẠI CHO THỬ LẠI
           if (success) {
               currentVatsimLinks[message.author.id] = {
                   cid: aiCid,
@@ -4181,14 +4182,21 @@ client.on('messageCreate', async (message) => {
                   imageUrl: `=IMAGE("${permanentImageUrl}")` 
               };
               await saveVatsimLinksSheet(currentVatsimLinks).catch(e => console.log('Lỗi lưu sheet CID:', e));
+              
+              // Tắt cái báo thức 5 phút đi vì đã xác thực xong
+              if (verifySession.timeoutId) clearTimeout(verifySession.timeoutId);
+              
+              // Dọn dẹp RAM
+              pendingVerifyDMs.delete(message.author.id); 
+              return processingMsg.edit(finalReply);
+          } else {
+              // Nếu thất bại (chưa đủ giờ bay, rating thấp...), KHÔNG xóa RAM
+              return processingMsg.edit(finalReply + `\n\n🔄 *Bạn vẫn có thể gửi lại ảnh khác để thử lại (trong thời hạn 5 phút).*`);
           }
-
-          pendingVerifyDMs.delete(message.author.id); // Dọn dẹp RAM
-          return processingMsg.edit(finalReply);
 
       } catch (err) {
           console.error("Lỗi xác thực DM:", err);
-          return processingMsg.edit("❌ Đã có lỗi xảy ra trong quá trình quét AI hoặc kéo dữ liệu. Vui lòng chụp lại ảnh khác và thử lại!");
+          return processingMsg.edit("❌ Đã có lỗi xảy ra trong quá trình quét. \n\n🔄 *Bạn có thể đính kèm lại ảnh để thử lại ngay bây giờ!*");
       }
   }
 
@@ -5125,11 +5133,25 @@ async function handleButton(interaction) {
       ));
 
       try {
-          // Đưa user vào danh sách chờ nhận DM
+          // 1. Dọn dẹp đồng hồ cũ nếu user bấm nút nhiều lần liên tục
+          if (pendingVerifyDMs.has(interaction.user.id)) {
+              clearTimeout(pendingVerifyDMs.get(interaction.user.id).timeoutId);
+          }
+
+          // 2. Tạo đồng hồ đếm ngược đúng 5 phút (300,000 mili-giây)
+          const expireTimer = setTimeout(async () => {
+              if (pendingVerifyDMs.has(interaction.user.id)) {
+                  pendingVerifyDMs.delete(interaction.user.id); // Hết giờ thì đá ra khỏi bộ nhớ
+                  await interaction.user.send('⏳ **Hết 5 phút!** Phiên xác thực của bạn đã tự động đóng. Vui lòng quay lại Server và bấm nút xin Role lại từ đầu nếu bạn vẫn muốn xác thực nhé!').catch(()=>{});
+              }
+          }, 5 * 60 * 1000);
+
+          // 3. Lưu phiên làm việc mới kèm theo cái đồng hồ
           pendingVerifyDMs.set(interaction.user.id, {
-              roleType: roleType,
               guildId: interaction.guild.id,
-              expires: Date.now() + 5 * 60 * 1000 // Cho 5 phút để gửi ảnh
+              roleType: interaction.customId.includes('pilot') ? 'pilot' : 'atc', // (Sếp chỉnh lại chỗ này cho khớp với biến lấy roleType của sếp nhé)
+              expires: Date.now() + 5 * 60 * 1000,
+              timeoutId: expireTimer
           });
 
           // Nhắn tin riêng: CHỈ ĐÒI ẢNH!
