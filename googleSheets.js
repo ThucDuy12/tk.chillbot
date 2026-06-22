@@ -784,47 +784,35 @@ async function loadVatsimLinksSheet() {
 // ========== LƯU DỮ LIỆU VATSIM LINKS ==========
 async function saveVatsimLinksSheet(data) {
   const sheets = await initGoogleSheets();
-  const sheetExistsFlag = await sheetExists(VATSIM_LINKS_SHEET_NAME);
-  if (!sheetExistsFlag) await createVatsimLinksSheet();
-
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: SPREADSHEET_ID,
-    fields: 'sheets.properties',
-  });
-  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === VATSIM_LINKS_SHEET_NAME);
-  const sheetId = sheet.properties.sheetId;
-
+  if (!(await sheetExists(VATSIM_LINKS_SHEET_NAME))) await createVatsimLinksSheet();
+  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID, fields: 'sheets.properties' });
+  const sheetId = spreadsheet.data.sheets.find(s => s.properties.title === VATSIM_LINKS_SHEET_NAME).properties.sheetId;
+  
   // Xóa dữ liệu cũ
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [{
-          deleteRange: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 4 }, // XÓA SẠCH 4 CỘT
-            shiftDimension: 'ROWS',
-          },
-      }],
-    },
+  await sheets.spreadsheets.batchUpdate({ 
+      spreadsheetId: SPREADSHEET_ID, 
+      requestBody: { 
+          requests: [{ deleteRange: { range: { sheetId, startRowIndex: 1, endRowIndex: 5000, startColumnIndex: 0, endColumnIndex: 4 }, shiftDimension: 'ROWS' } }] 
+      } 
   });
-
+  
   const rows = [];
   for (const [discordId, info] of Object.entries(data)) {
-    // Tương thích ngược: Nếu info là số (bản cũ), chuyển thành object
-    if (typeof info === 'number') {
-      rows.push([discordId, '', info, '']);
-    } else {
-      rows.push([discordId, info.username || '', info.cid || '', info.imageUrl || '']);
+    if (typeof info === 'number') { 
+        rows.push([discordId, '', info, '']); 
+    } else { 
+        rows.push([discordId, info.username || '', info.cid || '', info.imageUrl || '']); 
     }
   }
-
-  if (rows.length === 0) return;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${VATSIM_LINKS_SHEET_NAME}!A2`,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  });
+  
+  if (rows.length > 0) {
+      await sheets.spreadsheets.values.update({ 
+          spreadsheetId: SPREADSHEET_ID, 
+          range: `${VATSIM_LINKS_SHEET_NAME}!A2`, 
+          valueInputOption: 'USER_ENTERED', // <--- CHÌA KHÓA NẰM Ở ĐÂY NÈ SẾP!
+          requestBody: { values: rows } 
+      });
+  }
 }
 
 // ========== EXPORTS ==========
