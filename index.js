@@ -5136,23 +5136,44 @@ async function handleButton(interaction) {
       const ATC_ROLE_ID = '1393133850640781383';
       const member = interaction.member;
 
-      // --- LOGIC VƯỢT RÀO (BYPASS) ---
-      // 1. Nếu đang xin role Pilot, MÀ trong người đã có sẵn role ATC -> Duyệt luôn!
-      if (roleType === 'pilot' && member.roles.cache.has(ATC_ROLE_ID)) {
-          await member.roles.add(PILOT_ROLE_ID).catch(()=>{});
-          return interaction.editReply({ 
-              content: '✅ **Thành công!** Hệ thống nhận thấy bạn đã xác thực hồ sơ VATSIM trước đó. Đã cấp thêm role **Pilot** cho bạn!' 
-          });
-      }
+      // --- LOGIC VƯỢT RÀO (BYPASS) THÔNG MINH ---
+      // Nếu họ đã có 1 trong 2 role, khả năng cao họ đã có mặt trong "Sổ Đỏ"
+      if (member.roles.cache.has(ATC_ROLE_ID) || member.roles.cache.has(PILOT_ROLE_ID)) {
+          
+          // 1. Mở Sổ Đỏ ra tìm CID của họ
+          const currentVatsimLinks = await loadVatsimLinksSheet();
+          const existingData = currentVatsimLinks[interaction.user.id];
+          const existingCid = existingData ? (typeof existingData === 'object' ? existingData.cid : existingData) : null;
 
-      // 2. Nếu đang xin role ATC, MÀ trong người đã có sẵn role Pilot -> Duyệt luôn!
-      if (roleType === 'atc' && member.roles.cache.has(PILOT_ROLE_ID)) {
-          await member.roles.add(ATC_ROLE_ID).catch(()=>{});
-          return interaction.editReply({ 
-              content: '✅ **Thành công!** Hệ thống nhận thấy bạn đã xác thực hồ sơ VATSIM trước đó. Đã cấp thêm role **ATC** cho bạn!' 
-          });
+          // 2. Nếu tìm thấy CID, check thẳng API VATSIM luôn khỏi bắt gửi ảnh
+          if (existingCid) {
+              await interaction.editReply({ content: '⏳ Đang kiểm tra dữ liệu cập nhật trên máy chủ VATSIM...' });
+              const stats = await fetchVatsimStatsById(existingCid);
+              
+              if (!stats) return interaction.editReply({ content: `❌ Lỗi: Không tìm thấy dữ liệu VATSIM cho CID **${existingCid}**.` });
+              if (stats.rating === 0) return interaction.editReply({ content: `❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.` });
+
+              if (roleType === 'pilot') {
+                  if (stats.pilot_hours > 10) {
+                      await member.roles.add(PILOT_ROLE_ID).catch(()=>{});
+                      return interaction.editReply({ content: `✅ **Thành công!** Bạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã cấp thêm role **Pilot**!` });
+                  } else {
+                      return interaction.editReply({ content: `❌ Từ chối: Bạn mới có **${stats.pilot_hours.toFixed(1)}** giờ bay. Cần >10 giờ để nhận role Pilot.` });
+                  }
+              } else if (roleType === 'atc') {
+                  if (stats.rating > 1) {
+                      await member.roles.add(ATC_ROLE_ID).catch(()=>{});
+                      return interaction.editReply({ content: `✅ **Thành công!** Rating của bạn hợp lệ. Đã cấp thêm role **ATC**!` });
+                  } else {
+                      return interaction.editReply({ content: `❌ Từ chối: Rating của bạn hiện tại là OBS. Yêu cầu >= S1 để nhận role ATC.` });
+                  }
+              }
+              return; // Chặn ngang ở đây, không cho code chạy xuống dưới đòi gửi ảnh nữa
+          }
+          // Nếu lỡ có Role mà không có tên trong Sổ đỏ (do Admin add bằng tay), 
+          // thì bot mặc kệ, cứ thả trôi xuống dưới bắt chụp ảnh từ đầu!
       }
-      // -------------------------------
+      // ------------------------------------------------
 
       try {
           // 1. Dọn dẹp đồng hồ cũ nếu user bấm nút nhiều lần liên tục
