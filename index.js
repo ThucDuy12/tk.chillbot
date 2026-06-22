@@ -4020,20 +4020,22 @@ client.on('messageCreate', async (message) => {
 
           const imgBuffer = await downloadBuffer(attachment.url);
           const base64Image = imgBuffer.toString('base64');
-
-          // =========================================================================
-          // CÂU LỆNH THẦN CHÚ ÉP GEMINI ÉP KIỂM DUYỆT ẢNH VÀ TRẢ VỀ JSON CHI TIẾT
+// =========================================================================
+          // CÂU LỆNH THẦN CHÚ ÉP GEMINI KIỂM DUYỆT ẢNH VÀ TRẢ VỀ JSON CHI TIẾT
           // =========================================================================
           const prompt = `Bạn là một hệ thống kiểm duyệt chống giả mạo. Bức ảnh này PHẢI LÀ giao diện chuẩn của trang cá nhân VATSIM (my.vatsim.net).
-Nhiệm vụ của bạn là trích xuất chính xác thông tin trên ảnh và trả về ĐÚNG ĐỊNH DẠNG JSON. Không giải thích thêm.
-Nếu ảnh là phong cảnh, meme, không có giao diện VATSIM, hãy trả về: {"fake": true}
-Nếu ảnh hợp lệ, hãy trả về JSON:
-{
-  "fake": false,
-  "cid": 1234567,
-  "region": "Region ghi trên ảnh (nếu có)",
-  "division": "Division ghi trên ảnh (nếu có)"
-}`;
+          Nhiệm vụ của bạn là trích xuất chính xác thông tin trên ảnh và trả về ĐÚNG ĐỊNH DẠNG JSON. Không giải thích thêm.
+          LƯU Ý QUAN TRỌNG: VATSIM sử dụng mã viết tắt. Hãy trích xuất TÊN ĐẦY ĐỦ trên ảnh và cố gắng tự động dịch nó sang MÃ VIẾT TẮT chuẩn (VD: "Asia Pacific" -> "APAC", "West Asia" -> "WA", "South East Asia" -> "SEA", "Americas" -> "AMAS").
+          Nếu ảnh là phong cảnh, meme, không có giao diện VATSIM, hãy trả về: {"fake": true}
+          Nếu ảnh hợp lệ, hãy trả về JSON:
+          {
+            "fake": false,
+            "cid": 1234567,
+            "region_code": "Mã viết tắt (VD: APAC, AMAS, EMEA)",
+            "division_code": "Mã viết tắt (VD: WA, SEA, JPN)",
+            "raw_region": "Tên đầy đủ ghi trên ảnh (VD: Asia Pacific)",
+            "raw_division": "Tên đầy đủ ghi trên ảnh (VD: West Asia)"
+          }`;
                           
           const imagePart = { inlineData: { data: base64Image, mimeType: attachment.contentType } };
 
@@ -4080,33 +4082,49 @@ Nếu ảnh hợp lệ, hãy trả về JSON:
           }
 
           // ========================================================
-          // CHỐNG TRỘM 2: ĐỐI CHIẾU CHÉO (CROSS-CHECK) F12 INSPECT
+          // CHỐNG TRỘM 2: ĐỐI CHIẾU CHÉO (CROSS-CHECK) CHỐNG F12 THÔNG MINH
           // ========================================================
           const stats = await fetchVatsimStatsById(aiCid);
           
           if (!stats) return processingMsg.edit(`❌ CID **${aiCid}** không tồn tại trên hệ thống dữ liệu VATSIM.`);
           if (stats.rating === 0) return processingMsg.edit(`❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.`);
 
-          // Hàm bình chuẩn hóa chuỗi (Viết thường, xóa khoảng trắng) để đối chiếu OCR sai số nhẹ
+          // Hàm chuẩn hóa chuỗi và tách lấy chữ cái đầu (VD: "west asia" -> "wa")
           const normalize = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-          
-          const imgRegion = normalize(aiData.region);
+          const makeInitials = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).map(w => w[0]).join('');
+
           const apiRegion = normalize(stats.region);
-          const imgDivision = normalize(aiData.division);
-          const apiDivision = normalize(stats.division);
-          
-          // Kiểm tra xem Region/Division trên ảnh có khớp với dữ liệu thật của API không
-          if ((apiRegion && imgRegion && !imgRegion.includes(apiRegion) && !apiRegion.includes(imgRegion)) ||
-              (apiDivision && imgDivision && !imgDivision.includes(apiDivision) && !apiDivision.includes(imgDivision))) {
-              
-              // CẢNH BÁO F12 PHÁT HIỆN
+          const apiDiv = normalize(stats.division);
+
+          const imgRegCode = normalize(aiData.region_code);
+          const imgRegRaw = normalize(aiData.raw_region);
+          const imgDivCode = normalize(aiData.division_code);
+          const imgDivRaw = normalize(aiData.raw_division);
+          const imgDivInitials = makeInitials(aiData.raw_division);
+
+          // Logic kiểm tra Region Cực Thông Minh
+          let isRegionMatch = false;
+          if (apiRegion === imgRegCode || apiRegion === imgRegRaw || imgRegRaw.includes(apiRegion) || apiRegion.includes(imgRegRaw)) isRegionMatch = true;
+          if (apiRegion === 'apac' && imgRegRaw.includes('asiapacific')) isRegionMatch = true;
+          if (apiRegion === 'amas' && imgRegRaw.includes('americas')) isRegionMatch = true;
+          if (apiRegion === 'emea' && (imgRegRaw.includes('europe') || imgRegRaw.includes('africa') || imgRegRaw.includes('middle'))) isRegionMatch = true;
+
+          // Logic kiểm tra Division Siêu Bao Dung
+          let isDivMatch = false;
+          if (apiDiv === imgDivCode || apiDiv === imgDivRaw || imgDivRaw.includes(apiDiv) || apiDiv.includes(imgDivRaw)) isDivMatch = true;
+          if (imgDivInitials === apiDiv || imgDivInitials.includes(apiDiv)) isDivMatch = true; // "west asia" -> "wa"
+          if (apiDiv === 'vatpac' && imgDivRaw.includes('australia')) isDivMatch = true;
+          if (apiDiv === 'vatnz' && imgDivRaw.includes('newzealand')) isDivMatch = true;
+          if (apiDiv === 'vatuk' && imgDivRaw.includes('unitedkingdom')) isDivMatch = true;
+
+          if (!isRegionMatch || !isDivMatch) {
               await sendLog(createLogEmbed(
                   '🚨 Gian lận Xác Thực VATSIM', 
-                  `**User:** ${getUserIdentifier(message.author)}\n**CID Khai báo:** ${aiCid}\n\n**Lý do từ chối:** Có dấu hiệu dùng F12 (Inspect Element) để đổi mã CID.\n- Region trên ảnh: \`${aiData.region}\` | Thực tế: \`${stats.region}\`\n- Division trên ảnh: \`${aiData.division}\` | Thực tế: \`${stats.division}\``, 
+                  `**User:** ${getUserIdentifier(message.author)}\n**CID Khai báo:** ${aiCid}\n\n**Lý do từ chối:** Có dấu hiệu dùng F12 (Inspect Element) để đổi mã CID.\n- Region trên ảnh: \`${aiData.raw_region} (${aiData.region_code})\` | Thực tế API: \`${stats.region}\`\n- Division trên ảnh: \`${aiData.raw_division} (${aiData.division_code})\` | Thực tế API: \`${stats.division}\``, 
                   0xff0000
               ));
 
-              return processingMsg.edit(`🚨 **PHÁT HIỆN GIAN LẬN!**\nThông tin Region/Division trên ảnh không khớp với dữ liệu gốc của CID **${aiCid}** trên máy chủ VATSIM.\nVui lòng không sử dụng F12 (Inspect Element) để thay đổi mã nguồn trang web! Hành vi này đã được báo cáo cho Admin.`);
+              return processingMsg.edit(`🚨 **PHÁT HIỆN GIAN LẬN!**\nThông tin Region/Division trên ảnh không khớp với dữ liệu gốc của CID **${aiCid}**. Vui lòng không sử dụng F12 để thay đổi mã nguồn trang web!`);
           }
 
           // ========================================================
