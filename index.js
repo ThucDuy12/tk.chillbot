@@ -260,7 +260,7 @@ let routesData = fs.existsSync(ROUTES_FILE) ? JSON.parse(fs.readFileSync(ROUTES_
 // ===================== DATA =====================
 let roles = {
   basicMemberRoleId: '1375110178868826142',
-  verifiedMemberRoleId: '1430517630116036669',
+  verifiedMemberRoleId: '1493908725231128617',
   devRoleId: '1366433221687906304',
   adminRoleId: '1365960976016347136',
   banRoleId: '1408787259322273913',
@@ -5458,7 +5458,7 @@ if (interaction.customId.startsWith('role_info_modal_')) {
       );
 
     // Thêm ping DEV và Admin
-    const mentionText = `<@&${roles.devRoleId}> <@&${roles.adminRoleId}>`;
+    const mentionText = `<@&${roles.adminRoleId}> <@&${roles.devRoleId}> <@&${roles.verifiedMemberRoleId}>`;
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel('Approve').setStyle(ButtonStyle.Success),
@@ -5469,7 +5469,7 @@ if (interaction.customId.startsWith('role_info_modal_')) {
       content: mentionText,
       embeds: [embed],
       components: [row],
-      allowedMentions: { roles: [roles.devRoleId, roles.adminRoleId] } // chỉ ping đúng các role đó
+      allowedMentions: { roles: [roles.adminRoleId, roles.devRoleId, roles.verifiedMemberRoleId] } // chỉ ping đúng các role đó
     });
     
     pendingRequests.get(requestId).messageId = sentMessage.id;
