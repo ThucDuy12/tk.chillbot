@@ -3456,29 +3456,6 @@ client.once('ready', async () => {
     updateServerStats(client);
   }, 15 * 60 * 1000);
 
-  // ==========================================
-  // CẬP NHẬT VATSEA ATC LEADERBOARD
-  // ==========================================
-  async function runVatseaUpdate() {
-    const now = new Date();
-    // Lấy thời điểm bắt đầu của tháng hiện tại (UTC)
-    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
-    try {
-      await updateVatseaLeaderboardEmbed(startOfMonth, now);
-      console.log('✅ Đã auto-update VATSEA Leaderboard');
-    } catch (e) {
-      console.error('❌ Lỗi khi auto-update VATSEA Leaderboard:', e);
-    }
-  }
-
-  // 1. Chạy ngay lần đầu tiên sau khi bot khởi động (chờ 15 giây cho bot load xong các thứ khác)
-  setTimeout(() => {
-    runVatseaUpdate();
-  }, 15000);
-
-  // 2. Sau đó cứ đúng 1 tiếng (60 * 60 * 1000 ms) lặp lại 1 lần
-  setInterval(runVatseaUpdate, 60 * 60 * 1000);
-
   // VATSIM update scheduling
   const vatsimPeriodMs = (process.env.VATSIM_UPDATE_MINUTES ? parseInt(process.env.VATSIM_UPDATE_MINUTES) : 1) * 60 * 1000;
   vatsimWorker.postMessage('update');
