@@ -907,11 +907,11 @@ async function updateControllerLeaderboardEmbed() {
       return;
     }
     
-    // Get current UTC time
-    const now = new Date();
-    const utcTime = now.toUTCString();
-    const utcTimeShort = utcTime.split(' ')[4]; // Get HH:MM:SS part
-    const utcHourMinute = utcTimeShort.split(':').slice(0, 2).join(':');
+    // Get current UTC time & Force to XX:00
+    const now = new Date();
+    const roundedNow = new Date(now);
+    roundedNow.setUTCMinutes(0, 0, 0); // Ép phút, giây, mili-giây về số 0
+    const utcHourMinute = `${roundedNow.getUTCHours().toString().padStart(2, '0')}:00`;
     
     // Format time from seconds to "Xh Ym"
     function formatTime(seconds) {
@@ -1209,11 +1209,11 @@ async function updatePilotLeaderboardEmbed() {
       return;
     }
     
-    // Get current UTC time
-    const now = new Date();
-    const utcTime = now.toUTCString();
-    const utcTimeShort = utcTime.split(' ')[4]; // Get HH:MM:SS part
-    const utcHourMinute = utcTimeShort.split(':').slice(0, 2).join(':');
+    // Get current UTC time & Force to XX:00
+    const now = new Date();
+    const roundedNow = new Date(now);
+    roundedNow.setUTCMinutes(0, 0, 0); // Ép phút, giây, mili-giây về số 0
+    const utcHourMinute = `${roundedNow.getUTCHours().toString().padStart(2, '0')}:00`;
     
     // Format time from seconds to "Xh Ym"
     function formatTime(seconds) {
@@ -1230,7 +1230,7 @@ async function updatePilotLeaderboardEmbed() {
       .setColor(0x1E90FF)
       .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
       .setFooter({ text: 'Tự động cập nhật mỗi giờ | Giờ hiển thị: UTC' })
-      .setTimestamp();
+      .setTimestamp(roundedNow); // <--- NHÉT VÀO ĐÂY
     
     // Get all pilots and sort by time (descending)
     const pilotEntries = Object.entries(pilotLeaderboardData.pilots);
