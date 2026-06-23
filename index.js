@@ -5668,10 +5668,15 @@ async function handleAnnouncement(interaction) {
 
   let aiMessage = '';
   try {
-    const prompt = `Bạn là một trợ lý quản lý cộng đồng. Hãy viết lại đoạn thông báo sau bằng tiếng Việt sao cho thật chuyên nghiệp, lịch sự, rõ ràng và hấp dẫn để đăng lên kênh Discord. 
-    Yêu cầu: Giữ nguyên các thông tin chính, link, thẻ ICAO, ngày giờ (nếu có). Trình bày ngắt dòng, gạch đầu dòng hợp lý.
-    Lưu ý: không giải thích gì hết dài dòng lèm bèm chào hỏi gì hết trình bày thẳng luôn.
-    
+    const prompt = `Bạn là một trợ lý quản lý cộng đồng trên Discord. Nhiệm vụ của bạn là viết lại đoạn thông báo dưới đây sao cho chuyên nghiệp, lịch sự, rõ ràng và hấp dẫn hơn.
+
+    [YÊU CẦU BẮT BUỘC - LUẬT THÉP]
+    1. Giữ nguyên 100% các thông tin chính: link, mã ICAO, ngày giờ.
+    2. Trình bày ngắt dòng, sử dụng gạch đầu dòng (bullet points) hoặc emoji hợp lý cho Discord.
+    3. TUYỆT ĐỐI KHÔNG chào hỏi (Không dùng "Xin chào", "Dạ", v.v.).
+    4. TUYỆT ĐỐI KHÔNG giải thích hay thêm câu dẫn (Không dùng "Dưới đây là thông báo đã sửa", "Tôi đã viết lại...", v.v.).
+    5. CHỈ in ra đúng nội dung thông báo đã được viết lại, không thêm bất kỳ ký tự thừa nào khác.
+
     Nội dung gốc cần viết lại:
     ${rawMessage}`;
 
