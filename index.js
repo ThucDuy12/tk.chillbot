@@ -3238,12 +3238,20 @@ client.once('ready', async () => {
     new SlashCommandBuilder()
       .setName('atc_profile')
       .setDescription('Tra cứu thông tin Controller đang online trên VATSIM')
-      .addStringOption(option => option.setName('station').setDescription('Callsign trạm (VD: RPLL_APP, VVTS_TWR)').setRequired(true)),
-      
+      .addStringOption(option => option.setName('station').setDescription('Callsign trạm (VD: VVTS_APP, VVTS_TWR)').setRequired(true)),
     new SlashCommandBuilder()
       .setName('atis_vatsim')
       .setDescription('Đọc ATIS trực tiếp từ mạng bay VATSIM')
       .addStringOption(option => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS, WSSS)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('ivao_atc')
+      .setDescription('Tra cứu thông tin Controller đang online trên mạng bay IVAO')
+      .addStringOption(option => option.setName('station').setDescription('Callsign trạm (VD: VVTS_APP, WSSS_TWR)').setRequired(true)),
+      
+    new SlashCommandBuilder()
+      .setName('ivao_atis')
+      .setDescription('Đọc ATIS trực tiếp từ mạng bay IVAO')
+      .addStringOption(option => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS, VVNB)').setRequired(true)),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -8187,29 +8195,38 @@ async function handleAtcProfile(interaction) {
     const ratingStr = vatsimRatings[atc.rating] || `R${atc.rating}`;
 
     // Tính toán thời gian Online (hh:mm)
+    const logonUnix = Math.floor(new Date(atc.logon_time).getTime() / 1000);
     const logon = new Date(atc.logon_time).getTime();
     const diffMs = Date.now() - logon;
     const hours = Math.floor(diffMs / 3600000);
     const minutes = Math.floor((diffMs % 3600000) / 60000);
-    const timeOnline = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    const timeOnline = `${hours.toString().padStart(2, '0')}h ${minutes.toString().padStart(2, '0')}m`;
 
     // Xử lý Tần số
     const freq = (atc.frequency && atc.frequency !== '199.998' && atc.frequency !== 199.998) 
       ? atc.frequency 
       : 'Không có (199.998)';
 
-    // Xử lý Remarks (Thông tin thêm) - In ra theo dạng bullet point giống y hệt hình
-    let textRemarks = 'Không có thông tin.';
+    // Xử lý Remarks (Thông tin thêm) - Bọc blockquote > cho sang chảnh
+    let textRemarks = '> *Không có thông tin ghi chú.*';
     if (atc.text_atis && Array.isArray(atc.text_atis) && atc.text_atis.length > 0) {
-      // VATSIM trả về mảng chuỗi, map nó thành bullet point
-      textRemarks = atc.text_atis.map(line => `• ${line}`).join('\n');
+      textRemarks = atc.text_atis.map(line => `> ${line}`).join('\n');
     }
 
     const embed = new EmbedBuilder()
-      .setTitle(`📡 ${atc.callsign}`)
-      .setColor(0x3498db)
-      .setDescription(`**${atc.name || 'Ẩn danh'}** \` ${ratingStr} \` • \` ${freq} \`\n\n${textRemarks}`)
-      .setFooter({ text: `Time online: ${timeOnline}` });
+      .setAuthor({ name: 'VATSIM Controller Profile', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
+      .setTitle(`📡 Trạm: ${atc.callsign}`)
+      .setColor(0x00A8FF) // Màu xanh ngầu hơn
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/6356/6356863.png') // Thêm cái icon radar góc phải
+      .addFields(
+        { name: '👤 Controller', value: `**${atc.name || 'Ẩn danh'}**`, inline: true },
+        { name: '🎖️ Rating', value: `\`${ratingStr}\``, inline: true },
+        { name: '📶 Tần số', value: `\`${freq}\``, inline: true },
+        { name: '⏱️ Thời gian trực', value: `\`${timeOnline}\` (từ <t:${logonUnix}:t>)`, inline: false },
+        { name: '📝 Thông tin / Remarks', value: textRemarks, inline: false }
+      )
+      .setFooter({ text: `VATSIM CID: ${atc.cid}` })
+      .setTimestamp();
 
     await interaction.editReply({ embeds: [embed] });
 
@@ -8242,21 +8259,28 @@ async function handleAtisVatsim(interaction) {
     
     // Nếu sân bay chia ra Arrival ATIS và Departure ATIS, vòng lặp này sẽ in ra cả 2
     atisList.forEach(atis => {
-      const atisCode = atis.atis_code ? `Thông tin ${atis.atis_code}` : 'Không có mã định danh';
+      const atisCode = atis.atis_code ? `**Thông tin ${atis.atis_code}**` : '*Không có*';
+      const logonUnix = Math.floor(new Date(atis.logon_time).getTime() / 1000);
       
       let textInfo = 'Không có nội dung.';
       if (atis.text_atis && Array.isArray(atis.text_atis)) {
-        // VATSIM trả về ATIS dạng mảng nhiều dòng, ghép nó lại thành đoạn văn
+        // Lấy tất cả trừ dòng định dạng tên trạm (thường là dòng 1), ghép lại cho đẹp
         textInfo = atis.text_atis.join(' ');
       } else if (typeof atis.text_atis === 'string') {
         textInfo = atis.text_atis;
       }
 
       const embed = new EmbedBuilder()
-        .setTitle(`📻 ${atis.callsign} - ${atisCode}`)
+        .setAuthor({ name: 'VATSIM ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
+        .setTitle(`📻 Tần số: ${atis.callsign} (${atis.frequency})`)
         .setColor(0x2ecc71)
-        .setDescription(`\`\`\`\n${textInfo}\n\`\`\``)
-        .setFooter({ text: 'Dữ liệu phát sóng trực tiếp từ mạng VATSIM' })
+        .setThumbnail('https://i.ibb.co/6SKYp1Z/VATSIM-Logo-Official-Photoroom.png')
+        .addFields(
+          { name: '🏷️ Identifier', value: atisCode, inline: true },
+          { name: '⏱️ Phát sóng lúc', value: `<t:${logonUnix}:R>`, inline: true },
+          { name: '📝 Nội dung bản tin', value: `\`\`\`yaml\n${textInfo}\n\`\`\``, inline: false }
+        )
+        .setFooter({ text: 'Dữ liệu lấy trực tiếp từ mạng bay VATSIM' })
         .setTimestamp();
         
       embeds.push(embed);
@@ -8267,6 +8291,130 @@ async function handleAtisVatsim(interaction) {
   } catch (err) {
     console.error('Lỗi lệnh atis_vatsim:', err);
     await interaction.editReply('❌ Đã có lỗi xảy ra khi kéo dữ liệu ATIS từ VATSIM.');
+  }
+}
+
+// ===================== COMMAND: IVAO ATC PROFILE =====================
+async function handleIvaoAtc(interaction) {
+  const station = interaction.options.getString('station').toUpperCase();
+  await interaction.deferReply();
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // Gọi API dữ liệu trực tiếp của IVAO
+    const response = await fetch('https://api.ivao.aero/v2/tracker/whazzup');
+    if (!response.ok) return interaction.editReply('❌ Lỗi kết nối đến hệ thống máy chủ IVAO.');
+
+    const data = await response.json();
+    
+    // Tìm ATC khớp với callsign (Dữ liệu IVAO lưu trong clients.atcs)
+    const atcs = data.clients?.atcs || [];
+    const atc = atcs.find(c => c.callsign === station);
+
+    if (!atc) {
+      return interaction.editReply(`❌ Trạm **${station}** hiện tại đang Offline trên mạng bay IVAO.`);
+    }
+
+    // Format Rating của IVAO
+    const ivaoRatings = { 
+      1: 'OBS', 2: 'AS1', 3: 'AS2', 4: 'AS3', 
+      5: 'ADC', 6: 'APC', 7: 'ACC', 8: 'SEC', 
+      9: 'SAI', 10: 'CAI' 
+    };
+    const ratingStr = ivaoRatings[atc.rating] || `R${atc.rating}`;
+
+    // Tính toán thời gian Online (hh:mm)
+    const logonUnix = Math.floor(new Date(atc.createdAt).getTime() / 1000);
+    const logon = new Date(atc.createdAt).getTime();
+    const diffMs = Date.now() - logon;
+    const hours = Math.floor(diffMs / 3600000);
+    const minutes = Math.floor((diffMs % 3600000) / 60000);
+    const timeOnline = `${hours.toString().padStart(2, '0')}h ${minutes.toString().padStart(2, '0')}m`;
+
+    // Xử lý Tần số (IVAO trả về float như 118.1)
+    const freq = atc.atcSession?.frequency ? atc.atcSession.frequency.toFixed(3) : '199.998';
+
+    // Xử lý Remarks & ATIS (IVAO gộp chung ATIS Lines làm Remarks)
+    let textRemarks = '> *Không có thông tin ghi chú.*';
+    if (atc.atis && atc.atis.lines && Array.isArray(atc.atis.lines) && atc.atis.lines.length > 0) {
+      textRemarks = atc.atis.lines.map(line => `> ${line}`).join('\n');
+    }
+
+    const embed = new EmbedBuilder()
+      .setAuthor({ name: 'IVAO Controller Profile', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
+      .setTitle(`📡 Trạm: ${atc.callsign}`)
+      .setColor(0x0A2B5E) // Đổi sang màu Xanh Navy tối đậm (Đặc trưng của IVAO)
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/6356/6356863.png') 
+      .addFields(
+        { name: '👤 Controller', value: `**VID: ${atc.userId || 'Ẩn danh'}**`, inline: true }, // IVAO API thường chỉ public VID
+        { name: '🎖️ Rating', value: `\`${ratingStr}\``, inline: true },
+        { name: '📶 Tần số', value: `\`${freq}\``, inline: true },
+        { name: '⏱️ Thời gian trực', value: `\`${timeOnline}\` (từ <t:${logonUnix}:t>)`, inline: false },
+        { name: '📝 Thông tin / Remarks', value: textRemarks, inline: false }
+      )
+      .setFooter({ text: `IVAO VID: ${atc.userId || 'N/A'}` })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (err) {
+    console.error('Lỗi lệnh ivao_atc:', err);
+    await interaction.editReply('❌ Đã có lỗi xảy ra khi kéo dữ liệu từ IVAO.');
+  }
+}
+
+// ===================== COMMAND: IVAO ATIS =====================
+async function handleIvaoAtis(interaction) {
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply();
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    const response = await fetch('https://api.ivao.aero/v2/tracker/whazzup');
+    if (!response.ok) return interaction.editReply('❌ Lỗi kết nối đến hệ thống máy chủ IVAO.');
+
+    const data = await response.json();
+    
+    // Tìm toàn bộ các trạm ở sân bay này có phát sóng ATIS
+    const atcs = data.clients?.atcs || [];
+    const atisList = atcs.filter(a => a.callsign.startsWith(icao) && a.atis && a.atis.lines && a.atis.lines.length > 0);
+
+    if (!atisList || atisList.length === 0) {
+      return interaction.editReply(`❌ Hiện tại không có trạm nào đang phát ATIS tại sân bay **${icao}** trên mạng bay IVAO.`);
+    }
+
+    const embeds = [];
+    
+    atisList.forEach(atc => {
+      const atisCode = atc.atis.revision ? `**Thông tin ${atc.atis.revision}**` : '*Không định danh*';
+      const timestamp = atc.atis.timestamp || atc.createdAt;
+      const logonUnix = Math.floor(new Date(timestamp).getTime() / 1000);
+      
+      // Nối các dòng ATIS lại thành 1 đoạn văn bản liên tục
+      const textInfo = atc.atis.lines.join(' ');
+
+      const embed = new EmbedBuilder()
+        .setAuthor({ name: 'IVAO ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
+        .setTitle(`📻 Trạm: ${atc.callsign} (${atc.atcSession?.frequency?.toFixed(3) || 'N/A'})`)
+        .setColor(0x0A2B5E) // Xanh Navy
+        .setThumbnail('https://xe.ivao.aero/wordpress/wp-content/uploads/website/the-division/about/brand_logo_no_text.png')
+        .addFields(
+          { name: '🏷️ Identifier', value: atisCode, inline: true },
+          { name: '⏱️ Phát sóng lúc', value: `<t:${logonUnix}:R>`, inline: true },
+          { name: '📝 Nội dung bản tin', value: `\`\`\`yaml\n${textInfo}\n\`\`\``, inline: false }
+        )
+        .setFooter({ text: 'Dữ liệu phát sóng trực tiếp từ mạng IVAO' })
+        .setTimestamp();
+        
+      embeds.push(embed);
+    });
+
+    // Discord giới hạn 10 Embed cho 1 tin nhắn
+    await interaction.editReply({ embeds: embeds.slice(0, 10) });
+
+  } catch (err) {
+    console.error('Lỗi lệnh ivao_atis:', err);
+    await interaction.editReply('❌ Đã có lỗi xảy ra khi kéo dữ liệu ATIS từ mạng bay IVAO.');
   }
 }
 
