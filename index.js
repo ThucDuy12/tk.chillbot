@@ -8286,7 +8286,7 @@ async function handleAtisVatsim(interaction) {
         .setAuthor({ name: 'VATSIM ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
         .setTitle(`📻 Station: ${atis.callsign} (${atis.frequency})`)
         .setColor(0x2ecc71)
-        .setThumbnail('https://i.ibb.co/6SKYp1Z/VATSIM-Logo-Official-Photoroom.png')
+        .setThumbnail('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSZTpaHOLCaND817gJ28iYTv1WRWnf4wUQoocDs6VYj_guu8gDc2VFKqCxp&s=10')
         .addFields(
           { name: '🏷️ Identifier', value: atisCode, inline: true },
           { name: '⏱️ Upadate at', value: `<t:${logonUnix}:R>`, inline: true },
