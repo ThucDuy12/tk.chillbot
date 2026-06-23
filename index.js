@@ -2562,45 +2562,6 @@ function createEventEmbed(event, startTime) {
   return embed;
 }
 
-// ===================== THEO DÕI VOICE CHANNEL (AUTO-LEAVE & ANTI-BUG KICK) =====================
-client.on('voiceStateUpdate', (oldState, newState) => {
-    // 1. NẾU BOT BỊ KICK HOẶC NGẮT KẾT NỐI (Fix lỗi bot khùng không join lại)
-    if (oldState.member.user.id === client.user.id && oldState.channelId && !newState.channelId) {
-        const queue = musicQueues.get(oldState.guild.id);
-        if (queue) {
-            if (queue.progressInterval) clearInterval(queue.progressInterval);
-            if (queue.connection) queue.connection.destroy();
-            musicQueues.delete(oldState.guild.id);
-            console.log('Bot bị kick khỏi voice, đã tự động dọn dẹp RAM!');
-        }
-        return;
-    }
-
-    // 2. NẾU NGƯỜI DÙNG RỜI ĐI HẾT, CHỈ CÒN MÌNH BOT BƠ VƠ
-    if (oldState.channelId && oldState.channelId !== newState.channelId) {
-        const botVoiceChannel = oldState.guild.members.me.voice.channel;
-        
-        if (botVoiceChannel && oldState.channelId === botVoiceChannel.id) {
-            const humanCount = botVoiceChannel.members.filter(m => !m.user.bot).size;
-            
-            if (humanCount === 0) {
-                const queue = musicQueues.get(oldState.guild.id);
-                if (queue) {
-                    if (queue.progressInterval) clearInterval(queue.progressInterval);
-                    if (queue.connection) queue.connection.destroy(); 
-                    if (queue.dashboardMsg) {
-                        queue.dashboardMsg.edit({ 
-                            embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription('💤 Mọi người đã rời đi hết, Tk.Chill cũng dọn dẹp đi ngủ đây. Hẹn gặp lại!')], 
-                            components: [] 
-                        }).catch(()=>{});
-                    }
-                    musicQueues.delete(oldState.guild.id); 
-                }
-            }
-        }
-    }
-});
-
 // ===================== BAN: UNBAN =====================
 async function unbanUser(userId) {
   try {
@@ -8075,26 +8036,101 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
 // 7. LOG BỊ KICK KHỎI VOICE CHANNEL (SÚT BAY MÀU)
 client.on('voiceStateUpdate', async (oldState, newState) => {
-    // Điều kiện: Đang ở trong voice (old có channel) NHƯNG giờ bị văng ra (new không có channel)
-    if (oldState.channelId && !newState.channelId) {
+    const user = newState.member?.user || oldState.member?.user;
+    if (!user) return;
+
+    // ==========================================
+    // 1. CHỨC NĂNG BOT NHẠC: BỊ KICK / TỰ OUT KHI VẮNG
+    // ==========================================
+    if (user.id === client.user.id && oldState.channelId && !newState.channelId) {
+        // Fix lỗi bot khùng khi bị admin kick thẳng tay
+        const queue = musicQueues.get(oldState.guild.id);
+        if (queue) {
+            if (queue.progressInterval) clearInterval(queue.progressInterval);
+            if (queue.connection) queue.connection.destroy();
+            musicQueues.delete(oldState.guild.id);
+        }
+        return;
+    }
+
+    if (oldState.channelId && oldState.channelId !== newState.channelId) {
+        // Tự động out khi người dùng rời đi hết
+        const botVoiceChannel = oldState.guild.members.me.voice.channel;
+        if (botVoiceChannel && oldState.channelId === botVoiceChannel.id) {
+            const humanCount = botVoiceChannel.members.filter(m => !m.user.bot).size;
+            if (humanCount === 0) {
+                const queue = musicQueues.get(oldState.guild.id);
+                if (queue) {
+                    if (queue.progressInterval) clearInterval(queue.progressInterval);
+                    if (queue.connection) queue.connection.destroy(); 
+                    if (queue.dashboardMsg) {
+                        queue.dashboardMsg.edit({ 
+                            embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription('💤 Mọi người đã rời đi hết, Tk.Chill cũng dọn dẹp đi ngủ đây. Hẹn gặp lại!')], 
+                            components: [] 
+                        }).catch(()=>{});
+                    }
+                    musicQueues.delete(oldState.guild.id); 
+                }
+            }
+        }
+    }
+
+    // Bỏ qua log hành động của Bot để đỡ rác kênh Log
+    if (user.bot) return;
+
+    // ==========================================
+    // 2. CHỨC NĂNG LOGGING: JOIN, LEAVE, MOVE, KICK
+    // ==========================================
+    
+    // TRƯỜNG HỢP 1: VÀO VOICE (JOIN)
+    if (!oldState.channelId && newState.channelId) {
+        const embed = createLogEmbed(
+            '🎤 Voice Channel Joined',
+            `**User:** ${getUserIdentifier(user)}\n**Kênh:** <#${newState.channelId}>`,
+            0x2ecc71
+        );
+        await sendLog(embed);
+    }
+    // TRƯỜNG HỢP 2: ĐỔI KÊNH VOICE (MOVE)
+    else if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
+        const embed = createLogEmbed(
+            '🔄 Voice Channel Moved',
+            `**User:** ${getUserIdentifier(user)}\n**Từ kênh:** <#${oldState.channelId}>\n**Sang kênh:** <#${newState.channelId}>`,
+            0x3498db
+        );
+        await sendLog(embed);
+    }
+    // TRƯỜNG HỢP 3: RỜI VOICE (TỰ OUT HOẶC BỊ SÚT)
+    else if (oldState.channelId && !newState.channelId) {
+        let isKicked = false;
         try {
+            // Đợi 1.5s cho Discord ghi kịp Audit Log
             await new Promise(resolve => setTimeout(resolve, 1500));
-            
-            // Truy vết Audit Log (Loại 27: MEMBER_DISCONNECT) - Discord chỉ ghi log loại 27 này NẾU user bị người khác sút ra
             const fetchedLogs = await oldState.guild.fetchAuditLogs({ type: 27, limit: 1 });
             const disconnectLog = fetchedLogs.entries.first();
 
-            // Nếu tìm thấy log ngắt kết nối của user này trong vòng 5 giây -> Đích thị là bị ai đó sút, không phải tự out!
-            if (disconnectLog && disconnectLog.target.id === oldState.member.id && Math.abs(disconnectLog.createdTimestamp - Date.now()) < 5000) {
+            // Nếu tìm thấy log ngắt kết nối của user này trong vòng 5 giây -> Đích thị là bị sút!
+            if (disconnectLog && disconnectLog.target.id === user.id && Math.abs(disconnectLog.createdTimestamp - Date.now()) < 5000) {
+                isKicked = true;
                 const embed = createLogEmbed(
                     '🥾 Kicked from Voice Channel',
-                    `**User bị sút:** ${getUserIdentifier(oldState.member.user)}\n**Kênh đang ngồi:** <#${oldState.channelId}>\n**Sút bởi 👮:** ${getUserIdentifier(disconnectLog.executor)}`,
-                    0xe67e22 // Màu cam
+                    `**User bị sút:** ${getUserIdentifier(user)}\n**Kênh đang ngồi:** <#${oldState.channelId}>\n**Sút bởi 👮:** ${getUserIdentifier(disconnectLog.executor)}`,
+                    0xe67e22
                 );
                 await sendLog(embed);
             }
-        } catch (err) {
-            console.error('Lỗi tra Audit Log Kick Voice:', err.message);
+        } catch (e) {
+            console.error('Lỗi tra Audit Log Kick Voice:', e.message);
+        }
+
+        // Nếu check Audit Log không thấy ai sút -> Là do nó tự Out
+        if (!isKicked) {
+            const embed = createLogEmbed(
+                '🚪 Voice Channel Left',
+                `**User:** ${getUserIdentifier(user)}\n**Rời kênh:** <#${oldState.channelId}>`,
+                0xe74c3c
+            );
+            await sendLog(embed);
         }
     }
 });
