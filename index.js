@@ -1588,7 +1588,7 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
       .setDescription(`**Thống kê thời gian kiểm soát tại các sân bay lớn trong khu vực VATSEA**\n📅 Dữ liệu từ **${startStr}** đến **${endStr}**\n🕒 Cập nhật lúc: ${utcHourMinute} UTC`)
       .setColor(0x004c8f) // Màu xanh đậm chuẩn VATSIM
       // Sếp dán link ảnh trực tiếp vào đây (Tui lấy tạm link ảnh sếp vừa gửi)
-      .setImage('https://ibb.co/HsFLDsH') 
+      .setImage('https://i.ibb.co/5yMXWyR/VATSEA-LOGO-1000x310-Photoroom.png') 
       .setFooter({ text: 'Tự động cập nhật mỗi giờ | Nguồn: StatSim API', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
       .setTimestamp();
 
