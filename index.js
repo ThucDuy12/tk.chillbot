@@ -8207,23 +8207,32 @@ async function handleAtcProfile(interaction) {
       ? atc.frequency 
       : 'Không có (199.998)';
 
-    // Xử lý Remarks (Thông tin thêm) - Bọc blockquote > cho sang chảnh
+    // Xử lý Remarks và tự động nhận diện Website
     let textRemarks = '> *Không có thông tin ghi chú.*';
     if (atc.text_atis && Array.isArray(atc.text_atis) && atc.text_atis.length > 0) {
-      textRemarks = atc.text_atis.map(line => `> ${line}`).join('\n');
+      // Regex quét tên miền (domain)
+      const urlRegex = /(?:https?:\/\/)?(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z]{2,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi;
+      
+      textRemarks = atc.text_atis.map(line => {
+        const formattedLine = line.replace(urlRegex, (match) => {
+          let url = match.startsWith('http') ? match : `https://${match}`;
+          return `[${match}](${url})`;
+        });
+        return `> ${formattedLine}`;
+      }).join('\n');
     }
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: 'VATSIM Controller Profile', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
-      .setTitle(`📡 Trạm: ${atc.callsign}`)
-      .setColor(0x00A8FF) // Màu xanh ngầu hơn
-      .setThumbnail('https://cdn-icons-png.flaticon.com/512/6356/6356863.png') // Thêm cái icon radar góc phải
+      .setTitle(`📡 Station: ${atc.callsign}`)
+      .setColor(0x00A8FF)
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/10623/10623991.png') 
       .addFields(
-        { name: '👤 Controller', value: `**${atc.name || 'Ẩn danh'}**`, inline: true },
+        { name: '👤 Controller', value: `**${atc.name || atc.cid}**`, inline: true },
         { name: '🎖️ Rating', value: `\`${ratingStr}\``, inline: true },
-        { name: '📶 Tần số', value: `\`${freq}\``, inline: true },
-        { name: '⏱️ Thời gian trực', value: `\`${timeOnline}\` (từ <t:${logonUnix}:t>)`, inline: false },
-        { name: '📝 Thông tin / Remarks', value: textRemarks, inline: false }
+        { name: '📶 Frequency', value: `\`${freq}\``, inline: true },
+        { name: '⏱️ Time on duty', value: `\`${timeOnline}\` (from <t:${logonUnix}:t>)`, inline: false },
+        { name: '📝 Remarks', value: textRemarks, inline: false }
       )
       .setFooter({ text: `VATSIM CID: ${atc.cid}` })
       .setTimestamp();
@@ -8259,7 +8268,7 @@ async function handleAtisVatsim(interaction) {
     
     // Nếu sân bay chia ra Arrival ATIS và Departure ATIS, vòng lặp này sẽ in ra cả 2
     atisList.forEach(atis => {
-      const atisCode = atis.atis_code ? `**Thông tin ${atis.atis_code}**` : '*Không có*';
+      const atisCode = atis.atis_code ? `**Information ${atis.atis_code}**` : '*Không có*';
       const logonUnix = Math.floor(new Date(atis.logon_time).getTime() / 1000);
       
       let textInfo = 'Không có nội dung.';
@@ -8272,13 +8281,13 @@ async function handleAtisVatsim(interaction) {
 
       const embed = new EmbedBuilder()
         .setAuthor({ name: 'VATSIM ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
-        .setTitle(`📻 Tần số: ${atis.callsign} (${atis.frequency})`)
+        .setTitle(`📻 Station: ${atis.callsign} (${atis.frequency})`)
         .setColor(0x2ecc71)
         .setThumbnail('https://i.ibb.co/6SKYp1Z/VATSIM-Logo-Official-Photoroom.png')
         .addFields(
           { name: '🏷️ Identifier', value: atisCode, inline: true },
-          { name: '⏱️ Phát sóng lúc', value: `<t:${logonUnix}:R>`, inline: true },
-          { name: '📝 Nội dung bản tin', value: `\`\`\`yaml\n${textInfo}\n\`\`\``, inline: false }
+          { name: '⏱️ Upadate at', value: `<t:${logonUnix}:R>`, inline: true },
+          { name: '📝 Atis', value: `\`\`\`yaml\n${textInfo}\n\`\`\``, inline: false }
         )
         .setFooter({ text: 'Dữ liệu lấy trực tiếp từ mạng bay VATSIM' })
         .setTimestamp();
@@ -8334,23 +8343,32 @@ async function handleIvaoAtc(interaction) {
     // Xử lý Tần số (IVAO trả về float như 118.1)
     const freq = atc.atcSession?.frequency ? atc.atcSession.frequency.toFixed(3) : '199.998';
 
-    // Xử lý Remarks & ATIS (IVAO gộp chung ATIS Lines làm Remarks)
+    // Xử lý Remarks & ATIS và tự động nhận diện Website
     let textRemarks = '> *Không có thông tin ghi chú.*';
     if (atc.atis && atc.atis.lines && Array.isArray(atc.atis.lines) && atc.atis.lines.length > 0) {
-      textRemarks = atc.atis.lines.map(line => `> ${line}`).join('\n');
+      // Regex quét tên miền (domain)
+      const urlRegex = /(?:https?:\/\/)?(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z]{2,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)/gi;
+
+      textRemarks = atc.atis.lines.map(line => {
+        const formattedLine = line.replace(urlRegex, (match) => {
+          let url = match.startsWith('http') ? match : `https://${match}`;
+          return `[${match}](${url})`;
+        });
+        return `> ${formattedLine}`;
+      }).join('\n');
     }
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: 'IVAO Controller Profile', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
       .setTitle(`📡 Trạm: ${atc.callsign}`)
-      .setColor(0x0A2B5E) // Đổi sang màu Xanh Navy tối đậm (Đặc trưng của IVAO)
-      .setThumbnail('https://cdn-icons-png.flaticon.com/512/6356/6356863.png') 
+      .setColor(0x0A2B5E) 
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/10623/10623991.png') 
       .addFields(
-        { name: '👤 Controller', value: `**VID: ${atc.userId || 'Ẩn danh'}**`, inline: true }, // IVAO API thường chỉ public VID
+        { name: '👤 Controller', value: `**VID: ${atc.userId || 'Ẩn danh'}**`, inline: true }, 
         { name: '🎖️ Rating', value: `\`${ratingStr}\``, inline: true },
-        { name: '📶 Tần số', value: `\`${freq}\``, inline: true },
-        { name: '⏱️ Thời gian trực', value: `\`${timeOnline}\` (từ <t:${logonUnix}:t>)`, inline: false },
-        { name: '📝 Thông tin / Remarks', value: textRemarks, inline: false }
+        { name: '📶 Frequency', value: `\`${freq}\``, inline: true },
+        { name: '⏱️ Time on duty', value: `\`${timeOnline}\` (từ <t:${logonUnix}:t>)`, inline: false },
+        { name: '📝 Remarks', value: textRemarks, inline: false }
       )
       .setFooter({ text: `IVAO VID: ${atc.userId || 'N/A'}` })
       .setTimestamp();
@@ -8386,7 +8404,7 @@ async function handleIvaoAtis(interaction) {
     const embeds = [];
     
     atisList.forEach(atc => {
-      const atisCode = atc.atis.revision ? `**Thông tin ${atc.atis.revision}**` : '*Không định danh*';
+      const atisCode = atc.atis.revision ? `**Information ${atc.atis.revision}**` : '*Không định danh*';
       const timestamp = atc.atis.timestamp || atc.createdAt;
       const logonUnix = Math.floor(new Date(timestamp).getTime() / 1000);
       
@@ -8395,13 +8413,13 @@ async function handleIvaoAtis(interaction) {
 
       const embed = new EmbedBuilder()
         .setAuthor({ name: 'IVAO ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
-        .setTitle(`📻 Trạm: ${atc.callsign} (${atc.atcSession?.frequency?.toFixed(3) || 'N/A'})`)
+        .setTitle(`📻 Station: ${atc.callsign} (${atc.atcSession?.frequency?.toFixed(3) || 'N/A'})`)
         .setColor(0x0A2B5E) // Xanh Navy
         .setThumbnail('https://xe.ivao.aero/wordpress/wp-content/uploads/website/the-division/about/brand_logo_no_text.png')
         .addFields(
           { name: '🏷️ Identifier', value: atisCode, inline: true },
-          { name: '⏱️ Phát sóng lúc', value: `<t:${logonUnix}:R>`, inline: true },
-          { name: '📝 Nội dung bản tin', value: `\`\`\`yaml\n${textInfo}\n\`\`\``, inline: false }
+          { name: '⏱️ Update at', value: `<t:${logonUnix}:R>`, inline: true },
+          { name: '📝 Atis', value: `\`\`\`yaml\n${textInfo}\n\`\`\``, inline: false }
         )
         .setFooter({ text: 'Dữ liệu phát sóng trực tiếp từ mạng IVAO' })
         .setTimestamp();
