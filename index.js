@@ -146,8 +146,6 @@ async function savePendingUsers() {
   }
 }
 
-
-
 // Bộ nhớ tạm để lưu ảnh khi user mở Form (Modal)
 const userSellImages = new Map();
 
@@ -1574,12 +1572,24 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
       }
     }
 
-    // Build Embed
+    // Lấy giờ phút UTC hiện tại để hiển thị đẹp như Leaderboard kia
+    const now = new Date();
+    const utcTime = now.toUTCString();
+    const utcTimeShort = utcTime.split(' ')[4];
+    const utcHourMinute = utcTimeShort.split(':').slice(0, 2).join(':');
+
+    // Format khoảng thời gian lấy dữ liệu
+    const startStr = `${startTime.getUTCDate().toString().padStart(2, '0')}/${(startTime.getUTCMonth()+1).toString().padStart(2, '0')}`;
+    const endStr = `${endTime.getUTCDate().toString().padStart(2, '0')}/${(endTime.getUTCMonth()+1).toString().padStart(2, '0')}/${endTime.getUTCFullYear()}`;
+
+    // Build Embed với giao diện xịn xò + Ảnh Banner sếp đưa
     const embed = new EmbedBuilder()
-      .setTitle('🌐 Bảng xếp hạng ATC VATSEA')
-      .setDescription(`Dữ liệu từ **${startTime.toISOString().split('T')[0]}** đến **${endTime.toISOString().split('T')[0]}** (UTC)`)
-      .setColor(0x3498db)
-      .setFooter({ text: 'Tự động cập nhật mỗi giờ (Dữ liệu từ StatSim)' })
+      .setTitle('🌐 BẢNG XẾP HẠNG ATC VATSEA')
+      .setDescription(`**Thống kê thời gian kiểm soát tại các sân bay lớn trong khu vực VATSEA**\n📅 Dữ liệu từ **${startStr}** đến **${endStr}**\n🕒 Cập nhật lúc: ${utcHourMinute} UTC`)
+      .setColor(0x004c8f) // Màu xanh đậm chuẩn VATSIM
+      // Sếp dán link ảnh trực tiếp vào đây (Tui lấy tạm link ảnh sếp vừa gửi)
+      .setImage('https://vat-sea.com/wp-content/uploads/2023/02/VATSEA_LOGO-1000x310.png') 
+      .setFooter({ text: 'Tự động cập nhật mỗi giờ | Nguồn: StatSim API', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
       .setTimestamp();
 
     for (const category in positionIntervals) {
@@ -1590,22 +1600,31 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
         ranking.push({ pos, duration: calculateMergedDuration(positionsData[pos]) });
       }
       
+      // Sắp xếp thời gian từ cao xuống thấp
       ranking.sort((a, b) => b.duration - a.duration);
 
       let textBlock = '';
       let hasData = false;
+      const rankEmojis = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣'];
 
       ranking.forEach((item, index) => {
+        // Chỉ hiển thị những vị trí CÓ người ngồi (thời gian > 0)
         if (item.duration > 0) {
-          textBlock += `**${index + 1}.** ${item.pos}: \`${formatVatseaDuration(item.duration)}\`\n`;
+          const rankIcon = rankEmojis[index] || `**${index + 1}.**`;
+          textBlock += `${rankIcon} **${item.pos}** - \`${formatVatseaDuration(item.duration)}\`\n`;
           hasData = true;
-        } else {
-          textBlock += `**${index + 1}.** ${item.pos}: \`0s\`\n`;
         }
       });
 
+      // Icon theo từng hạng mục cho ngầu
+      let catIcon = '🔹';
+      if (category === 'Center') catIcon = '🚀';
+      if (category === 'Approach') catIcon = '📡';
+      if (category === 'Tower') catIcon = '🏢';
+      if (category === 'Ground') catIcon = '🛬';
+
       embed.addFields({
-        name: `🔹 ${category}`,
+        name: `${catIcon} ${category}`,
         value: hasData ? textBlock : 'Không có dữ liệu.\n',
         inline: false
       });
@@ -1615,9 +1634,8 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
     if (VATSEA_CHANNEL_ID) {
       const channel = await client.channels.fetch(VATSEA_CHANNEL_ID);
       
-      // NẾU MẤT JSON: Tìm lại ID cũ
       if (!vatseaMessageStore.messageId) {
-        const oldMsgId = await findOldMessageByTitle(VATSEA_CHANNEL_ID, 'Bảng xếp hạng ATC VATSEA');
+        const oldMsgId = await findOldMessageByTitle(VATSEA_CHANNEL_ID, 'BẢNG XẾP HẠNG ATC VATSEA') || await findOldMessageByTitle(VATSEA_CHANNEL_ID, 'Bảng xếp hạng ATC VATSEA');
         if (oldMsgId) vatseaMessageStore.messageId = oldMsgId;
       }
 
@@ -3255,11 +3273,26 @@ client.once('ready', async () => {
   } catch (error) {
     console.error('❌ Lỗi kéo dữ liệu Simbrief Users:', error);
   }
+  
+  
+  async function runVatseaUpdate() {
+    const now = new Date();
+    // Lấy thời điểm bắt đầu của tháng hiện tại (UTC)
+    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+    try {
+      await updateVatseaLeaderboardEmbed(startOfMonth, now);
+      console.log('✅ Đã auto-update VATSEA Leaderboard');
+    } catch (e) {
+      console.error('❌ Lỗi khi auto-update VATSEA Leaderboard:', e);
+    }
+  }
+
   // ================= TÍNH NĂNG: HẸN GIỜ CHẴN LEADERBOARD (FIX TRÒN GIỜ) =================
   function startHourlyLeaderboard() {
     // 1. CHẠY NGAY LẬP TỨC 1 LẦN KHI BẬT BOT ĐỂ UPDATE DATA MỚI NHẤT
     updateControllerLeaderboardEmbed();
     updatePilotLeaderboardEmbed();
+    runVatseaUpdate(); // <-- KÉO VATSEA VÀO ĐÂY
     console.log(`[Leaderboard] Đã cập nhật phát súng đầu tiên khi khởi động bot.`);
 
     // 2. TỰ ĐỘNG TÍNH TOÁN ĐỂ CANH ĐÚNG GIỜ CHẴN TIẾP THEO
@@ -3272,20 +3305,22 @@ client.once('ready', async () => {
     setTimeout(() => {
       updateControllerLeaderboardEmbed();
       updatePilotLeaderboardEmbed();
+      runVatseaUpdate(); // <-- KÉO VATSEA VÀO ĐÂY
       console.log(`[Leaderboard] Đã chạm mốc giờ chẵn! Bắt đầu khóa vòng lặp chuẩn 1 tiếng/lần.`);
 
       // Từ giây phút này trở đi, cứ đúng 60 phút (9h00, 10h00, 11h00...) là nó tự nã lệnh
       setInterval(() => {
         updateControllerLeaderboardEmbed();
         updatePilotLeaderboardEmbed();
+        runVatseaUpdate(); // <-- KÉO VATSEA VÀO ĐÂY
         console.log(`[Leaderboard] Cập nhật định kỳ giờ chẵn thành công.`);
       }, 60 * 60 * 1000);
       
     }, msUntilNextHour);
   }
-  
   // Kích hoạt bộ đếm giờ chẵn
   startHourlyLeaderboard();
+  
   // =========================================================================
   // restore bans timeouts
   for (const [userId, ban] of Object.entries(bans.users)) {
