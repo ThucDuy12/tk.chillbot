@@ -3235,6 +3235,15 @@ client.once('ready', async () => {
       .setName('setup_vatsim_verify')
       .setDescription('Tạo bảng xác thực CID nhận role VATSIM (Admin only)')
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    new SlashCommandBuilder()
+      .setName('atc_profile')
+      .setDescription('Tra cứu thông tin Controller đang online trên VATSIM')
+      .addStringOption(option => option.setName('station').setDescription('Callsign trạm (VD: RPLL_APP, VVTS_TWR)').setRequired(true)),
+      
+    new SlashCommandBuilder()
+      .setName('atis_vatsim')
+      .setDescription('Đọc ATIS trực tiếp từ mạng bay VATSIM')
+      .addStringOption(option => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS, WSSS)').setRequired(true)),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3698,6 +3707,12 @@ client.on('interactionCreate', async (interaction) => {
           break;
         case 'setup_vatsim_verify':
           await handleSetupVatsimVerify(interaction);
+          break;
+        case 'atc_profile':
+          await handleAtcProfile(interaction);
+          break;
+        case 'atis_vatsim':
+          await handleAtisVatsim(interaction);
           break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
@@ -8146,6 +8161,114 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         }
     }
 });
+
+// ===================== COMMAND: ATC PROFILE =====================
+async function handleAtcProfile(interaction) {
+  const station = interaction.options.getString('station').toUpperCase();
+  await interaction.deferReply();
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    // Gọi API v3 của VATSIM
+    const response = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
+    if (!response.ok) return interaction.editReply('❌ Lỗi kết nối đến hệ thống máy chủ VATSIM.');
+
+    const data = await response.json();
+    
+    // Tìm ATC khớp với callsign
+    const atc = data.controllers.find(c => c.callsign === station);
+
+    if (!atc) {
+      return interaction.editReply(`❌ Trạm **${station}** hiện tại đang Offline trên mạng bay VATSIM.`);
+    }
+
+    // Format Rating
+    const vatsimRatings = { 0: 'Susp', 1: 'OBS', 2: 'S1', 3: 'S2', 4: 'S3', 5: 'C1', 6: 'C2', 7: 'C3', 8: 'I1', 9: 'I2', 10: 'I3', 11: 'SUP', 12: 'ADM' };
+    const ratingStr = vatsimRatings[atc.rating] || `R${atc.rating}`;
+
+    // Tính toán thời gian Online (hh:mm)
+    const logon = new Date(atc.logon_time).getTime();
+    const diffMs = Date.now() - logon;
+    const hours = Math.floor(diffMs / 3600000);
+    const minutes = Math.floor((diffMs % 3600000) / 60000);
+    const timeOnline = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+
+    // Xử lý Tần số
+    const freq = (atc.frequency && atc.frequency !== '199.998' && atc.frequency !== 199.998) 
+      ? atc.frequency 
+      : 'Không có (199.998)';
+
+    // Xử lý Remarks (Thông tin thêm) - In ra theo dạng bullet point giống y hệt hình
+    let textRemarks = 'Không có thông tin.';
+    if (atc.text_atis && Array.isArray(atc.text_atis) && atc.text_atis.length > 0) {
+      // VATSIM trả về mảng chuỗi, map nó thành bullet point
+      textRemarks = atc.text_atis.map(line => `• ${line}`).join('\n');
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle(`📡 ${atc.callsign}`)
+      .setColor(0x3498db)
+      .setDescription(`**${atc.name || 'Ẩn danh'}** \` ${ratingStr} \` • \` ${freq} \`\n\n${textRemarks}`)
+      .setFooter({ text: `Time online: ${timeOnline}` });
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (err) {
+    console.error('Lỗi lệnh atc_profile:', err);
+    await interaction.editReply('❌ Đã có lỗi xảy ra khi kéo dữ liệu từ VATSIM.');
+  }
+}
+
+// ===================== COMMAND: ATIS VATSIM =====================
+async function handleAtisVatsim(interaction) {
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply();
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    const response = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
+    if (!response.ok) return interaction.editReply('❌ Lỗi kết nối đến hệ thống máy chủ VATSIM.');
+
+    const data = await response.json();
+    
+    // Lọc ra các trạm ATIS của sân bay này (VD: VVTS_ATIS, VVTS_A_ATIS, VVTS_D_ATIS)
+    const atisList = data.atis.filter(a => a.callsign.startsWith(icao) && a.callsign.includes('ATIS'));
+
+    if (!atisList || atisList.length === 0) {
+      return interaction.editReply(`❌ Hiện tại không có trạm ATIS nào đang phát sóng tại sân bay **${icao}** trên VATSIM.`);
+    }
+
+    const embeds = [];
+    
+    // Nếu sân bay chia ra Arrival ATIS và Departure ATIS, vòng lặp này sẽ in ra cả 2
+    atisList.forEach(atis => {
+      const atisCode = atis.atis_code ? `Thông tin ${atis.atis_code}` : 'Không có mã định danh';
+      
+      let textInfo = 'Không có nội dung.';
+      if (atis.text_atis && Array.isArray(atis.text_atis)) {
+        // VATSIM trả về ATIS dạng mảng nhiều dòng, ghép nó lại thành đoạn văn
+        textInfo = atis.text_atis.join(' ');
+      } else if (typeof atis.text_atis === 'string') {
+        textInfo = atis.text_atis;
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle(`📻 ${atis.callsign} - ${atisCode}`)
+        .setColor(0x2ecc71)
+        .setDescription(`\`\`\`\n${textInfo}\n\`\`\``)
+        .setFooter({ text: 'Dữ liệu phát sóng trực tiếp từ mạng VATSIM' })
+        .setTimestamp();
+        
+      embeds.push(embed);
+    });
+
+    await interaction.editReply({ embeds: embeds });
+
+  } catch (err) {
+    console.error('Lỗi lệnh atis_vatsim:', err);
+    await interaction.editReply('❌ Đã có lỗi xảy ra khi kéo dữ liệu ATIS từ VATSIM.');
+  }
+}
 
 // ===================== LOGIN =====================
 client.login(TOKEN);
