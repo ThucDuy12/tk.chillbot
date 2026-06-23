@@ -1575,7 +1575,7 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
     // Ép giờ hiện tại lùi về đúng phút 0, giây 0
     const now = new Date();
     const roundedNow = new Date(now);
-    roundedNow.setMinutes(0, 0, 0);
+    roundedNow.setUTCMinutes(0, 0, 0); // Thêm chữ UTC vào đây là xong!
 
     const utcHourMinute = `${roundedNow.getUTCHours().toString().padStart(2, '0')}:00`;
 
