@@ -5646,6 +5646,7 @@ async function handleSubmitProfile(interaction) {
   await interaction.showModal(modal);
 }
 
+// ===================== COMMAND: GỬI THÔNG BÁO (ANNOUNCEMENT) =====================
 async function handleAnnouncement(interaction) {
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
@@ -5682,10 +5683,16 @@ async function handleAnnouncement(interaction) {
 
     const result = await geminiModel.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 1500, temperature: 0.6 },
+      // TĂNG HẲN LÊN 8192 ĐỂ AI KHÔNG BAO GIỜ BỊ HỤT HƠI KHI VIẾT VĂN DÀI
+      generationConfig: { maxOutputTokens: 8192, temperature: 0.6 }, 
     });
     
     aiMessage = result.response.text().trim();
+    
+    // Quét sạch rác nếu AI lỡ dại tự bọc thêm thẻ code block markdown vào văn bản
+    if (aiMessage.startsWith('```')) {
+      aiMessage = aiMessage.replace(/^```(markdown|txt|html)?\n?/, '').replace(/\n?```$/, '').trim();
+    }
   } catch (err) {
     console.error("Lỗi khi Gemini viết lại thông báo:", err);
     // Nếu AI lỗi, fallback dùng luôn bản gốc
@@ -5693,7 +5700,8 @@ async function handleAnnouncement(interaction) {
   }
 
   const reqId = Date.now().toString();
-  // Lưu tạm vào RAM chờ user bấm nút
+  
+  // LƯU TOÀN BỘ NỘI DUNG GỐC (FULL 100%) VÀO BỘ NHỚ TẠM ĐỂ CHỜ GỬI
   pendingAnnouncements.set(reqId, { 
     channelId: channel.id, 
     rawMessage: rawMessage, 
@@ -5701,12 +5709,20 @@ async function handleAnnouncement(interaction) {
     targetTime: targetTime 
   });
 
+  // TỈA NGẮN CHO BẢNG PREVIEW ĐỂ KHÔNG LÀM SẬP DISCORD (Giới hạn 1024 ký tự)
+  const previewRaw = rawMessage.length > 900 
+    ? rawMessage.substring(0, 900) + '...\n\n[...Đã ẩn bớt phần còn lại...]' 
+    : rawMessage;
+  const previewAi = aiMessage.length > 900 
+    ? aiMessage.substring(0, 900) + '...\n\n[...Đã ẩn bớt phần còn lại...]' 
+    : aiMessage;
+
   const embed = new EmbedBuilder()
-    .setTitle('✨ Gợi ý từ Gemini AI')
-    .setDescription('Mình đã viết lại nội dung của bạn cho chuyên nghiệp hơn. Bạn muốn dùng bản nào để gửi đi?')
+    .setTitle('✨ Gợi ý từ Gemini')
+    .setDescription('Mình đã viết lại nội dung của bạn cho chuyên nghiệp hơn. Bạn muốn dùng bản nào để gửi đi?\n\n⚠️ *Lưu ý: Bảng preview bên dưới có thể bị ẩn bớt nếu quá dài, nhưng khi bạn bấm nút gửi thì nội dung sẽ đăng lên ĐẦY ĐỦ 100%.*')
     .addFields(
-      { name: '📝 Bản gốc của bạn', value: `\`\`\`\n${rawMessage}\n\`\`\`` },
-      { name: '🤖 Bản do AI nâng cấp', value: `\`\`\`\n${aiMessage}\n\`\`\`` },
+      { name: '📝 Bản gốc của bạn', value: `\`\`\`\n${previewRaw}\n\`\`\`` },
+      { name: '🤖 Bản do AI nâng cấp', value: `\`\`\`\n${previewAi}\n\`\`\`` },
       { name: '⏰ Lịch trình', value: targetTime ? `<t:${Math.floor(targetTime/1000)}:F>` : 'Gửi ngay lập tức' }
     )
     .setColor(0x3498db);
@@ -5718,8 +5734,6 @@ async function handleAnnouncement(interaction) {
   );
 
   await interaction.editReply({ content: `**Lưu ID lịch trình nếu cần hủy:** \`${reqId}\``, embeds: [embed], components: [row] });
-
-  await interaction.editReply({ embeds: [embed], components: [row] });
 }
 
 async function handleSetupAtcNoti(interaction) {
