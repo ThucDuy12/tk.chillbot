@@ -3722,6 +3722,12 @@ client.on('interactionCreate', async (interaction) => {
         case 'atis_vatsim':
           await handleAtisVatsim(interaction);
           break;
+        case 'ivao_atc':
+          await handleIvaoAtc(interaction);
+          break;
+        case 'ivao_atis':
+          await handleIvaoAtis(interaction);
+          break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
           const anh2 = interaction.options.getAttachment('anh2');
