@@ -7342,7 +7342,7 @@ async function handleOnlineAtc(interaction) {
     const embed = new EmbedBuilder()
       .setTitle(`📡 ATC Đang Online - ${icao}`)
       .setColor(0x2ecc71)
-      .setThumbnail('https://cdn-icons-png.flaticon.com/512/8144/8144342.png')
+      .setThumbnail('https://cdn-icons-png.freepik.com/512/6938/6938996.png')
       .setTimestamp()
       .setFooter({ text: 'Dữ liệu trực tiếp từ VATSIM' });
 
