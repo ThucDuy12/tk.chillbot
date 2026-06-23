@@ -3759,7 +3759,6 @@ client.on('interactionCreate', async (interaction) => {
         const customId = interaction.customId;
 
         // ===================== XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC (ĐỂ NGOÀI CÙNG) =====================
-        // ===================== XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC =====================
         if (customId.startsWith('music_')) {
             const queue = musicQueues.get(interaction.guild.id);
             if (!queue) {
@@ -3811,6 +3810,27 @@ client.on('interactionCreate', async (interaction) => {
                 }
             }
             return; 
+        }
+
+        if (interaction.customId.startsWith('ann_editai_')) {
+          const reqId = interaction.customId.replace('ann_editai_', '');
+          const data = pendingAnnouncements.get(reqId);
+          if (!data) return interaction.reply({ content: '❌ Phiên đã hết hạn.', ephemeral: true });
+
+          const modal = new ModalBuilder()
+            .setCustomId(`modalai_${reqId}`)
+            .setTitle('Sửa nội dung AI');
+
+          const textInput = new TextInputBuilder()
+            .setCustomId('ai_text')
+            .setLabel('Sửa theo ý bạn (sẽ gửi bản này)')
+            .setStyle(TextInputStyle.Paragraph)
+            .setValue(data.aiMessage.substring(0, 4000))
+            .setRequired(true);
+
+          modal.addComponents(new ActionRowBuilder().addComponents(textInput));
+          await interaction.showModal(modal);
+          return; // Dừng tại đây
         }
 
         // ===================== XỬ LÝ NÚT BẤM MARKETPLACE =====================
@@ -3945,6 +3965,50 @@ client.on('interactionCreate', async (interaction) => {
           const newEmbed = createMarketplaceEmbed(data, parsedData.sellerId, image);
           await interaction.update({ embeds: [newEmbed] });
           return;
+        }
+        // Tình huống 1: Sửa thông báo cũ trên kênh
+        if (interaction.customId.startsWith('editannoun_')) {
+          const parts = interaction.customId.split('_');
+          const channelId = parts[1];
+          const messageId = parts[2];
+          const newText = interaction.fields.getTextInputValue('new_content');
+
+          try {
+            const channel = await interaction.client.channels.fetch(channelId);
+            const msg = await channel.messages.fetch(messageId);
+            await msg.edit(newText);
+            await interaction.reply({ content: '✅ Đã cập nhật thành công thông báo cũ!', ephemeral: true });
+          } catch (err) {
+            await interaction.reply({ content: '❌ Lỗi không sửa được tin nhắn (Có thể khác tác giả).', ephemeral: true });
+          }
+        }
+
+        // Tình huống 2: Người dùng sửa xong bản AI, cập nhật lại màn hình Preview
+        if (interaction.customId.startsWith('modalai_')) {
+          const reqId = interaction.customId.replace('modalai_', '');
+          const newText = interaction.fields.getTextInputValue('ai_text');
+          const data = pendingAnnouncements.get(reqId);
+
+          if (!data) return interaction.reply({ content: '❌ Phiên đã hết hạn.', ephemeral: true });
+
+          // Lưu lại nội dung người dùng vừa sửa vào bộ nhớ tạm
+          data.aiMessage = newText;
+          pendingAnnouncements.set(reqId, data);
+
+          // Cắt tỉa lại cho gọn bảng Preview (tránh sập bot)
+          const previewRaw = data.rawMessage.length > 900 ? data.rawMessage.substring(0, 900) + '...\n[...]' : data.rawMessage;
+          const previewAi = newText.length > 900 ? newText.substring(0, 900) + '...\n[...]' : newText;
+
+          const embed = EmbedBuilder.from(interaction.message.embeds[0])
+            .setDescription('✨ **Bạn đã tự chỉnh sửa lại bản AI.** Bạn chốt gửi đi chưa?')
+            .setFields(
+              { name: '📝 Bản gốc của bạn', value: `\`\`\`\n${previewRaw}\n\`\`\`` },
+              { name: '🤖 Bản do AI nâng cấp (ĐÃ SỬA)', value: `\`\`\`\n${previewAi}\n\`\`\`` },
+              { name: '⏰ Lịch trình', value: data.targetTime ? `<t:${Math.floor(data.targetTime/1000)}:F>` : 'Gửi ngay lập tức' }
+            )
+            .setColor(0xf1c40f); // Đổi sang màu vàng cho biết là đã edit
+
+          await interaction.update({ embeds: [embed] });
         }
         // Nộp form từ chối bài bán
         if (interaction.customId.startsWith('market_reject_modal_')) {
@@ -5729,6 +5793,8 @@ async function handleAnnouncement(interaction) {
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`ann_okay_${reqId}`).setLabel('✅ Gửi bản AI').setStyle(ButtonStyle.Success),
+    // THÊM NÚT SỬA VÀO ĐÂY:
+    new ButtonBuilder().setCustomId(`ann_editai_${reqId}`).setLabel('✏️ Sửa bản AI').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`ann_orig_${reqId}`).setLabel('✅ Gửi bản gốc').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(`ann_reject_${reqId}`).setLabel('❌ Hủy gửi').setStyle(ButtonStyle.Danger)
   );
@@ -7079,37 +7145,42 @@ async function handleRoute(interaction) {
   }
 }
 
-// ===================== COMMAND: EDIT & CANCEL ANNOUNCEMENT =====================
+// ===================== COMMAND: SỬA THÔNG BÁO CŨ (/edit_announ) =====================
 async function handleEditAnnoun(interaction) {
+  // Kiểm tra quyền
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
-  if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-    return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
-  }
+  if (!hasDev && !hasAdmin) return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
 
-  const id = interaction.options.getString('id');
-  const newContent = interaction.options.getString('content');
-  const channelOpt = interaction.options.getChannel('channel') || interaction.channel;
+  const channel = interaction.options.getChannel('channel');
+  const messageId = interaction.options.getString('message_id');
 
-  await interaction.deferReply({ ephemeral: true });
-
-  // 1. Tìm xem có nằm trong danh sách đang chờ gửi (hẹn giờ) không
-  const scheduledIndex = scheduledAnnouncements.findIndex(a => a.id === id);
-  if (scheduledIndex !== -1) {
-    scheduledAnnouncements[scheduledIndex].content = newContent;
-    await db.saveAnnouncements(scheduledAnnouncements);
-    return interaction.editReply({ content: '✅ Đã cập nhật nội dung cho thông báo đã lên lịch!' });
-  }
-
-  // 2. Nếu không, cố gắng tìm và sửa tin nhắn đã gửi ở trong kênh
   try {
-    const message = await channelOpt.messages.fetch(id);
-    if (message) {
-      await message.edit({ content: newContent });
-      return interaction.editReply({ content: '✅ Đã chỉnh sửa tin nhắn thành công!' });
-    }
-  } catch (err) {
-    return interaction.editReply({ content: `❌ Không tìm thấy tin nhắn với ID \`${id}\` trong kênh <#${channelOpt.id}>, hoặc nó không phải tin nhắn hẹn giờ. Nếu đây là tin nhắn đã gửi ở kênh khác, vui lòng chọn đúng mục "channel" trong lệnh.` });
+    // Tìm tin nhắn theo ID
+    const targetMsg = await channel.messages.fetch(messageId);
+    if (!targetMsg) return interaction.reply({ content: '❌ Không tìm thấy tin nhắn với ID này.', ephemeral: true });
+
+    // Tạo bảng nhập (Modal)
+    const modal = new ModalBuilder()
+      .setCustomId(`editannoun_${channel.id}_${messageId}`)
+      .setTitle('Sửa thông báo');
+
+    // Chèn nguyên văn nội dung cũ vào bảng (giới hạn 4000 ký tự của Discord)
+    const textInput = new TextInputBuilder()
+      .setCustomId('new_content')
+      .setLabel('Nội dung cần sửa')
+      .setStyle(TextInputStyle.Paragraph)
+      .setValue(targetMsg.content.substring(0, 4000)) 
+      .setRequired(true);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(textInput));
+    
+    // Bật Pop-up lên màn hình người dùng
+    await interaction.showModal(modal);
+
+  } catch (error) {
+    console.error('Lỗi lấy tin nhắn cũ:', error);
+    await interaction.reply({ content: '❌ Có lỗi xảy ra, đảm bảo ID đúng và bot có quyền xem kênh đó.', ephemeral: true });
   }
 }
 
