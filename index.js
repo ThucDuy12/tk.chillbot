@@ -928,7 +928,7 @@ async function updateControllerLeaderboardEmbed() {
       .setColor(0xFFD700)
       .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
       .setFooter({ text: 'Tự động cập nhật mỗi giờ | Giờ hiển thị: UTC' })
-      .setTimestamp();
+      .setTimestamp(roundedNow);
     
     // Add each category
     const categories = ['Center', 'Approach', 'Tower', 'Ground'];
@@ -1572,11 +1572,12 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
       }
     }
 
-    // Lấy giờ phút UTC hiện tại để hiển thị đẹp như Leaderboard kia
+    // Ép giờ hiện tại lùi về đúng phút 0, giây 0
     const now = new Date();
-    const utcTime = now.toUTCString();
-    const utcTimeShort = utcTime.split(' ')[4];
-    const utcHourMinute = utcTimeShort.split(':').slice(0, 2).join(':');
+    const roundedNow = new Date(now);
+    roundedNow.setMinutes(0, 0, 0);
+
+    const utcHourMinute = `${roundedNow.getUTCHours().toString().padStart(2, '0')}:00`;
 
     // Format khoảng thời gian lấy dữ liệu
     const startStr = `${startTime.getUTCDate().toString().padStart(2, '0')}/${(startTime.getUTCMonth()+1).toString().padStart(2, '0')}`;
@@ -1590,7 +1591,7 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
       // Sếp dán link ảnh trực tiếp vào đây (Tui lấy tạm link ảnh sếp vừa gửi)
       .setImage('https://i.ibb.co/5yMXWyR/VATSEA-LOGO-1000x310-Photoroom.png') 
       .setFooter({ text: 'Tự động cập nhật mỗi giờ | Nguồn: StatSim API', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
-      .setTimestamp();
+      .setTimestamp(roundedNow);
 
     for (const category in positionIntervals) {
       const positionsData = positionIntervals[category];
