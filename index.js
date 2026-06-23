@@ -3319,8 +3319,6 @@ client.once('ready', async () => {
       
     }, msUntilNextHour);
   }
-  // Kích hoạt bộ đếm giờ chẵn
-  startHourlyLeaderboard();
   
   // =========================================================================
   // restore bans timeouts
@@ -3440,10 +3438,11 @@ client.once('ready', async () => {
   }, 60 * 60 * 1000); // 1 giờ chạy 1 lần
 
   // ensure messages exist for editing
-  await ensureVatsimMessageExists();
-  await ensureLeaderboardMessagesExist();
-  await loadAllLeaderboards();
-
+  await ensureVatsimMessageExists();
+  await ensureLeaderboardMessagesExist();
+  await loadAllLeaderboards(); // Đợi bot kéo xong data Sheets rồi...
+  
+  startHourlyLeaderboard(); // ...thì mới được nổ súng cập nhật Leaderboard!
   await ensureACDMMessageExists();
   
   // Thêm dòng này để bật kết nối lấy dữ liệu ACDM liên tục
