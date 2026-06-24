@@ -6502,86 +6502,61 @@ async function handleMetar(interaction) {
   }
 }
 
-// ===================== ACTIVE RUNWAY CALCULATOR (HYBRID: API + LOCAL DB) =====================
 async function handleRunway(interaction) {
   const icao = interaction.options.getString('icao').toUpperCase();
   await interaction.deferReply();
 
   try {
-    // 1. LẤY METAR ĐỂ TÍNH GIÓ 
+    // 1. LẤY METAR ĐỂ TÍNH GIÓ (Ưu tiên dùng fetchATIS hoặc CheckWX như cũ)
     let metar = null;
     const atisData = await fetchATIS(icao);
-    
-    if (atisData && atisData.metar) {
-      metar = atisData.metar; 
-    } else {
-      metar = await fetchMetarFromCheckWX(icao);
-    }
+    metar = atisData ? atisData.metar : await fetchMetarFromCheckWX(icao);
 
-    if (!metar) {
-      return await interaction.editReply({ content: `❌ Không lấy được dữ liệu METAR cho sân bay ${icao} trên toàn bộ hệ thống để tính toán gió.` });
-    }
+    if (!metar) return await interaction.editReply(`❌ Không lấy được METAR cho **${icao}**.`);
     
-    // Tìm hướng gió và tốc độ gió trong METAR (VD: 25015G25KT, VRB02KT)
     const windMatch = metar.match(/(VRB|\d{3})(\d{2,3})(?:G\d{2,3})?KT/);
-    if (!windMatch) {
-      return await interaction.editReply({ content: `❌ Không tìm thấy thông số gió hợp lệ trong METAR của ${icao}.\n\`METAR: ${metar}\`` });
-    }
+    if (!windMatch) return await interaction.editReply(`❌ METAR của ${icao} không có thông tin gió.`);
 
-    const windDirStr = windMatch[1];
+    const windDir = windMatch[1] === 'VRB' ? null : parseInt(windMatch[1], 10);
     const windSpeed = parseInt(windMatch[2], 10);
 
     let embed = new EmbedBuilder()
       .setTitle(`🛫 Active Runway Indicator - ${icao}`)
-      .setDescription(`Dựa trên METAR gần nhất:\n\`\`\`${metar}\`\`\``)
+      .setDescription(`Dựa trên METAR:\n\`\`\`${metar}\`\`\``)
       .setColor(0x3498db)
       .setTimestamp();
 
-    // Nếu gió đổi hướng liên tục (VRB) hoặc quá nhẹ (<3 KT)
-    if (windDirStr === 'VRB' || windSpeed < 3) {
-      embed.addFields({ name: '🌬️ Gió', value: 'Gió nhẹ hoặc đổi hướng liên tục (Calm/Variable).', inline: false });
-      embed.addFields({ name: '✅ Đề xuất', value: 'Có thể sử dụng đường băng tùy ý hoặc theo quy trình tiêu chuẩn của ATC/Sân bay.', inline: false });
-      return await interaction.editReply({ embeds: [embed] });
+    if (windDir === null || windSpeed < 3) {
+      return await interaction.editReply({ embeds: [embed.addFields({ name: '🌬️ Gió', value: 'Gió nhẹ/Variable, tự chọn đường băng.', inline: false })] });
     }
 
-    const windDir = parseInt(windDirStr, 10);
-    embed.addFields({ name: '🌬️ Gió hiện tại', value: `Hướng: **${windDir}°** | Tốc độ: **${windSpeed} KT**`, inline: false });
-
-    // ==========================================
-    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỰ ĐỘNG TỪ API
-    // ==========================================
+    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỪ OPENAIP (ĐỘNG VÀ CHUẨN)
     let runways = [];
     try {
       const fetch = (await import('node-fetch')).default;
-      const res = await fetch(`https://api.checkwx.com/station/${icao}`, {
-        headers: { 'X-API-Key': CHECKWX_API_KEY }
-      });
+      // OpenAIP API lấy thông tin sân bay (Airport) và đường băng (Runway)
+      // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỰ ĐỘNG TỪ API
+      const openAipKey = process.env.OPENAIP_API_KEY;
+      if (!openAipKey) console.warn("⚠️ Chưa cấu hình OPENAIP_API_KEY trong .env!");
       
-      if (res.ok) {
-        const data = await res.json();
-        // Cào đường băng từ API
-        if (data && data.data && data.data.length > 0 && data.data[0].runways) {
-          data.data[0].runways.forEach(rw => {
-            if (rw.ident1) {
-              const num1 = parseInt(rw.ident1.replace(/\D/g, ''), 10);
-              if (!isNaN(num1)) runways.push({ id: rw.ident1, heading: num1 * 10 });
-            }
-            if (rw.ident2) {
-              const num2 = parseInt(rw.ident2.replace(/\D/g, ''), 10);
-              if (!isNaN(num2)) runways.push({ id: rw.ident2, heading: num2 * 10 });
-            }
-          });
+      const res = await fetch(`https://api.openaip.net/api/airports?icao=${icao}&apiKey=${openAipKey}`); // Đây là key công cộng
+      const data = await res.json();
+      
+      if (data.items && data.items.length > 0) {
+        const airport = data.items[0];
+        if (airport.runways) {
+          runways = airport.runways.map(rw => ({
+            id: rw.designator, // VD: 07L, 25R
+            heading: rw.bearing // Heading thực tế từ OpenAIP
+          }));
         }
       }
-    } catch (e) {
-      console.error('Lỗi khi kéo dữ liệu sân bay toàn cầu:', e);
-    }
+    } catch (e) { console.error('Lỗi OpenAIP:', e); }
 
-    // ==========================================
-    // 3. HỆ THỐNG DỰ PHÒNG (DATABASE NỘI BỘ) - Cứu cánh khi API ngáo
-    // ==========================================
+    // 3. FALLBACK: Nếu OpenAIP tèo, dùng danh sách cũ của bạn
     if (runways.length === 0) {
-      const fallbackRunways = {
+      const fallback = {
+        // Vietnam
         VVTS: [{ id: '07', heading: 70 }, { id: '25', heading: 250 }],
         VVNB: [{ id: '11', heading: 110 }, { id: '29', heading: 290 }],
         VVDN: [{ id: '17', heading: 170 }, { id: '35', heading: 350 }],
@@ -6683,60 +6658,33 @@ async function handleRunway(interaction) {
         VTSP: [{ id: '09', heading: 90 }, { id: '27', heading: 270 }],
         RPVM: [{ id: '04', heading: 40 }, { id: '22', heading: 220 }],
         RPLC: [{ id: '02', heading: 20 }, { id: '20', heading: 200 }],
-        RPMD: [{ id: '05', heading: 50 }, { id: '23', heading: 230 }]
+        RPMD: [{ id: '05', heading: 50 }, { id: '23', heading: 230 }],
       };
-      
-      // Nếu có trong sổ tay nội bộ thì lôi ra xài
-      if (fallbackRunways[icao]) {
-        runways = fallbackRunways[icao];
-      }
+      runways = fallback[icao] || [];
     }
 
-    // ==========================================
-    // 4. TÍNH TOÁN
-    // ==========================================
     if (runways.length === 0) {
-      embed.addFields({ 
-        name: '⚠️ Lưu ý', 
-        value: `Sân bay **${icao}** không có dữ liệu đường băng trong hệ thống API toàn cầu lẫn Database nội bộ. Tuy nhiên, dựa vào METAR, gió đang thổi từ hướng **${windDir}°**, bạn có thể tự đối chiếu với Chart nhé!` 
-      });
-    } else {
-      let bestRunway = null;
-      let minDiff = 180;
-
-      // Tìm đường băng đón gió trực diện nhất (Headwind)
-      runways.forEach(rw => {
-        let diff = Math.abs(windDir - rw.heading);
-        if (diff > 180) diff = 360 - diff; 
-        
-        if (diff < minDiff) {
-          minDiff = diff;
-          bestRunway = rw;
-        }
-      });
-
-      // Tính Component (Dùng lượng giác để bóc tách gió ngược và ngang)
-      const angleRad = minDiff * (Math.PI / 180);
-      const headwind = Math.abs(Math.round(Math.cos(angleRad) * windSpeed));
-      const crosswind = Math.abs(Math.round(Math.sin(angleRad) * windSpeed));
-
-      embed.addFields({
-        name: '🎯 Đường băng thuận lợi nhất',
-        value: `**Runway ${bestRunway.id}** (Lệch gió so với trục đường băng: ${minDiff}°)`,
-        inline: false
-      });
-      embed.addFields({
-        name: '✈️ Phân tích thành phần gió',
-        value: `Gió ngược (Headwind): **${headwind} KT**\nGió ngang (Crosswind): **${crosswind} KT**`,
-        inline: false
-      });
-      embed.setFooter({ text: 'Lưu ý: Luôn tuân theo huấn lệnh của ATC (nếu có).' });
+        return await interaction.editReply(`❌ Không tìm thấy dữ liệu đường băng cho ${icao} cả từ OpenAIP và DB nội bộ.`);
     }
 
+    // 4. TÍNH TOÁN ĐƯỜNG BĂNG TỐT NHẤT (Đón gió ngược)
+    let bestRunway = null;
+    let minDiff = 180;
+    runways.forEach(rw => {
+      let diff = Math.abs(windDir - rw.heading);
+      if (diff > 180) diff = 360 - diff;
+      if (diff < minDiff) { minDiff = diff; bestRunway = rw; }
+    });
+
+    embed.addFields(
+        { name: '🌬️ Gió', value: `${windDir}° / ${windSpeed} KT`, inline: true },
+        { name: '🎯 Active Runway', value: `**${bestRunway.id}** (Lệch: ${minDiff}°)` }
+    );
     await interaction.editReply({ embeds: [embed] });
+
   } catch (error) {
-    console.error('Runway calc error:', error);
-    await interaction.editReply({ content: '❌ Có lỗi xảy ra khi tính toán đường băng.' });
+    console.error(error);
+    await interaction.editReply('❌ Lỗi xử lý.');
   }
 }
 
