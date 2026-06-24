@@ -4097,6 +4097,17 @@ client.on('messageCreate', async (message) => {
 
           const imgBuffer = await downloadBuffer(attachment.url);
           const base64Image = imgBuffer.toString('base64');
+          
+          // =========================================================================
+          // KHỞI TẠO CÔNG CỤ BÁO CÁO ADMIN (GỬI THẲNG VÀO KÊNH TK-CHILL-ADMIN-BOT)
+          // =========================================================================
+          const adminChannel = client.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
+          const notifyAdmin = (title, desc, color) => {
+              if (adminChannel) {
+                  adminChannel.send({ embeds: [new EmbedBuilder().setTitle(title).setDescription(desc).setColor(color).setTimestamp()] }).catch(() => {});
+              }
+          };
+
           // =========================================================================
           // CÂU LỆNH THẦN CHÚ ÉP GEMINI KIỂM DUYỆT ẢNH VÀ TRẢ VỀ JSON CHI TIẾT
           // =========================================================================
@@ -4130,11 +4141,13 @@ client.on('messageCreate', async (message) => {
 
           // Kiểm tra xem AI có chê ảnh fake không
           if (aiData.fake || !aiData.cid) {
+              notifyAdmin('🚨 Cảnh báo: Ảnh không hợp lệ', `**User:** <@${message.author.id}>\n**Lý do:** Bức ảnh nộp lên không giống giao diện VATSIM hoặc bị cắt ghép sơ sài.`, 0xff0000);
               return processingMsg.edit(`❌ **BOT TỪ CHỐI XÁC THỰC!**\nBức ảnh này không giống giao diện chuẩn của trang my.vatsim.net hoặc cắt ghép quá sơ sài. Vui lòng chụp full màn hình rõ nét!`);
           }
 
           const aiCid = parseInt(aiData.cid);
           if (isNaN(aiCid) || aiCid < 10000) {
+              notifyAdmin('🚨 Cảnh báo: Lỗi trích xuất CID', `**User:** <@${message.author.id}>\n**Lý do:** Bot không tìm thấy số CID hợp lệ trên ảnh.`, 0xffa500);
               return processingMsg.edit(`❌ **Xác thực thất bại!**\nBOT không thể tìm thấy mã số CID hợp lệ trong bức ảnh này. Vui lòng chụp lại rõ ràng hơn.`);
           }
 
@@ -4150,11 +4163,13 @@ client.on('messageCreate', async (message) => {
           const existingCid = existingData ? getCid(existingData) : null;
 
           if (existingCid && existingCid !== aiCid) {
+              notifyAdmin('⚠️ Cảnh báo: Đổi CID trái phép', `**User:** <@${message.author.id}>\n**CID Cũ:** ${existingCid} | **CID Mới nộp:** ${aiCid}\n**Lý do:** Mỗi tài khoản Discord chỉ được giữ 1 CID duy nhất.`, 0xffa500);
               return processingMsg.edit(`❌ Cảnh báo! Bạn đã từng liên kết với CID **${existingCid}** rồi. Mỗi tài khoản Discord chỉ được giữ 1 CID duy nhất!`);
           }
 
           const isCidTaken = Object.values(currentVatsimLinks).some(val => getCid(val) === aiCid);
           if (isCidTaken && existingCid !== aiCid) {
+              notifyAdmin('🚨 Cảnh báo: Trùng CID (Nghi vấn ăn cắp)', `**User:** <@${message.author.id}>\n**CID Khai báo:** ${aiCid}\n**Lý do:** CID này đã được một người khác trong Server liên kết từ trước.`, 0xff0000);
               return processingMsg.edit(`❌ CID **${aiCid}** đã được một người khác trong Server liên kết trước đó. Nếu bạn bị giả mạo, hãy báo Admin.`);
           }
 
@@ -4163,10 +4178,16 @@ client.on('messageCreate', async (message) => {
           // ========================================================
           const stats = await fetchVatsimStatsById(aiCid);
           
-          if (!stats) return processingMsg.edit(`❌ CID **${aiCid}** không tồn tại trên hệ thống dữ liệu VATSIM.`);
-          if (stats.rating === 0) return processingMsg.edit(`❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.`);
+          if (!stats) {
+              notifyAdmin('🚨 Cảnh báo: Sai CID', `**User:** <@${message.author.id}>\n**CID Khai báo:** ${aiCid}\n**Lý do:** CID hoàn toàn không tồn tại trên hệ thống VATSIM.`, 0xff0000);
+              return processingMsg.edit(`❌ CID **${aiCid}** không tồn tại trên hệ thống dữ liệu VATSIM.`);
+          }
+          if (stats.rating === 0) {
+              notifyAdmin('🚨 Cảnh báo: Tài khoản bị khóa', `**User:** <@${message.author.id}>\n**CID Khai báo:** ${aiCid}\n**Lý do:** Tài khoản VATSIM này đang bị Suspended.`, 0xff0000);
+              return processingMsg.edit(`❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.`);
+          }
 
-          // Hàm chuẩn hóa chuỗi và tách lấy chữ cái đầu (VD: "west asia" -> "wa")
+          // Hàm chuẩn hóa chuỗi và tách lấy chữ cái đầu
           const normalize = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
           const makeInitials = (str) => String(str || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).map(w => w[0]).join('');
 
@@ -4191,7 +4212,7 @@ client.on('messageCreate', async (message) => {
           if (apiDiv === imgDivCode || apiDiv === imgDivRaw || imgDivRaw.includes(apiDiv) || apiDiv.includes(imgDivRaw) || imgDivCode.includes(apiDiv)) isDivMatch = true;
           if (imgDivInitials === apiDiv || imgDivInitials.includes(apiDiv)) isDivMatch = true; 
           
-          // ĐẶC CÁCH CHO ANH EM VATSEA (Vì API trả về SEA nhưng ai cũng gọi là VATSEA / Southeast Asia)
+          // ĐẶC CÁCH CHO ANH EM VATSEA
           if (apiDiv === 'sea' && (imgDivRaw.includes('southeast') || imgDivCode.includes('vatsea') || imgDivCode === 'sea')) isDivMatch = true;
           if (apiDiv === 'wa' && imgDivRaw.includes('westasia')) isDivMatch = true;
           if (apiDiv === 'vatpac' && imgDivRaw.includes('australia')) isDivMatch = true;
@@ -4204,6 +4225,9 @@ client.on('messageCreate', async (message) => {
                   `**User:** ${getUserIdentifier(message.author)}\n**CID Khai báo:** ${aiCid}\n\n**Lý do từ chối:** Có dấu hiệu dùng F12 (Inspect Element) để đổi mã CID.\n- Region trên ảnh: \`${aiData.raw_region} (${aiData.region_code})\` | Thực tế API: \`${stats.region}\`\n- Division trên ảnh: \`${aiData.raw_division} (${aiData.division_code})\` | Thực tế API: \`${stats.division}\``, 
                   0xff0000
               ));
+
+              // BÁO CÁO ADMIN KÊNH RIÊNG
+              notifyAdmin('🚨 Cảnh báo: F12 (Fake CID)', `**User:** <@${message.author.id}>\n**CID Khai báo:** ${aiCid}\n**Lý do:** Thông tin Region/Division trên ảnh không khớp dữ liệu API. Có dấu hiệu dùng F12.`, 0xff0000);
 
               return processingMsg.edit(`🚨 **PHÁT HIỆN GIAN LẬN!**\nThông tin Region/Division trên ảnh không khớp với dữ liệu gốc của CID **${aiCid}**. Vui lòng không sử dụng F12 để thay đổi mã nguồn trang web!`);
           }
@@ -4224,6 +4248,7 @@ client.on('messageCreate', async (message) => {
                   success = true;
                   finalReply = `🎉 **XÁC THỰC THÀNH CÔNG!**\nBạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã tự động cấp Role **VATSIM Pilot** cho bạn trong Server!`;
               } else {
+                  notifyAdmin('⚠️ Cảnh báo: Chưa đủ giờ bay Pilot', `**User:** <@${message.author.id}>\n**CID:** ${aiCid}\n**Lý do:** Mới có ${stats.pilot_hours.toFixed(1)} giờ bay (Yêu cầu > 10).`, 0xffa500);
                   finalReply = `❌ Từ chối: Ảnh chính chủ, nhưng bạn mới có **${stats.pilot_hours.toFixed(1)}** giờ bay. Cần >10 giờ để nhận role Pilot.`;
               }
           } else {
@@ -4232,6 +4257,7 @@ client.on('messageCreate', async (message) => {
                   success = true;
                   finalReply = `🎉 **XÁC THỰC THÀNH CÔNG!**\nRating của bạn hợp lệ. Đã tự động cấp Role **VATSIM ATC** cho bạn trong Server!`;
               } else {
+                  notifyAdmin('⚠️ Cảnh báo: Chưa đủ Rating ATC', `**User:** <@${message.author.id}>\n**CID:** ${aiCid}\n**Lý do:** Rating đang là OBS (Yêu cầu >= S1).`, 0xffa500);
                   finalReply = `❌ Từ chối: Ảnh chính chủ, nhưng Rating của bạn là OBS. Yêu cầu >= S1.`;
               }
           }
@@ -4257,7 +4283,6 @@ client.on('messageCreate', async (message) => {
 
           // LOGIC MỚI: CHỈ XÓA PHIÊN KHI THÀNH CÔNG, THẤT BẠI CHO THỬ LẠI
           if (success) {
-              // Gộp dữ liệu vào Cache để chống thất thoát dữ liệu do Google API đọc sót
               vatsimLinksCache[message.author.id] = {
                   cid: aiCid,
                   username: message.author.username,
@@ -4268,6 +4293,9 @@ client.on('messageCreate', async (message) => {
               // Tắt cái báo thức 5 phút đi vì đã xác thực xong
               if (verifySession.timeoutId) clearTimeout(verifySession.timeoutId);
               
+              // BÁO CÁO ADMIN THÀNH CÔNG
+              notifyAdmin('✅ Xác thực VATSIM thành công', `**User:** <@${message.author.id}>\n**Role vừa cấp:** VATSIM ${verifySession.roleType.toUpperCase()}\n**CID:** ${aiCid}`, 0x2ecc71);
+
               // Dọn dẹp RAM
               pendingVerifyDMs.delete(message.author.id); 
               return processingMsg.edit(finalReply);
