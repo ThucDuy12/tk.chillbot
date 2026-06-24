@@ -5260,6 +5260,14 @@ async function handleButton(interaction) {
       // Nếu họ đã có 1 trong 2 role, khả năng cao họ đã có mặt trong "Sổ Đỏ"
       if (member.roles.cache.has(ATC_ROLE_ID) || member.roles.cache.has(PILOT_ROLE_ID)) {
           
+          // Khởi tạo công cụ báo cáo Admin cho khu vực Bypass
+          const adminChannel = interaction.client.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
+          const notifyAdmin = (title, desc, color) => {
+              if (adminChannel) {
+                  adminChannel.send({ embeds: [new EmbedBuilder().setTitle(title).setDescription(desc).setColor(color).setTimestamp()] }).catch(() => {});
+              }
+          };
+
           // 1. Mở Sổ Đỏ ra tìm CID của họ
           const currentVatsimLinks = await loadVatsimLinksSheet();
           const existingData = currentVatsimLinks[interaction.user.id];
@@ -5270,21 +5278,31 @@ async function handleButton(interaction) {
               await interaction.editReply({ content: '⏳ Đang kiểm tra dữ liệu cập nhật trên máy chủ VATSIM...' });
               const stats = await fetchVatsimStatsById(existingCid);
               
-              if (!stats) return interaction.editReply({ content: `❌ Lỗi: Không tìm thấy dữ liệu VATSIM cho CID **${existingCid}**.` });
-              if (stats.rating === 0) return interaction.editReply({ content: `❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.` });
+              if (!stats) {
+                  notifyAdmin('🚨 Cảnh báo: Lỗi API Bypass', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Không tìm thấy dữ liệu trên VATSIM API.`, 0xff0000);
+                  return interaction.editReply({ content: `❌ Lỗi: Không tìm thấy dữ liệu VATSIM cho CID **${existingCid}**.` });
+              }
+              if (stats.rating === 0) {
+                  notifyAdmin('🚨 Cảnh báo: Tài khoản bị khóa (Bypass)', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Tài khoản đang bị Suspended.`, 0xff0000);
+                  return interaction.editReply({ content: `❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.` });
+              }
 
               if (roleType === 'pilot') {
                   if (stats.pilot_hours > 10) {
                       await member.roles.add(PILOT_ROLE_ID).catch(()=>{});
+                      notifyAdmin('✅ Xác thực VATSIM thành công (Bypass)', `**User:** <@${interaction.user.id}>\n**Role xin thêm:** VATSIM PILOT\n**CID:** ${existingCid}`, 0x2ecc71);
                       return interaction.editReply({ content: `✅ **Thành công!** Bạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã cấp thêm role **Pilot**!` });
                   } else {
+                      notifyAdmin('⚠️ Cảnh báo: Chưa đủ giờ bay (Bypass)', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Xin thêm role Pilot nhưng mới có ${stats.pilot_hours.toFixed(1)} giờ bay (Yêu cầu > 10).`, 0xffa500);
                       return interaction.editReply({ content: `❌ Từ chối: Bạn mới có **${stats.pilot_hours.toFixed(1)}** giờ bay. Cần >10 giờ để nhận role Pilot.` });
                   }
               } else if (roleType === 'atc') {
                   if (stats.rating > 1) {
                       await member.roles.add(ATC_ROLE_ID).catch(()=>{});
+                      notifyAdmin('✅ Xác thực VATSIM thành công (Bypass)', `**User:** <@${interaction.user.id}>\n**Role xin thêm:** VATSIM ATC\n**CID:** ${existingCid}`, 0x2ecc71);
                       return interaction.editReply({ content: `✅ **Thành công!** Rating của bạn hợp lệ. Đã cấp thêm role **ATC**!` });
                   } else {
+                      notifyAdmin('⚠️ Cảnh báo: Chưa đủ Rating ATC (Bypass)', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Xin thêm role ATC nhưng Rating đang là OBS (Yêu cầu >= S1).`, 0xffa500);
                       return interaction.editReply({ content: `❌ Từ chối: Rating của bạn hiện tại là OBS. Yêu cầu >= S1 để nhận role ATC.` });
                   }
               }
