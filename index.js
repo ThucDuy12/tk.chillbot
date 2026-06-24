@@ -3178,10 +3178,8 @@ client.once('ready', async () => {
       .setName('edit_announ')
       .setDescription('Sửa nội dung thông báo (đã gửi hoặc đang chờ lịch)')
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
-      .addStringOption(option => option.setName('id').setDescription('ID tin nhắn đã gửi hoặc ID lịch trình').setRequired(true))
-      .addStringOption(option => option.setName('content').setDescription('Nội dung mới muốn sửa').setRequired(true))
+      .addStringOption(option => option.setName('message_id').setDescription('ID tin nhắn đã gửi hoặc ID lịch trình').setRequired(true))
       .addChannelOption(option => option.setName('channel').setDescription('Kênh chứa tin nhắn (bắt buộc nếu là tin nhắn đã gửi)').setRequired(false)),
-      
     new SlashCommandBuilder()
       .setName('cancel_announ')
       .setDescription('Hủy bỏ thông báo đã lên lịch (chưa gửi)')
@@ -4009,6 +4007,20 @@ client.on('interactionCreate', async (interaction) => {
             .setColor(0xf1c40f); // Đổi sang màu vàng cho biết là đã edit
 
           await interaction.update({ embeds: [embed] });
+        }
+        // Tình huống 3: Người dùng sửa thông báo Hẹn giờ (Scheduled)
+        if (interaction.customId.startsWith('edit_sched_')) {
+          const reqId = interaction.customId.replace('edit_sched_', '');
+          const newText = interaction.fields.getTextInputValue('new_content');
+          
+          const scheduledIndex = scheduledAnnouncements.findIndex(a => a.id === reqId);
+          if (scheduledIndex !== -1) {
+            scheduledAnnouncements[scheduledIndex].content = newText;
+            await db.saveAnnouncements(scheduledAnnouncements);
+            await interaction.reply({ content: '✅ Đã cập nhật nội dung cho thông báo hẹn giờ thành công!', ephemeral: true });
+          } else {
+            await interaction.reply({ content: '❌ Lịch trình này không còn tồn tại hoặc đã được gửi đi.', ephemeral: true });
+          }
         }
         // Nộp form từ chối bài bán
         if (interaction.customId.startsWith('market_reject_modal_')) {
@@ -7150,22 +7162,45 @@ async function handleEditAnnoun(interaction) {
   // Kiểm tra quyền
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
-  if (!hasDev && !hasAdmin) return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+  if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
+    return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+  }
 
   const channel = interaction.options.getChannel('channel');
   const messageId = interaction.options.getString('message_id');
 
+  // 1. Kiểm tra xem có phải là ID của thông báo hẹn giờ đang chờ gửi không
+  const scheduledIndex = scheduledAnnouncements.findIndex(a => a.id === messageId);
+  if (scheduledIndex !== -1) {
+    const modal = new ModalBuilder()
+      .setCustomId(`edit_sched_${messageId}`)
+      .setTitle('Sửa thông báo chờ lịch');
+
+    const textInput = new TextInputBuilder()
+      .setCustomId('new_content')
+      .setLabel('Nội dung cần sửa')
+      .setStyle(TextInputStyle.Paragraph)
+      .setValue(scheduledAnnouncements[scheduledIndex].content.substring(0, 4000)) 
+      .setRequired(true);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(textInput));
+    return await interaction.showModal(modal); // Mở Modal và DỪNG ở đây
+  }
+
+  // 2. Nếu KHÔNG PHẢI lịch trình hẹn giờ, bắt buộc phải có Channel để móc tin nhắn cũ
+  if (!channel) {
+    return interaction.reply({ content: '❌ Đây không phải ID lịch trình. Nếu bạn muốn sửa tin nhắn đã gửi, vui lòng chọn thêm mục `channel` (kênh chứa tin nhắn đó) nhé!', ephemeral: true });
+  }
+
   try {
-    // Tìm tin nhắn theo ID
     const targetMsg = await channel.messages.fetch(messageId);
     if (!targetMsg) return interaction.reply({ content: '❌ Không tìm thấy tin nhắn với ID này.', ephemeral: true });
 
-    // Tạo bảng nhập (Modal)
+    // Tạo bảng nhập (Modal) cho tin nhắn đã gửi
     const modal = new ModalBuilder()
       .setCustomId(`editannoun_${channel.id}_${messageId}`)
       .setTitle('Sửa thông báo');
 
-    // Chèn nguyên văn nội dung cũ vào bảng (giới hạn 4000 ký tự của Discord)
     const textInput = new TextInputBuilder()
       .setCustomId('new_content')
       .setLabel('Nội dung cần sửa')
