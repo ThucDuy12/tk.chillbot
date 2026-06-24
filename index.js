@@ -4097,7 +4097,7 @@ client.on('messageCreate', async (message) => {
 
           const imgBuffer = await downloadBuffer(attachment.url);
           const base64Image = imgBuffer.toString('base64');
-// =========================================================================
+          // =========================================================================
           // CÂU LỆNH THẦN CHÚ ÉP GEMINI KIỂM DUYỆT ẢNH VÀ TRẢ VỀ JSON CHI TIẾT
           // =========================================================================
           const prompt = `Bạn là một hệ thống kiểm duyệt chống giả mạo. Bức ảnh này PHẢI LÀ giao diện chuẩn của trang cá nhân VATSIM (my.vatsim.net).
@@ -4181,15 +4181,19 @@ client.on('messageCreate', async (message) => {
 
           // Logic kiểm tra Region Cực Thông Minh
           let isRegionMatch = false;
-          if (apiRegion === imgRegCode || apiRegion === imgRegRaw || imgRegRaw.includes(apiRegion) || apiRegion.includes(imgRegRaw)) isRegionMatch = true;
-          if (apiRegion === 'apac' && imgRegRaw.includes('asiapacific')) isRegionMatch = true;
-          if (apiRegion === 'amas' && imgRegRaw.includes('americas')) isRegionMatch = true;
-          if (apiRegion === 'emea' && (imgRegRaw.includes('europe') || imgRegRaw.includes('africa') || imgRegRaw.includes('middle'))) isRegionMatch = true;
+          if (apiRegion === imgRegCode || apiRegion === imgRegRaw || imgRegRaw.includes(apiRegion) || apiRegion.includes(imgRegRaw) || imgRegCode.includes(apiRegion)) isRegionMatch = true;
+          if (apiRegion === 'apac' && (imgRegRaw.includes('asiapacific') || imgRegCode === 'apac')) isRegionMatch = true;
+          if (apiRegion === 'amas' && (imgRegRaw.includes('americas') || imgRegCode === 'amas')) isRegionMatch = true;
+          if (apiRegion === 'emea' && (imgRegRaw.includes('europe') || imgRegRaw.includes('africa') || imgRegRaw.includes('middle') || imgRegCode === 'emea')) isRegionMatch = true;
 
           // Logic kiểm tra Division Siêu Bao Dung
           let isDivMatch = false;
-          if (apiDiv === imgDivCode || apiDiv === imgDivRaw || imgDivRaw.includes(apiDiv) || apiDiv.includes(imgDivRaw)) isDivMatch = true;
-          if (imgDivInitials === apiDiv || imgDivInitials.includes(apiDiv)) isDivMatch = true; // "west asia" -> "wa"
+          if (apiDiv === imgDivCode || apiDiv === imgDivRaw || imgDivRaw.includes(apiDiv) || apiDiv.includes(imgDivRaw) || imgDivCode.includes(apiDiv)) isDivMatch = true;
+          if (imgDivInitials === apiDiv || imgDivInitials.includes(apiDiv)) isDivMatch = true; 
+          
+          // ĐẶC CÁCH CHO ANH EM VATSEA (Vì API trả về SEA nhưng ai cũng gọi là VATSEA / Southeast Asia)
+          if (apiDiv === 'sea' && (imgDivRaw.includes('southeast') || imgDivCode.includes('vatsea') || imgDivCode === 'sea')) isDivMatch = true;
+          if (apiDiv === 'wa' && imgDivRaw.includes('westasia')) isDivMatch = true;
           if (apiDiv === 'vatpac' && imgDivRaw.includes('australia')) isDivMatch = true;
           if (apiDiv === 'vatnz' && imgDivRaw.includes('newzealand')) isDivMatch = true;
           if (apiDiv === 'vatuk' && imgDivRaw.includes('unitedkingdom')) isDivMatch = true;
@@ -4253,12 +4257,13 @@ client.on('messageCreate', async (message) => {
 
           // LOGIC MỚI: CHỈ XÓA PHIÊN KHI THÀNH CÔNG, THẤT BẠI CHO THỬ LẠI
           if (success) {
-              currentVatsimLinks[message.author.id] = {
+              // Gộp dữ liệu vào Cache để chống thất thoát dữ liệu do Google API đọc sót
+              vatsimLinksCache[message.author.id] = {
                   cid: aiCid,
                   username: message.author.username,
-                  imageUrl: `=IMAGE("${permanentImageUrl}")` 
+                  imageUrl: permanentImageUrl // Chỉ lưu link gốc dạng Text
               };
-              await saveVatsimLinksSheet(currentVatsimLinks).catch(e => console.log('Lỗi lưu sheet CID:', e));
+              await saveVatsimLinksSheet(vatsimLinksCache).catch(e => console.log('Lỗi lưu sheet CID:', e));
               
               // Tắt cái báo thức 5 phút đi vì đã xác thực xong
               if (verifySession.timeoutId) clearTimeout(verifySession.timeoutId);
