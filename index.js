@@ -6533,25 +6533,68 @@ async function handleRunway(interaction) {
     // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỪ OPENAIP (ĐỘNG VÀ CHUẨN)
     let runways = [];
     try {
-      const fetch = (await import('node-fetch')).default;
-      // OpenAIP API lấy thông tin sân bay (Airport) và đường băng (Runway)
-      // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỰ ĐỘNG TỪ API
+      // Thay đổi tên biến fetch nội bộ thành openAipFetch để tránh xung đột với khai báo ở đầu file toàn cục
+      const openAipFetch = global.fetch || (await import('node-fetch')).default;
+
       const openAipKey = process.env.OPENAIP_API_KEY;
       if (!openAipKey) console.warn("⚠️ Chưa cấu hình OPENAIP_API_KEY trong .env!");
       
-      const res = await fetch(`https://api.openaip.net/api/airports?icao=${icao}&apiKey=${openAipKey}`); // Đây là key công cộng
+      const res = await openAipFetch(`https://api.core.openaip.net/api/airports?search=${icao.toUpperCase()}`, {
+          headers: {
+              'x-openaip-client-id': openAipKey, 
+              'Accept': 'application/json'
+          }
+      });
+
       const data = await res.json();
+      console.log(`[DEBUG OPENAIP] Data nhận được cho ${icao}:`, JSON.stringify(data, null, 2));
       
       if (data.items && data.items.length > 0) {
-        const airport = data.items[0];
-        if (airport.runways) {
-          runways = airport.runways.map(rw => ({
-            id: rw.designator, // VD: 07L, 25R
-            heading: rw.bearing // Heading thực tế từ OpenAIP
-          }));
+        const airport = data.items.find(ap => ap.icaoCode === icao.toUpperCase());
+        if (airport && airport.runways && airport.runways.length > 0) {
+          
+          airport.runways.forEach(rw => {
+            if (rw.designator && rw.designator.includes('/')) {
+              // Tách chuỗi "08R/26L" -> ['08R', '26L']
+              const parts = rw.designator.split('/'); 
+              
+              // OpenAIP sử dụng trueHeading thay vì bearing
+              let heading1 = rw.trueHeading || (parseInt(parts[0]) * 10);
+              let heading2 = (heading1 + 180) % 360;
+
+              // Thuật toán kiểm tra góc chuẩn để tránh gán nhầm heading ngược hướng cho đầu băng
+              const approxD1 = parseInt(parts[0]) * 10; 
+              const diff1 = Math.min(Math.abs(heading1 - approxD1), 360 - Math.abs(heading1 - approxD1));
+              const diff2 = Math.min(Math.abs(heading2 - approxD1), 360 - Math.abs(heading2 - approxD1));
+              
+              const finalHeading1 = diff1 < diff2 ? heading1 : heading2;
+              const finalHeading2 = (finalHeading1 + 180) % 360;
+
+              // Đẩy đầu băng thứ nhất vào danh sách (Ví dụ: 08R)
+              runways.push({
+                id: parts[0],
+                heading: finalHeading1
+              });
+              
+              // Đẩy đầu băng đối diện vào danh sách (Ví dụ: 26L)
+              runways.push({
+                id: parts[1],
+                heading: finalHeading2
+              });
+            } else if (rw.designator) {
+              // Trường hợp đường băng chỉ có một hướng duy nhất (sân bay trực thăng hoặc bãi đáp đặc biệt)
+              runways.push({
+                id: rw.designator,
+                heading: rw.trueHeading || 0
+              });
+            }
+          });
+
         }
       }
-    } catch (e) { console.error('Lỗi OpenAIP:', e); }
+    } catch (e) { 
+      console.error('Lỗi khi xử lý dữ liệu OpenAIP:', e); 
+    }
 
     // 3. FALLBACK: Nếu OpenAIP tèo, dùng danh sách cũ của bạn
     if (runways.length === 0) {
