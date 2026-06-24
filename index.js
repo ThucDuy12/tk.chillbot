@@ -4127,8 +4127,17 @@ client.on('messageCreate', async (message) => {
                           
           const imagePart = { inlineData: { data: base64Image, mimeType: attachment.contentType } };
 
-          const aiResult = await geminiModel.generateContent([prompt, imagePart]);
-          const aiExtractedText = aiResult.response.text().trim();
+          let aiExtractedText = '';
+          try {
+              // Bọc hàm retry: Nếu lỗi 503 nó sẽ tự động chờ 2s rồi thử lại, tối đa 5 lần!
+              const aiResult = await retryWithBackoff(async () => {
+                  return await geminiModel.generateContent([prompt, imagePart]);
+              }, 5, 2000); 
+              
+              aiExtractedText = aiResult.response.text().trim();
+          } catch (e) {
+              return processingMsg.edit("❌ **Hệ thống đang quá tải!**\nBot đã cố gắng thử đập cửa nhà Louis Lì nhiều lần nhưng đang bị kẹt mạng tạm thời. Bạn vui lòng giữ nguyên ảnh ở đây và bấm nút xin role lại sau 5 phút nhé!");
+          }
 
           // Xử lý dữ liệu JSON do AI trả về
           let aiData;
