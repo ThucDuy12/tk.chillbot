@@ -3059,7 +3059,8 @@ client.once('ready', async () => {
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
       .addChannelOption((option) => option.setName('channel').setDescription('Kênh gửi').setRequired(true))
       .addStringOption((option) => option.setName('message').setDescription('Nội dung').setRequired(true))
-      .addStringOption((option) => option.setName('time').setDescription('Hẹn giờ gửi (YYYY-MM-DD HH:MM UTC), bỏ trống = gửi luôn').setRequired(false)),
+      .addStringOption((option) => option.setName('time').setDescription('Hẹn giờ gửi (YYYY-MM-DD HH:MM UTC), bỏ trống = gửi luôn').setRequired(false))
+      .addAttachmentOption((option) => option.setName('image').setDescription('Hình ảnh đính kèm').setRequired(false)),
     new SlashCommandBuilder()
       .setName('setup_atc_noti')
       .setDescription('Tạo tin nhắn đăng ký nhận role ATC Notification (Admin only)')
@@ -3366,12 +3367,11 @@ client.once('ready', async () => {
       if (now >= ann.time) {
         try {
           const targetChannel = await client.channels.fetch(ann.channelId);
-          if (targetChannel) {
-            await targetChannel.send({ 
-              content: ann.content, 
-              allowedMentions: { parse: ['roles', 'users', 'everyone'] } 
-            });
-          }
+          // Tìm đoạn: await targetChannel.send({ content: ann.content, ... })
+          // Sửa thành:
+          const payload = { content: ann.content, allowedMentions: { parse: ['roles', 'users', 'everyone'] } };
+          if (ann.imageUrl) payload.files = [ann.imageUrl];
+          await targetChannel.send(payload);
         } catch (err) {
           console.error(`Lỗi gửi thông báo đã lên lịch (ID: ${ann.id}):`, err);
         }
@@ -5208,6 +5208,13 @@ async function handleButton(interaction) {
     // Xóa bộ nhớ tạm
     pendingAnnouncements.delete(reqId);
 
+    // Cấu trúc gửi tin bao gồm cả content và ảnh (nếu có)
+    const sendPayload = { 
+        content: finalMessage, 
+        allowedMentions: { parse: ['roles', 'users', 'everyone'] } 
+    };
+    if (pendingData.imageUrl) sendPayload.files = [pendingData.imageUrl];
+
     // Nếu có hẹn giờ
     if (pendingData.targetTime) {
       // Đẩy vào mảng và lưu ra file JSON
@@ -5215,6 +5222,7 @@ async function handleButton(interaction) {
         id: reqId,
         channelId: pendingData.channelId,
         content: finalMessage,
+        imageUrl: pendingData.imageUrl,
         time: pendingData.targetTime,
         author: interaction.user.id
       });
@@ -5791,6 +5799,7 @@ async function handleAnnouncement(interaction) {
   const channel = interaction.options.getChannel('channel');
   const rawMessage = interaction.options.getString('message');
   const timeStr = interaction.options.getString('time');
+  const image = interaction.options.getAttachment('image');
 
   let targetTime = null;
   if (timeStr) {
@@ -5842,7 +5851,8 @@ async function handleAnnouncement(interaction) {
     channelId: channel.id, 
     rawMessage: rawMessage, 
     aiMessage: aiMessage, 
-    targetTime: targetTime 
+    targetTime: targetTime,
+    imageUrl: image ? image.url : null 
   });
 
   // TỈA NGẮN CHO BẢNG PREVIEW ĐỂ KHÔNG LÀM SẬP DISCORD (Giới hạn 1024 ký tự)
