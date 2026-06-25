@@ -5189,7 +5189,6 @@ async function handleButton(interaction) {
   }
   // Xử lý nút bấm Đồng ý / Từ chối thông báo AI
   if (customId.startsWith('ann_')) {
-    // 1. NGAY KHI BẤM NÚT, BÁO CHO DISCORD BIẾT BOT ĐANG XỬ LÝ (TRÁNH LỖI TIMEOUT ĐỎ MÀN HÌNH)
     await interaction.deferUpdate().catch(() => {});
 
     const parts = customId.split('_');
@@ -5198,41 +5197,51 @@ async function handleButton(interaction) {
 
     const pendingData = pendingAnnouncements.get(reqId);
     if (!pendingData) {
-      // Lưu ý: Vì đã dùng deferUpdate ở trên nên bây giờ phải dùng followUp
-      return interaction.followUp({ content: '❌ Yêu cầu đã hết hạn hoặc bot vừa bị restart. Vui lòng gõ lại lệnh để tạo thông báo mới!', ephemeral: true });
+      return interaction.followUp({ content: '❌ Yêu cầu đã hết hạn hoặc đã được xử lý. Vui lòng tạo thông báo mới!', ephemeral: true });
     }
+
+    // 🛡️ CHỐNG BẤM ĐÚP: Cờ khóa an toàn
+    if (pendingData.isProcessing) {
+        return interaction.followUp({ content: '⏳ Bot đang xử lý và tải ảnh rồi, bạn từ từ đừng bấm vội nhé...', ephemeral: true });
+    }
+    pendingData.isProcessing = true; // Khóa lại không cho bấm nữa
 
     if (action === 'reject') {
       pendingAnnouncements.delete(reqId);
-      // Dùng editReply thay cho update
       return interaction.editReply({ content: '❌ Đã hủy gửi thông báo.', embeds: [], components: [] });
     }
 
-    // Chọn văn bản cuối cùng dựa theo nút user bấm
     const finalMessage = action === 'okay' ? pendingData.aiMessage : pendingData.rawMessage;
     
-    // Xóa bộ nhớ tạm
-    pendingAnnouncements.delete(reqId);
-
-    // Cấu trúc gửi tin bao gồm cả content và ảnh (nếu có)
     const sendPayload = { 
         content: finalMessage, 
         allowedMentions: { parse: ['roles', 'users', 'everyone'] } 
     };
-    if (pendingData.imageUrl) sendPayload.files = [pendingData.imageUrl];
 
-    // Nếu có hẹn giờ
+    // 🖼️ TỰ TẢI ẢNH SIÊU TỐC: Tránh việc Discord bị nghẽn mạng gây timeout
+    if (pendingData.imageUrl) {
+        try {
+          const { AttachmentBuilder } = require('discord.js');
+          const imgBuffer = await downloadBuffer(pendingData.imageUrl);
+          sendPayload.files = [new AttachmentBuilder(imgBuffer, { name: 'tk_chill_announcement.png' })];
+        } catch (imgErr) {
+          console.error("Lỗi khi tải ảnh trước khi gửi:", imgErr);
+          sendPayload.content += `\n\n*(⚠️ Bot không thể đính kèm ảnh do link ảnh đã hết hạn hoặc lỗi máy chủ)*`;
+        }
+    }
+
     if (pendingData.targetTime) {
-      // Đẩy vào mảng và lưu ra file JSON
       scheduledAnnouncements.push({
         id: reqId,
         channelId: pendingData.channelId,
         content: finalMessage,
-        imageUrl: pendingData.imageUrl,
+        imageUrl: pendingData.imageUrl, // Hẹn giờ thì giữ lại link để sau này tải
         time: pendingData.targetTime,
         author: interaction.user.id
       });
       await db.saveAnnouncements(scheduledAnnouncements);
+      
+      pendingAnnouncements.delete(reqId); // Xóa trí nhớ sau khi đã lưu an toàn
 
       await interaction.editReply({ 
         content: `✅ Đã lên lịch gửi thông báo vào <t:${Math.floor(pendingData.targetTime/1000)}:F>!\n**ID Lịch trình:** \`${reqId}\` (Dùng để sửa/hủy)`, 
@@ -5240,13 +5249,16 @@ async function handleButton(interaction) {
         components: [] 
       });
     } else {
-      // Gửi ngay lập tức
       try {
         const targetChannel = await client.channels.fetch(pendingData.channelId);
         const sentMsg = await targetChannel.send(sendPayload);
+        
+        pendingAnnouncements.delete(reqId); // Chỉ xóa trí nhớ khi đã gửi thành công 100%
+
         await interaction.editReply({ content: `✅ Đã gửi thông báo thành công!\n**ID Tin nhắn:** \`${sentMsg.id}\` (Dùng để sửa)`, embeds: [], components: [] });
       } catch (err) {
-        await interaction.editReply({ content: `❌ Lỗi khi gửi thông báo: ${err.message}`, embeds: [], components: [] });
+        pendingData.isProcessing = false; // Mở khóa để bạn có thể thử bấm gửi lại
+        await interaction.followUp({ content: `❌ Lỗi khi gửi thông báo: ${err.message}`, ephemeral: true });
       }
     }
     return;
