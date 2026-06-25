@@ -30,9 +30,14 @@ const play = require('play-dl');
 // Kho chứa danh sách phát nhạc của các server
 const musicQueues = new Map();
 
-function downloadBuffer(url, timeout = 30000) {
+function downloadBuffer(url, timeout = 60000) { // Tăng lên 60s
   return new Promise((resolve, reject) => {
-    const req = https.get(url, (res) => {
+    const options = {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    };
+    const req = https.get(url, options, (res) => {
       if (res.statusCode === 200) {
         const chunks = [];
         res.on('data', chunk => chunks.push(chunk));
@@ -3375,14 +3380,13 @@ client.once('ready', async () => {
           const payload = { content: ann.content, allowedMentions: { parse: ['roles', 'users', 'everyone'] } };
           
           if (ann.imageUrl) {
-            try {
-              // Tăng timeout lên 30 giây
-              const imgBuffer = await downloadBuffer(ann.imageUrl, 30000);
-              payload.files = [{ attachment: imgBuffer, name: 'tk_chill_announcement.png' }];
-            } catch (e) {
-              console.error('Không thể tải ảnh hẹn giờ:', e);
-              payload.content += `\n\n*(⚠️ Không thể đính kèm ảnh, vui lòng xem link gốc: ${ann.imageUrl})*`;
-            }
+              try {
+                  const imgBuffer = await downloadBuffer(ann.imageUrl, 60000);
+                  payload.files = [{ attachment: imgBuffer, name: 'tk_chill_announcement.png' }];
+              } catch (e) {
+                  console.error('Không thể tải ảnh hẹn giờ:', e);
+                  payload.content += `\n\n*(⚠️ Không thể đính kèm ảnh, link: ${ann.imageUrl})*`;
+              }
           }
           
           await targetChannel.send(payload);
@@ -5217,56 +5221,63 @@ async function handleButton(interaction) {
     if (action === 'okay' || action === 'orig') {
     const finalMessage = action === 'okay' ? pendingData.aiMessage : pendingData.rawMessage;
     const sendPayload = {
-      content: finalMessage,
-      allowedMentions: { parse: ['roles', 'users', 'everyone'] }
+        content: finalMessage,
+        allowedMentions: { parse: ['roles', 'users', 'everyone'] }
     };
 
-    // Tải ảnh về buffer nếu có imageUrl
     if (pendingData.imageUrl) {
-      try {
-        // Dùng downloadBuffer đã có sẵn (không cần AbortController)
-        const imgBuffer = await downloadBuffer(pendingData.imageUrl);
-        sendPayload.files = [{ attachment: imgBuffer, name: 'tk_chill_announcement.png' }];
-      } catch (err) {
-        console.error('Không thể tải ảnh để gửi ngay:', err);
-        // Vẫn gửi tin nhắn nhưng thêm dòng báo lỗi
-        sendPayload.content += `\n\n*(⚠️ Không thể đính kèm ảnh, vui lòng xem link gốc: ${pendingData.imageUrl})*`;
-      }
+        try {
+            console.log(`[Announce] Bắt đầu tải ảnh từ: ${pendingData.imageUrl}`);
+            const imgBuffer = await downloadBuffer(pendingData.imageUrl, 60000);
+            console.log(`[Announce] Tải ảnh thành công, kích thước: ${imgBuffer.length} bytes`);
+            sendPayload.files = [{ attachment: imgBuffer, name: 'tk_chill_announcement.png' }];
+        } catch (err) {
+            console.error('[Announce] Lỗi tải ảnh:', err.message);
+            // Fallback: thêm link vào tin nhắn
+            sendPayload.content += `\n\n*(⚠️ Không thể đính kèm ảnh, vui lòng xem link: ${pendingData.imageUrl})*`;
+        }
     }
-    
+
     // Xóa bộ nhớ tạm
     pendingAnnouncements.delete(reqId);
 
-    // Nếu có hẹn giờ
     if (pendingData.targetTime) {
-      // Đẩy vào mảng và lưu ra file JSON
-      scheduledAnnouncements.push({
-        id: reqId,
-        channelId: pendingData.channelId,
-        content: finalMessage,
-        imageUrl: pendingData.imageUrl,
-        time: pendingData.targetTime,
-        author: interaction.user.id
-      });
-      await db.saveAnnouncements(scheduledAnnouncements);
-
-      await interaction.update({ 
-        content: `✅ Đã lên lịch gửi thông báo vào <t:${Math.floor(pendingData.targetTime/1000)}:F>!\n**ID Lịch trình:** \`${reqId}\` (Dùng để sửa/hủy)`, 
-        embeds: [], 
-        components: [] 
-      });
+        // Lưu vào scheduledAnnouncements
+        scheduledAnnouncements.push({
+            id: reqId,
+            channelId: pendingData.channelId,
+            content: sendPayload.content, // đã có fallback
+            imageUrl: pendingData.imageUrl, // vẫn giữ link
+            time: pendingData.targetTime,
+            author: interaction.user.id
+        });
+        await db.saveAnnouncements(scheduledAnnouncements);
+        await interaction.update({
+            content: `✅ Đã lên lịch gửi thông báo vào <t:${Math.floor(pendingData.targetTime/1000)}:F>!\n**ID Lịch trình:** \`${reqId}\` (Dùng để sửa/hủy)`,
+            embeds: [],
+            components: []
+        });
     } else {
-      // Gửi ngay lập tức
-      try {
-        const targetChannel = await client.channels.fetch(pendingData.channelId);
-        const sentMsg = await targetChannel.send({ content: finalMessage, allowedMentions: { parse: ['roles', 'users', 'everyone'] } });
-        await interaction.update({ content: `✅ Đã gửi thông báo thành công!\n**ID Tin nhắn:** \`${sentMsg.id}\` (Dùng để sửa)`, embeds: [], components: [] });
-      } catch (err) {
-        await interaction.update({ content: `❌ Lỗi khi gửi thông báo: ${err.message}`, embeds: [], components: [] });
-      }
+        try {
+            const targetChannel = await client.channels.fetch(pendingData.channelId);
+            const sentMsg = await targetChannel.send(sendPayload);
+            await interaction.update({
+                content: `✅ Đã gửi thông báo thành công!\n**ID Tin nhắn:** \`${sentMsg.id}\` (Dùng để sửa)`,
+                embeds: [],
+                components: []
+            });
+        } catch (sendErr) {
+            console.error('[Announce] Lỗi gửi tin nhắn:', sendErr);
+            await interaction.update({
+                content: `❌ Lỗi khi gửi thông báo: ${sendErr.message}`,
+                embeds: [],
+                components: []
+            });
+        }
     }
     return;
-  }}
+}
+
 
   // Xử lý nút bấm Xin Role VATSIM
   if (customId === 'btn_verify_pilot' || customId === 'btn_verify_atc') {
@@ -5850,10 +5861,17 @@ async function handleAnnouncement(interaction) {
         const imgbbRes = await fetchObj(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, { method: 'POST', body: params });
         const imgbbData = await imgbbRes.json();
         
+        // Sau khi upload ImgBB
         if (imgbbData && imgbbData.data && imgbbData.data.url) {
-           finalImageUrl = imgbbData.data.url; // Đổi link chết thành link bất tử
-        } else { 
-           finalImageUrl = image.url; 
+            // Đảm bảo link là ảnh trực tiếp
+            let directUrl = imgbbData.data.url;
+            // Nếu link không có đuôi ảnh, thử thêm ?format=image
+            if (!directUrl.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i)) {
+                directUrl = directUrl + '?format=image';
+            }
+            finalImageUrl = directUrl;
+        } else {
+            finalImageUrl = image.url; // fallback về link Discord
         }
       } catch (e) { 
         console.error('Lỗi up ảnh thông báo lên ImgBB:', e);
@@ -8811,4 +8829,5 @@ if (BOT2_URL) {
     }, 14 * 60 * 1000);
 } else {
     console.log("⚠️ Chưa cài BOT2_URL, tính năng Ping chéo đang tắt.");
+}
 }
