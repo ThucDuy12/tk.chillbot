@@ -3367,10 +3367,20 @@ client.once('ready', async () => {
       if (now >= ann.time) {
         try {
           const targetChannel = await client.channels.fetch(ann.channelId);
-          // Tìm đoạn: await targetChannel.send({ content: ann.content, ... })
-          // Sửa thành:
           const payload = { content: ann.content, allowedMentions: { parse: ['roles', 'users', 'everyone'] } };
-          if (ann.imageUrl) payload.files = [ann.imageUrl];
+          
+          if (ann.imageUrl) {
+            try {
+              // Tải ảnh về RAM trước khi gửi để chống lỗi AbortError (treo hệ thống)
+              const imgBuffer = await downloadBuffer(ann.imageUrl);
+              payload.files = [{ attachment: imgBuffer, name: 'tk_chill_announcement.png' }];
+            } catch (e) {
+              console.error('Không thể tải ảnh hẹn giờ:', e);
+              // Lỡ ảnh lỗi thì vẫn cho gửi chữ, kèm cái link vớt vát
+              payload.content += `\n\n*(⚠️ Không thể đính kèm ảnh, vui lòng xem link: ${ann.imageUrl})*`;
+            }
+          }
+          
           await targetChannel.send(payload);
         } catch (err) {
           console.error(`Lỗi gửi thông báo đã lên lịch (ID: ${ann.id}):`, err);
@@ -5812,6 +5822,36 @@ async function handleAnnouncement(interaction) {
   // Đặt trạng thái "Đang suy nghĩ" vì AI cần vài giây để viết lại văn
   await interaction.deferReply({ ephemeral: true });
 
+  // ========================================================
+  // BẾ ẢNH LÊN IMGBB LẤY LINK VĨNH VIỄN TRƯỚC KHI HẸN GIỜ
+  // ========================================================
+  let finalImageUrl = null;
+  if (image) {
+    if (process.env.IMGBB_API_KEY) {
+      try {
+        const imgBuffer = await downloadBuffer(image.url);
+        const base64Image = imgBuffer.toString('base64');
+        const params = new URLSearchParams();
+        params.append('image', base64Image);
+        
+        const fetchObj = (await import('node-fetch')).default;
+        const imgbbRes = await fetchObj(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, { method: 'POST', body: params });
+        const imgbbData = await imgbbRes.json();
+        
+        if (imgbbData && imgbbData.data && imgbbData.data.url) {
+           finalImageUrl = imgbbData.data.url; // Đổi link chết thành link bất tử
+        } else { 
+           finalImageUrl = image.url; 
+        }
+      } catch (e) { 
+        console.error('Lỗi up ảnh thông báo lên ImgBB:', e);
+        finalImageUrl = image.url; 
+      }
+    } else {
+      finalImageUrl = image.url; // Nếu không có API key thì đành xài tạm link cũ
+    }
+  }
+
   let aiMessage = '';
   try {
     const prompt = `Bạn là một trợ lý quản lý cộng đồng trên Discord. Nhiệm vụ của bạn là viết lại đoạn thông báo dưới đây sao cho chuyên nghiệp, lịch sự, rõ ràng và hấp dẫn hơn.
@@ -5852,7 +5892,7 @@ async function handleAnnouncement(interaction) {
     rawMessage: rawMessage, 
     aiMessage: aiMessage, 
     targetTime: targetTime,
-    imageUrl: image ? image.url : null 
+    imageUrl: finalImageUrl 
   });
 
   // TỈA NGẮN CHO BẢNG PREVIEW ĐỂ KHÔNG LÀM SẬP DISCORD (Giới hạn 1024 ký tự)
@@ -6502,7 +6542,7 @@ async function handleMetar(interaction) {
   }
 }
 
-// ===================== ACTIVE RUNWAY CALCULATOR (HYBRID: API + LOCAL DB) =====================
+// ===================== ACTIVE RUNWAY CALCULATOR (HYBRID: OPENAIP + LOCAL DB) =====================
 async function handleRunway(interaction) {
   const icao = interaction.options.getString('icao').toUpperCase();
   await interaction.deferReply();
@@ -6548,33 +6588,36 @@ async function handleRunway(interaction) {
     embed.addFields({ name: '🌬️ Gió hiện tại', value: `Hướng: **${windDir}°** | Tốc độ: **${windSpeed} KT**`, inline: false });
 
     // ==========================================
-    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỰ ĐỘNG TỪ API
+    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỪ OPENAIP
     // ==========================================
     let runways = [];
+    let dataSource = 'Chưa xác định';
+    
     try {
-      const fetch = (await import('node-fetch')).default;
-      const res = await fetch(`https://api.checkwx.com/station/${icao}`, {
-        headers: { 'X-API-Key': CHECKWX_API_KEY }
-      });
+      const fetchObj = (await import('node-fetch')).default;
+      // Gọi API Key từ file .env (có sẵn key backup nếu bạn quên cài)
+      const openAipKey = process.env.OPENAIP_API_KEY || '5989180126584288000'; 
+      
+      const res = await fetchObj(`https://api.openaip.net/api/airports?icao=${icao}&apiKey=${openAipKey}`);
       
       if (res.ok) {
         const data = await res.json();
-        // Cào đường băng từ API
-        if (data && data.data && data.data.length > 0 && data.data[0].runways) {
-          data.data[0].runways.forEach(rw => {
-            if (rw.ident1) {
-              const num1 = parseInt(rw.ident1.replace(/\D/g, ''), 10);
-              if (!isNaN(num1)) runways.push({ id: rw.ident1, heading: num1 * 10 });
-            }
-            if (rw.ident2) {
-              const num2 = parseInt(rw.ident2.replace(/\D/g, ''), 10);
-              if (!isNaN(num2)) runways.push({ id: rw.ident2, heading: num2 * 10 });
+        // Cào đường băng từ API OpenAIP
+        if (data && data.items && data.items.length > 0 && data.items[0].runways) {
+          data.items[0].runways.forEach(rw => {
+            if (rw.designator) {
+                // OpenAIP thường dùng trueHeading, lấy để tính toán cho chuẩn
+                const hdg = rw.trueHeading !== undefined ? rw.trueHeading : rw.bearing;
+                if (hdg !== undefined) {
+                    runways.push({ id: rw.designator, heading: hdg });
+                }
             }
           });
+          if (runways.length > 0) dataSource = 'OpenAIP API';
         }
       }
     } catch (e) {
-      console.error('Lỗi khi kéo dữ liệu sân bay toàn cầu:', e);
+      console.error('Lỗi khi kéo dữ liệu sân bay từ OpenAIP:', e);
     }
 
     // ==========================================
@@ -6582,6 +6625,7 @@ async function handleRunway(interaction) {
     // ==========================================
     if (runways.length === 0) {
       const fallbackRunways = {
+        // Vietnam
         VVTS: [{ id: '07', heading: 70 }, { id: '25', heading: 250 }],
         VVNB: [{ id: '11', heading: 110 }, { id: '29', heading: 290 }],
         VVDN: [{ id: '17', heading: 170 }, { id: '35', heading: 350 }],
@@ -6686,9 +6730,9 @@ async function handleRunway(interaction) {
         RPMD: [{ id: '05', heading: 50 }, { id: '23', heading: 230 }]
       };
       
-      // Nếu có trong sổ tay nội bộ thì lôi ra xài
       if (fallbackRunways[icao]) {
         runways = fallbackRunways[icao];
+        dataSource = 'Database Nội Bộ';
       }
     }
 
@@ -6698,7 +6742,7 @@ async function handleRunway(interaction) {
     if (runways.length === 0) {
       embed.addFields({ 
         name: '⚠️ Lưu ý', 
-        value: `Sân bay **${icao}** không có dữ liệu đường băng trong hệ thống API toàn cầu lẫn Database nội bộ. Tuy nhiên, dựa vào METAR, gió đang thổi từ hướng **${windDir}°**, bạn có thể tự đối chiếu với Chart nhé!` 
+        value: `Sân bay **${icao}** không có dữ liệu đường băng trong hệ thống OpenAIP lẫn Database nội bộ. Tuy nhiên, dựa vào METAR, gió đang thổi từ hướng **${windDir}°**, bạn có thể tự đối chiếu với Chart nhé!` 
       });
     } else {
       let bestRunway = null;
@@ -6730,7 +6774,7 @@ async function handleRunway(interaction) {
         value: `Gió ngược (Headwind): **${headwind} KT**\nGió ngang (Crosswind): **${crosswind} KT**`,
         inline: false
       });
-      embed.setFooter({ text: 'Lưu ý: Luôn tuân theo huấn lệnh của ATC (nếu có).' });
+      embed.setFooter({ text: `Dữ liệu đường băng: ${dataSource} • Lưu ý: Luôn tuân theo huấn lệnh của ATC.` });
     }
 
     await interaction.editReply({ embeds: [embed] });
