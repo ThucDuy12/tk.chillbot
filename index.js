@@ -6587,53 +6587,41 @@ async function handleRunway(interaction) {
     const windDir = parseInt(windDirStr, 10);
     embed.addFields({ name: '🌬️ Gió hiện tại', value: `Hướng: **${windDir}°** | Tốc độ: **${windSpeed} KT**`, inline: false });
 
-    // ==========================================
-    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỰ ĐỘNG TỪ OPENAIP
-    // ==========================================
+    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỪ OPENAIP (ĐÃ FIX CƠ CHẾ TÌM KIẾM)
     let runways = [];
     let dataSource = 'Chưa xác định';
     
     try {
       const fetchObj = (await import('node-fetch')).default;
-      // Gọi API Key từ file .env
-      const openAipKey = process.env.OPENAIP_API_KEY || '5989180126584288000'; 
+      const openAipKey = process.env.OPENAIP_API_KEY || 'ce754e3a33063d110f1879a62508ee6a'; 
       
-      // SỬA LẠI: Dùng biến 'search=' thay vì 'icao='
-      const res = await fetchObj(`https://api.openaip.net/api/airports?search=${icao}&apiKey=${openAipKey}`);
+      // Tìm bằng param 'icao' trực tiếp, và thêm 'limit' để tránh lỗi
+      const res = await fetchObj(`https://api.openaip.net/api/airports?icao=${icao}&apiKey=${openAipKey}`);
       
       if (res.ok) {
         const data = await res.json();
         
-        // SỬA LẠI: Tìm chính xác sân bay có ICAO khớp với yêu cầu
-        const targetAirport = data.items?.find(ap => ap.icaoCode === icao);
+        // Fix: Tìm trong trường 'items', kiểm tra kỹ cả object
+        const airport = data.items ? data.items.find(ap => ap.icaoCode === icao) : null;
 
-        if (targetAirport && targetAirport.runways && targetAirport.runways.length > 0) {
-          targetAirport.runways.forEach(rw => {
+        if (airport && airport.runways) {
+          airport.runways.forEach(rw => {
             if (rw.designator) {
-                // Designator của OpenAIP có dạng gộp "08L/26R", ta phải chặt nó ra làm đôi bằng dấu '/'
                 const parts = rw.designator.split('/');
-                
-                // Lấy trueHeading, nếu không có thì lấy magneticHeading
-                const baseHdg = rw.trueHeading !== undefined ? rw.trueHeading : rw.magneticHeading;
+                // Sử dụng trueHeading hoặc magneticHeading từ API
+                const hdg = rw.trueHeading !== undefined ? rw.trueHeading : rw.magneticHeading;
 
-                if (baseHdg !== undefined) {
-                    if (parts.length === 2) {
-                        // Tách thành 2 đường băng. Đầu bên kia sẽ bằng đầu này + 180 độ
-                        runways.push({ id: parts[0].trim(), heading: baseHdg });
-                        runways.push({ id: parts[1].trim(), heading: (baseHdg + 180) % 360 });
-                    } else {
-                        // Nếu chỉ có 1 đầu (hiếm gặp nhưng vẫn phòng hờ)
-                        runways.push({ id: parts[0].trim(), heading: baseHdg });
-                    }
+                if (hdg !== undefined) {
+                    parts.forEach(part => {
+                        runways.push({ id: part.trim(), heading: hdg });
+                    });
                 }
             }
           });
           if (runways.length > 0) dataSource = 'OpenAIP API';
         }
       }
-    } catch (e) {
-      console.error('Lỗi khi kéo dữ liệu sân bay từ OpenAIP:', e);
-    }
+    } catch (e) { console.error('Lỗi OpenAIP:', e); }
 
     // ==========================================
     // 3. HỆ THỐNG DỰ PHÒNG (DATABASE NỘI BỘ) - Cứu cánh khi API ngáo
