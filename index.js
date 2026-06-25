@@ -5189,30 +5189,35 @@ async function handleButton(interaction) {
   }
   // Xử lý nút bấm Đồng ý / Từ chối thông báo AI
   if (customId.startsWith('ann_')) {
+    // 1. NGAY KHI BẤM NÚT, BÁO CHO DISCORD BIẾT BOT ĐANG XỬ LÝ (TRÁNH LỖI TIMEOUT ĐỎ MÀN HÌNH)
+    await interaction.deferUpdate().catch(() => {});
+
     const parts = customId.split('_');
     const action = parts[1]; // 'okay', 'orig' hoặc 'reject'
     const reqId = parts[2];
 
     const pendingData = pendingAnnouncements.get(reqId);
     if (!pendingData) {
-      return interaction.reply({ content: '❌ Yêu cầu đã hết hạn hoặc bot vừa bị restart.', ephemeral: true });
+      // Lưu ý: Vì đã dùng deferUpdate ở trên nên bây giờ phải dùng followUp
+      return interaction.followUp({ content: '❌ Yêu cầu đã hết hạn hoặc bot vừa bị restart. Vui lòng gõ lại lệnh để tạo thông báo mới!', ephemeral: true });
     }
 
     if (action === 'reject') {
       pendingAnnouncements.delete(reqId);
-      return interaction.update({ content: '❌ Đã hủy gửi thông báo.', embeds: [], components: [] });
+      // Dùng editReply thay cho update
+      return interaction.editReply({ content: '❌ Đã hủy gửi thông báo.', embeds: [], components: [] });
     }
 
     // Chọn văn bản cuối cùng dựa theo nút user bấm
     const finalMessage = action === 'okay' ? pendingData.aiMessage : pendingData.rawMessage;
-
+    
     // Xóa bộ nhớ tạm
     pendingAnnouncements.delete(reqId);
 
     // Cấu trúc gửi tin bao gồm cả content và ảnh (nếu có)
-    const sendPayload = {
-      content: finalMessage,
-      allowedMentions: { parse: ['roles', 'users', 'everyone'] }
+    const sendPayload = { 
+        content: finalMessage, 
+        allowedMentions: { parse: ['roles', 'users', 'everyone'] } 
     };
     if (pendingData.imageUrl) sendPayload.files = [pendingData.imageUrl];
 
@@ -5229,22 +5234,19 @@ async function handleButton(interaction) {
       });
       await db.saveAnnouncements(scheduledAnnouncements);
 
-      await interaction.update({
-        content: `✅ Đã lên lịch gửi thông báo vào <t:${Math.floor(pendingData.targetTime / 1000)}:F>!\n**ID Lịch trình:** \`${reqId}\` (Dùng để sửa/hủy)`,
-        embeds: [],
-        components: []
+      await interaction.editReply({ 
+        content: `✅ Đã lên lịch gửi thông báo vào <t:${Math.floor(pendingData.targetTime/1000)}:F>!\n**ID Lịch trình:** \`${reqId}\` (Dùng để sửa/hủy)`, 
+        embeds: [], 
+        components: [] 
       });
     } else {
       // Gửi ngay lập tức
       try {
         const targetChannel = await client.channels.fetch(pendingData.channelId);
-
-        // ✅ THAY BẰNG DÒNG NÀY ĐỂ BOT GỬI ĐÚNG GÓI PAYLOAD CÓ CHỨA ẢNH:
         const sentMsg = await targetChannel.send(sendPayload);
-
-        await interaction.update({ content: `✅ Đã gửi thông báo thành công!\n**ID Tin nhắn:** \`${sentMsg.id}\` (Dùng để sửa)`, embeds: [], components: [] });
+        await interaction.editReply({ content: `✅ Đã gửi thông báo thành công!\n**ID Tin nhắn:** \`${sentMsg.id}\` (Dùng để sửa)`, embeds: [], components: [] });
       } catch (err) {
-        await interaction.update({ content: `❌ Lỗi khi gửi thông báo: ${err.message}`, embeds: [], components: [] });
+        await interaction.editReply({ content: `❌ Lỗi khi gửi thông báo: ${err.message}`, embeds: [], components: [] });
       }
     }
     return;
