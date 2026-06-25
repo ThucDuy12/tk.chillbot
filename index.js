@@ -30,18 +30,22 @@ const play = require('play-dl');
 // Kho chứa danh sách phát nhạc của các server
 const musicQueues = new Map();
 
-// Cỗ máy tải file vật lý bằng HTTPS chuẩn của Node.js (Chống mọi lỗi thư viện)
-function downloadBuffer(url) {
+function downloadBuffer(url, timeout = 30000) {
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    const req = https.get(url, (res) => {
       if (res.statusCode === 200) {
         const chunks = [];
         res.on('data', chunk => chunks.push(chunk));
         res.on('end', () => resolve(Buffer.concat(chunks)));
       } else {
-        reject(new Error(`Mã lỗi: ${res.statusCode}`));
+        reject(new Error(`HTTP ${res.statusCode}`));
       }
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(timeout, () => {
+      req.destroy();
+      reject(new Error('Download timeout'));
+    });
   });
 }
 
@@ -336,7 +340,7 @@ async function loadAllLeaderboards() {
 // ===================== CLIENT =====================
 const client = new Client({
   rest: {
-    timeout: 30000, // Tăng lên 30 giây thay vì mặc định
+    timeout: 60000, // Tăng lên 30 giây thay vì mặc định
   },
   intents: [
     GatewayIntentBits.Guilds,
@@ -3363,37 +3367,32 @@ client.once('ready', async () => {
     let hasChanges = false;
     
     // Thay đoạn gửi thông báo cũ bằng đoạn này:
-for (let i = scheduledAnnouncements.length - 1; i >= 0; i--) {
-  const ann = scheduledAnnouncements[i];
-  if (now >= ann.time) {
-    try {
-      const targetChannel = await client.channels.fetch(ann.channelId);
-      const payload = { content: ann.content, allowedMentions: { parse: ['roles', 'users', 'everyone'] } };
-      
-      if (ann.imageUrl) {
+    for (let i = scheduledAnnouncements.length - 1; i >= 0; i--) {
+      const ann = scheduledAnnouncements[i];
+      if (now >= ann.time) {
         try {
-          // Thêm timeout cho việc tải ảnh (không để nó treo quá 15 giây)
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 15000);
+          const targetChannel = await client.channels.fetch(ann.channelId);
+          const payload = { content: ann.content, allowedMentions: { parse: ['roles', 'users', 'everyone'] } };
           
-          const imgBuffer = await downloadBuffer(ann.imageUrl); // Đảm bảo downloadBuffer dùng đúng cách
-          clearTimeout(timeoutId);
+          if (ann.imageUrl) {
+            try {
+              // Tăng timeout lên 30 giây
+              const imgBuffer = await downloadBuffer(ann.imageUrl, 30000);
+              payload.files = [{ attachment: imgBuffer, name: 'tk_chill_announcement.png' }];
+            } catch (e) {
+              console.error('Không thể tải ảnh hẹn giờ:', e);
+              payload.content += `\n\n*(⚠️ Không thể đính kèm ảnh, vui lòng xem link gốc: ${ann.imageUrl})*`;
+            }
+          }
           
-          payload.files = [{ attachment: imgBuffer, name: 'tk_chill_announcement.png' }];
-        } catch (e) {
-          console.error('Không thể tải ảnh hẹn giờ:', e);
-          payload.content += `\n\n*(⚠️ Không thể đính kèm ảnh, vui lòng xem link gốc: ${ann.imageUrl})*`;
+          await targetChannel.send(payload);
+        } catch (err) {
+          console.error(`Lỗi gửi thông báo đã lên lịch (ID: ${ann.id}):`, err);
         }
+        scheduledAnnouncements.splice(i, 1);
+        hasChanges = true;
       }
-      
-      await targetChannel.send(payload);
-    } catch (err) {
-      console.error(`Lỗi gửi thông báo đã lên lịch (ID: ${ann.id}):`, err);
     }
-    scheduledAnnouncements.splice(i, 1);
-    hasChanges = true;
-  }
-}
     
     // Nếu có thông báo vừa được gửi/xóa, cập nhật lại file JSON
     if (hasChanges) {
@@ -5215,18 +5214,28 @@ async function handleButton(interaction) {
       return interaction.update({ content: '❌ Đã hủy gửi thông báo.', embeds: [], components: [] });
     }
 
-    // Chọn văn bản cuối cùng dựa theo nút user bấm
+    if (action === 'okay' || action === 'orig') {
     const finalMessage = action === 'okay' ? pendingData.aiMessage : pendingData.rawMessage;
+    const sendPayload = {
+      content: finalMessage,
+      allowedMentions: { parse: ['roles', 'users', 'everyone'] }
+    };
+
+    // Tải ảnh về buffer nếu có imageUrl
+    if (pendingData.imageUrl) {
+      try {
+        // Dùng downloadBuffer đã có sẵn (không cần AbortController)
+        const imgBuffer = await downloadBuffer(pendingData.imageUrl);
+        sendPayload.files = [{ attachment: imgBuffer, name: 'tk_chill_announcement.png' }];
+      } catch (err) {
+        console.error('Không thể tải ảnh để gửi ngay:', err);
+        // Vẫn gửi tin nhắn nhưng thêm dòng báo lỗi
+        sendPayload.content += `\n\n*(⚠️ Không thể đính kèm ảnh, vui lòng xem link gốc: ${pendingData.imageUrl})*`;
+      }
+    }
     
     // Xóa bộ nhớ tạm
     pendingAnnouncements.delete(reqId);
-
-    // Cấu trúc gửi tin bao gồm cả content và ảnh (nếu có)
-    const sendPayload = { 
-        content: finalMessage, 
-        allowedMentions: { parse: ['roles', 'users', 'everyone'] } 
-    };
-    if (pendingData.imageUrl) sendPayload.files = [pendingData.imageUrl];
 
     // Nếu có hẹn giờ
     if (pendingData.targetTime) {
@@ -5257,7 +5266,7 @@ async function handleButton(interaction) {
       }
     }
     return;
-  }
+  }}
 
   // Xử lý nút bấm Xin Role VATSIM
   if (customId === 'btn_verify_pilot' || customId === 'btn_verify_atc') {
