@@ -6588,28 +6588,43 @@ async function handleRunway(interaction) {
     embed.addFields({ name: '🌬️ Gió hiện tại', value: `Hướng: **${windDir}°** | Tốc độ: **${windSpeed} KT**`, inline: false });
 
     // ==========================================
-    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỪ OPENAIP
+    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỰ ĐỘNG TỪ OPENAIP
     // ==========================================
     let runways = [];
     let dataSource = 'Chưa xác định';
     
     try {
       const fetchObj = (await import('node-fetch')).default;
-      // Gọi API Key từ file .env (có sẵn key backup nếu bạn quên cài)
+      // Gọi API Key từ file .env
       const openAipKey = process.env.OPENAIP_API_KEY || '5989180126584288000'; 
       
-      const res = await fetchObj(`https://api.openaip.net/api/airports?icao=${icao}&apiKey=${openAipKey}`);
+      // SỬA LẠI: Dùng biến 'search=' thay vì 'icao='
+      const res = await fetchObj(`https://api.openaip.net/api/airports?search=${icao}&apiKey=${openAipKey}`);
       
       if (res.ok) {
         const data = await res.json();
-        // Cào đường băng từ API OpenAIP
-        if (data && data.items && data.items.length > 0 && data.items[0].runways) {
-          data.items[0].runways.forEach(rw => {
+        
+        // SỬA LẠI: Tìm chính xác sân bay có ICAO khớp với yêu cầu
+        const targetAirport = data.items?.find(ap => ap.icaoCode === icao);
+
+        if (targetAirport && targetAirport.runways && targetAirport.runways.length > 0) {
+          targetAirport.runways.forEach(rw => {
             if (rw.designator) {
-                // OpenAIP thường dùng trueHeading, lấy để tính toán cho chuẩn
-                const hdg = rw.trueHeading !== undefined ? rw.trueHeading : rw.bearing;
-                if (hdg !== undefined) {
-                    runways.push({ id: rw.designator, heading: hdg });
+                // Designator của OpenAIP có dạng gộp "08L/26R", ta phải chặt nó ra làm đôi bằng dấu '/'
+                const parts = rw.designator.split('/');
+                
+                // Lấy trueHeading, nếu không có thì lấy magneticHeading
+                const baseHdg = rw.trueHeading !== undefined ? rw.trueHeading : rw.magneticHeading;
+
+                if (baseHdg !== undefined) {
+                    if (parts.length === 2) {
+                        // Tách thành 2 đường băng. Đầu bên kia sẽ bằng đầu này + 180 độ
+                        runways.push({ id: parts[0].trim(), heading: baseHdg });
+                        runways.push({ id: parts[1].trim(), heading: (baseHdg + 180) % 360 });
+                    } else {
+                        // Nếu chỉ có 1 đầu (hiếm gặp nhưng vẫn phòng hờ)
+                        runways.push({ id: parts[0].trim(), heading: baseHdg });
+                    }
                 }
             }
           });
