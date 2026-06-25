@@ -5073,6 +5073,7 @@ async function handleButton(interaction) {
     await interaction.showModal(modal);
     return;
   }
+}
 
   if (customId.startsWith('approve_') || customId.startsWith('deny_')) {
     const hasVerified = interaction.member.roles.cache.has(roles.verifiedMemberRoleId);
@@ -8829,5 +8830,4 @@ if (BOT2_URL) {
     }, 14 * 60 * 1000);
 } else {
     console.log("⚠️ Chưa cài BOT2_URL, tính năng Ping chéo đang tắt.");
-}
 }
