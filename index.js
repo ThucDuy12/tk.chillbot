@@ -335,6 +335,9 @@ async function loadAllLeaderboards() {
 
 // ===================== CLIENT =====================
 const client = new Client({
+  rest: {
+    timeout: 30000, // Tăng lên 30 giây thay vì mặc định
+  },
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
@@ -3359,38 +3362,38 @@ client.once('ready', async () => {
     const now = Date.now();
     let hasChanges = false;
     
-    // Duyệt ngược mảng để dễ dàng xóa phần tử khi đã gửi xong
-    for (let i = scheduledAnnouncements.length - 1; i >= 0; i--) {
-      const ann = scheduledAnnouncements[i];
+    // Thay đoạn gửi thông báo cũ bằng đoạn này:
+for (let i = scheduledAnnouncements.length - 1; i >= 0; i--) {
+  const ann = scheduledAnnouncements[i];
+  if (now >= ann.time) {
+    try {
+      const targetChannel = await client.channels.fetch(ann.channelId);
+      const payload = { content: ann.content, allowedMentions: { parse: ['roles', 'users', 'everyone'] } };
       
-      // Nếu thời gian hiện tại đã vượt qua thời gian hẹn giờ
-      if (now >= ann.time) {
+      if (ann.imageUrl) {
         try {
-          const targetChannel = await client.channels.fetch(ann.channelId);
-          const payload = { content: ann.content, allowedMentions: { parse: ['roles', 'users', 'everyone'] } };
+          // Thêm timeout cho việc tải ảnh (không để nó treo quá 15 giây)
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000);
           
-          if (ann.imageUrl) {
-            try {
-              // Tải ảnh về RAM trước khi gửi để chống lỗi AbortError (treo hệ thống)
-              const imgBuffer = await downloadBuffer(ann.imageUrl);
-              payload.files = [{ attachment: imgBuffer, name: 'tk_chill_announcement.png' }];
-            } catch (e) {
-              console.error('Không thể tải ảnh hẹn giờ:', e);
-              // Lỡ ảnh lỗi thì vẫn cho gửi chữ, kèm cái link vớt vát
-              payload.content += `\n\n*(⚠️ Không thể đính kèm ảnh, vui lòng xem link: ${ann.imageUrl})*`;
-            }
-          }
+          const imgBuffer = await downloadBuffer(ann.imageUrl); // Đảm bảo downloadBuffer dùng đúng cách
+          clearTimeout(timeoutId);
           
-          await targetChannel.send(payload);
-        } catch (err) {
-          console.error(`Lỗi gửi thông báo đã lên lịch (ID: ${ann.id}):`, err);
+          payload.files = [{ attachment: imgBuffer, name: 'tk_chill_announcement.png' }];
+        } catch (e) {
+          console.error('Không thể tải ảnh hẹn giờ:', e);
+          payload.content += `\n\n*(⚠️ Không thể đính kèm ảnh, vui lòng xem link gốc: ${ann.imageUrl})*`;
         }
-        
-        // Gửi xong thì xóa khỏi mảng
-        scheduledAnnouncements.splice(i, 1);
-        hasChanges = true;
       }
+      
+      await targetChannel.send(payload);
+    } catch (err) {
+      console.error(`Lỗi gửi thông báo đã lên lịch (ID: ${ann.id}):`, err);
     }
+    scheduledAnnouncements.splice(i, 1);
+    hasChanges = true;
+  }
+}
     
     // Nếu có thông báo vừa được gửi/xóa, cập nhật lại file JSON
     if (hasChanges) {
