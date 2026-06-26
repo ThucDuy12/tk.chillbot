@@ -3371,8 +3371,12 @@ client.once('ready', async () => {
           const payload = { content: safeContent, allowedMentions: { parse: ['roles', 'users', 'everyone'] } };
 
           if (ann.imageUrl) {
-            // 🚀 Bắn link ImgBB bất tử ra, không lo chết link Discord, không lo lỗi mạng Render
-            payload.files = [ann.imageUrl];
+            // 🚀 Bắn link ImgBB bất tử vào Embed, máy chủ Discord sẽ tự render ảnh!
+            payload.embeds = [
+                new EmbedBuilder()
+                    .setImage(ann.imageUrl)
+                    .setColor(0x2b2d31)
+            ];
           }
 
           await targetChannel.send(payload);
@@ -5221,9 +5225,13 @@ async function handleButton(interaction) {
         allowedMentions: { parse: ['roles', 'users', 'everyone'] } 
     };
 
-    // 🚀 TỐC ĐỘ ÁNH SÁNG: Dùng link bất tử ImgBB đã xử lý từ trước, Discord tự render siêu nhanh
+    // 🚀 CÁCH ÉP DISCORD TỰ HIỂN THỊ ẢNH MÀ BOT KHÔNG CẦN TẢI: Dùng Embed
     if (pendingData.imageUrl) {
-        sendPayload.files = [pendingData.imageUrl];
+        sendPayload.embeds = [
+            new EmbedBuilder()
+                .setImage(pendingData.imageUrl)
+                .setColor(0x2b2d31) // Màu viền tiệp với màu nền Discord cho đẹp
+        ];
     }
 
     if (pendingData.targetTime) {
