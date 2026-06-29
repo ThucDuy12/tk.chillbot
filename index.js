@@ -4141,7 +4141,7 @@ client.on('messageCreate', async (message) => {
 
         aiExtractedText = aiResult.response.text().trim();
       } catch (e) {
-        return processingMsg.edit("❌ **Hệ thống đang quá tải!**\nBot đã cố gắng thử đập cửa nhà Louis Lì nhiều lần nhưng đang bị kẹt mạng tạm thời. Bạn vui lòng giữ nguyên ảnh ở đây và bấm nút xin role lại sau 5 phút nhé!");
+        return processingMsg.edit("❌ **Hệ thống đang quá tải!**\nBot đã cố gắng thử đập cửa nhà Louis Lì nhiều lần nhưng mà nó đang đi chơi rồi. Bạn vui lòng bấm nút xin role lại sau 5 phút nhé!");
       }
 
       // Xử lý dữ liệu JSON do AI trả về
@@ -5270,6 +5270,23 @@ async function handleButton(interaction) {
 
   // Xử lý nút bấm Xin Role VATSIM
   if (customId === 'btn_verify_pilot' || customId === 'btn_verify_atc') {
+    // --- THÊM KIỂM TRA ROLE MEMBER TẠI ĐÂY ---
+    const hasMember = interaction.member.roles.cache.has(roles.basicMemberRoleId);
+    if (!hasMember) {
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('request_member')
+          .setLabel('Xin Role Member')
+          .setStyle(ButtonStyle.Primary)
+      );
+      return interaction.reply({ 
+        content: '❌ Chầm chậm đã! Bạn cần có role **Member** để chính thức tham gia server trước khi liên kết tài khoản VATSIM. Bấm nút dưới đây để xin role nha:', 
+        components: [row], 
+        ephemeral: true 
+      });
+    }
+    // ------------------------------------------
+
     const roleType = customId.split('_')[2]; // 'pilot' hoặc 'atc'
 
     await interaction.deferReply({ ephemeral: true });
