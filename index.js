@@ -6944,23 +6944,18 @@ async function handleTaf(interaction) {
 // ===================== REACTION ROLES =====================
 client.on('messageReactionAdd', async (reaction, user) => {
   if (user.bot) return;
-  // Kéo tin nhắn về nếu nó là dạng partial (chưa có trong cache)
-  if (reaction.partial) {
-    try {
-      await reaction.fetch();
-    } catch (error) {
-      console.error('Không thể fetch message reaction:', error);
-      return;
-    }
-  }
 
-  // So sánh ID tin nhắn với ID đã lưu trong JSON
+  // Bọc thép: Ép bot tải lại toàn bộ thông tin tin nhắn nếu nó là đồ cổ
+  if (reaction.message.partial) await reaction.message.fetch().catch(() => {});
+  if (reaction.partial) await reaction.fetch().catch(() => {});
+
   if (reaction.emoji.name === '🤖' && reaction.message.id === reactionRoleData.atcNotiMsgId) {
     try {
-      const member = await reaction.message.guild.members.fetch(user.id);
+      const guild = reaction.message.guild || await client.guilds.fetch(GUILD_ID);
+      const member = await guild.members.fetch(user.id);
       if (member) {
         await member.roles.add(ATC_NOTI_ROLE_ID);
-        console.log(`Đã cấp role BOT_Notification cho ${user.tag}`);
+        console.log(`✅ Đã cấp role BOT_Notification cho ${user.tag}`);
       }
     } catch (err) {
       console.error('Lỗi khi cấp role BOT_Notification:', err);
@@ -6970,23 +6965,18 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
 client.on('messageReactionRemove', async (reaction, user) => {
   if (user.bot) return;
-  // Kéo tin nhắn về nếu nó là dạng partial
-  if (reaction.partial) {
-    try {
-      await reaction.fetch();
-    } catch (error) {
-      console.error('Không thể fetch message reaction:', error);
-      return;
-    }
-  }
 
-  // So sánh ID tin nhắn với ID đã lưu trong JSON
+  // Bọc thép: Ép bot tải lại toàn bộ thông tin tin nhắn nếu nó là đồ cổ
+  if (reaction.message.partial) await reaction.message.fetch().catch(() => {});
+  if (reaction.partial) await reaction.fetch().catch(() => {});
+
   if (reaction.emoji.name === '🤖' && reaction.message.id === reactionRoleData.atcNotiMsgId) {
     try {
-      const member = await reaction.message.guild.members.fetch(user.id);
+      const guild = reaction.message.guild || await client.guilds.fetch(GUILD_ID);
+      const member = await guild.members.fetch(user.id);
       if (member) {
         await member.roles.remove(ATC_NOTI_ROLE_ID);
-        console.log(`Đã gỡ role ATC_Notification khỏi ${user.tag}`);
+        console.log(`✅ Đã gỡ role ATC_Notification khỏi ${user.tag}`);
       }
     } catch (err) {
       console.error('Lỗi khi xóa role ATC_Notification:', err);
