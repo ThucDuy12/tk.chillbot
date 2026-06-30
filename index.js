@@ -6514,11 +6514,19 @@ async function handleMetar(interaction) {
 
       // =========================================================
       // LUẬT ĐẶC CÁCH VCLvACC (VIỆT NAM, CAMPUCHIA, LÀO)
-      // Các sân bay VV, VD, VL thường chỉ dùng chung Arrival ATIS
-      // -> Chém luôn Departure ATIS để tránh rác!
+      // Sân bay VCL thường chỉ hiển thị 1 mã D-ATIS dùng chung.
+      // -> So sánh thời gian cập nhật, cái nào mới nhất thì giữ lại!
       // =========================================================
       if (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL')) {
-        atisData.departure = null;
+        if (atisData.arrival && atisData.departure) {
+          // arrTimestamp và depTimestamp là thời gian tuyệt đối (mili-giây) đã quét từ web
+          // Giá trị nào lớn hơn tức là thời gian gần với hiện tại hơn (mới hơn)
+          if (atisData.depTimestamp > atisData.arrTimestamp) {
+            atisData.arrival = null; // Departure mới hơn -> Xóa Arrival
+          } else {
+            atisData.departure = null; // Arrival mới hơn (hoặc bằng) -> Xóa Departure
+          }
+        }
       }
 
       // =========================================================
