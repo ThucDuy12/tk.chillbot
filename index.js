@@ -6514,17 +6514,44 @@ async function handleMetar(interaction) {
 
       // =========================================================
       // LUẬT ĐẶC CÁCH VCLvACC (VIỆT NAM, CAMPUCHIA, LÀO)
-      // Sân bay VCL thường chỉ hiển thị 1 mã D-ATIS dùng chung.
-      // -> So sánh thời gian cập nhật, cái nào mới nhất thì giữ lại!
+      // Ghép Ngày trên Header với Giờ trong ATIS để đọ thời gian tuyệt đối
       // =========================================================
       if (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL')) {
         if (atisData.arrival && atisData.departure) {
-          // arrTimestamp và depTimestamp là thời gian tuyệt đối (mili-giây) đã quét từ web
-          // Giá trị nào lớn hơn tức là thời gian gần với hiện tại hơn (mới hơn)
-          if (atisData.depTimestamp > atisData.arrTimestamp) {
-            atisData.arrival = null; // Departure mới hơn -> Xóa Arrival
+          
+          // Hàm tính mốc thời gian thực tế
+          const getRealIssueTime = (headerTs, text) => {
+            if (!headerTs || !text) return 0;
+            
+            // Tìm mã giờ Z (Bắt cả loại 0500Z hoặc 300500Z)
+            const m = text.match(/\b(?:[0-3][0-9])?([0-2][0-9][0-5][0-9])Z\b/);
+            if (!m) return headerTs; // Nếu ATC gõ sai format, xài luôn giờ Header
+
+            const hh = parseInt(m[1].substring(0, 2), 10);
+            const mm = parseInt(m[1].substring(2, 4), 10);
+
+            // Bóc ngày từ Header
+            const dateObj = new Date(headerTs);
+            // Ghép Ngày Header + Giờ ATIS
+            let issueTime = Date.UTC(dateObj.getUTCFullYear(), dateObj.getUTCMonth(), dateObj.getUTCDate(), hh, mm, 0);
+
+            // Xử lý Lỗi Giao Thừa: ATIS 2350Z hôm qua, nhưng Header web là 0010Z hôm nay.
+            // Nếu ghép lại nó sẽ thành 2350Z hôm nay (vọt tới tương lai). Giải pháp: Lùi 1 ngày!
+            if (issueTime > headerTs + 12 * 3600 * 1000) {
+              issueTime -= 24 * 3600 * 1000; 
+            }
+
+            return issueTime;
+          };
+
+          const realArrTime = getRealIssueTime(atisData.arrTimestamp, atisData.arrival);
+          const realDepTime = getRealIssueTime(atisData.depTimestamp, atisData.departure);
+
+          // Thằng nào mang mốc thời gian tổng hợp lớn hơn (mới hơn) thì giữ lại
+          if (realArrTime >= realDepTime) {
+            atisData.departure = null;
           } else {
-            atisData.departure = null; // Arrival mới hơn (hoặc bằng) -> Xóa Departure
+            atisData.arrival = null;
           }
         }
       }
