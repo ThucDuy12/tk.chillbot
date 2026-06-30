@@ -507,8 +507,14 @@ vatsimWorker.on('message', async (data) => {
     const maxFieldsPerEmbed = 4; // Tối đa 20 fields (200 người) mỗi Embed để tin nhắn không quá dài
     const embeds = [];
 
-    // Xây dựng mảng nội dung cho ATC
-    const ctrlLines = controllers.map(c => {
+    // LỌC BỎ OBS TRƯỚC KHI BUILD MẢNG ATC
+    const validControllers = controllers.filter(c => {
+      if (!c.callsign) return false;
+      return c.rating > 1 && !c.callsign.toUpperCase().includes('OBS');
+    });
+
+    // Xây dựng mảng nội dung cho ATC (Chỉ lấy ATC hợp lệ)
+    const ctrlLines = validControllers.map(c => {
       const name = c.name || `CID: ${c.cid}`;
 
       // Đổi hiển thị trong danh sách tổng để đẹp hơn
@@ -571,7 +577,7 @@ vatsimWorker.on('message', async (data) => {
           currentEmbed = new EmbedBuilder().setColor(0x2ecc71);
           embeds.push(currentEmbed);
         }
-        const name = index === 0 ? `📡 ATC Online (${controllers.length})` : `📡 ATC Online`;
+        const name = index === 0 ? `📡 ATC Online (${validControllers.length})` : `📡 ATC Online`;
         currentEmbed.addFields({ name, value: chunk.join('\n'), inline: false });
       });
     }
@@ -3042,6 +3048,17 @@ client.once('ready', async () => {
     console.error('Lỗi nạp lịch thông báo:', e);
   }
 
+  // Nạp trạng thái Award từ MongoDB để chống spam khi restart
+  try {
+    const savedAward = await db.getBotConfig('award_sent');
+    if (savedAward) {
+      awardSent = savedAward;
+      console.log(`✅ Đã nạp trạng thái Award từ MongoDB: Tháng ${awardSent.lastMonth}/${awardSent.lastYear}`);
+    }
+  } catch (e) {
+    console.error('Lỗi nạp config Award:', e);
+  }
+
   // Load sổ đỏ CID từ Google Sheets
   try {
     if (typeof loadVatsimLinksSheet === 'function') {
@@ -4743,11 +4760,12 @@ async function checkAndSendMonthlyAwards() {
       if (sent) sentAny = true;
     }
 
-    // Lưu trạng thái đã gửi
+    // Lưu trạng thái đã gửi (LÊN MONGODB LUÔN CHO BẤT TỬ)
     if (sentAny) {
       awardSent = { lastMonth: currentMonth, lastYear: currentYear };
-      fs.writeFileSync(AWARD_SENT_FILE, JSON.stringify(awardSent, null, 2));
-      console.log(`[Monthly Award] Đã gửi award và lưu trạng thái cho tháng ${currentMonth}/${currentYear}`);
+      await db.saveBotConfig('award_sent', awardSent); // Lưu lên MongoDB
+      fs.writeFileSync(AWARD_SENT_FILE, JSON.stringify(awardSent, null, 2)); // Backup local
+      console.log(`[Monthly Award] Đã gửi award và lưu trạng thái LÊN MONGODB cho tháng ${currentMonth}/${currentYear}`);
     }
 
   } catch (err) {
@@ -4758,10 +4776,11 @@ async function checkAndSendMonthlyAwards() {
 /**
  * Reset trạng thái award (dành cho admin)
  */
-function resetAwardStatus() {
+async function resetAwardStatus() {
   awardSent = { lastMonth: null, lastYear: null };
+  await db.saveBotConfig('award_sent', awardSent); // Đẩy reset lên MongoDB
   fs.writeFileSync(AWARD_SENT_FILE, JSON.stringify(awardSent, null, 2));
-  console.log('✅ Đã reset trạng thái award!');
+  console.log('✅ Đã reset trạng thái award trên MongoDB!');
 }
 
 // ===================== /SUMMARIZE =====================
@@ -5539,7 +5558,7 @@ async function handleSendAward(interaction) {
       });
 
     } else if (subcommand === 'reset_status') {
-      resetAwardStatus();
+      await resetAwardStatus();
       await interaction.editReply({
         content: '✅ Đã reset trạng thái award! Có thể gửi lại award cho tháng này.'
       });
