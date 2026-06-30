@@ -1179,17 +1179,25 @@ async function updatePilotLeaderboard(currentPilots, currentTime) {
       } else {
         // Existing pilot - cộng thêm thời gian
         const existing = pilotLeaderboardData.pilots[cid];
+        
+        // 1. KIỂM TRA CHUYẾN MỚI TRƯỚC KHI CẬP NHẬT DATA
+        const isNewRoute = existing.lastDeparture !== pilot.departure || existing.lastArrival !== pilot.arrival;
+        const isNewCallsign = existing.callsign !== pilot.callsign;
+        // Nếu offline lâu hơn 30 phút (1800000 ms), tính là chuyến mới thay vì rớt mạng
+        const isLongDisconnect = (currentTime - existing.lastUpdate) > 1800000; 
+
+        // Nếu thỏa mãn 1 trong 3 điều kiện trên -> Tăng số chuyến bay
+        if (isNewRoute || isNewCallsign || isLongDisconnect) {
+          existing.flights = (existing.flights || 1) + 1;
+        }
+
+        // 2. BÂY GIỜ MỚI CẬP NHẬT ĐÈ DATA MỚI LÊN
         existing.seconds += updateSeconds;
         existing.lastUpdate = currentTime;
         existing.callsign = pilot.callsign;
         existing.lastDeparture = pilot.departure;
         existing.lastArrival = pilot.arrival;
         existing.lastAircraft = pilot.aircraft;
-
-        // Nếu có thay đổi sân bay, tăng số chuyến bay
-        if (existing.lastDeparture !== pilot.departure || existing.lastArrival !== pilot.arrival) {
-          existing.flights += 1;
-        }
       }
     });
 
@@ -1262,7 +1270,9 @@ async function updatePilotLeaderboardEmbed() {
         const formattedTime = formatTime(data.seconds);
         const flights = data.flights || 1;
         const rankEmoji = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '•';
-        leaderboardText += `${rankEmoji} **${displayName}** - ${formattedTime}\n`;
+        
+        // Thêm số chuyến bay vào ngay sau thời gian
+        leaderboardText += `${rankEmoji} **${displayName}** - ${formattedTime} (${flights} chuyến)\n`;
       });
 
       embed.addFields({
