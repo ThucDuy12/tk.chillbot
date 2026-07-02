@@ -401,6 +401,47 @@ vatsimWorker.on('message', async (data) => {
 
     const controllers = data.controllers || [];
     const pilots = data.pilots || [];
+    const now = Date.now();
+    const tenMins = 10 * 60 * 1000;
+
+    // === THUẬT TOÁN BỌC THÉP: NỐI GIỜ BAY KHI RỚT MẠNG ===
+    if (global.pilotSessionCache) {
+      pilots.forEach(p => {
+        const cidStr = p.cid.toString();
+        const currentLogon = new Date(p.logon_time).getTime();
+        let session = global.pilotSessionCache.get(cidStr);
+
+        if (session) {
+          // Nếu rớt mạng dưới 10 phút -> NỐI CHUYẾN
+          if (now - session.lastSeen <= tenMins) {
+            // Ép giờ logon của API VATSIM quay về giờ gốc đã lưu
+            p.logon_time = new Date(session.firstLogon).toISOString();
+            session.lastSeen = now; 
+          } else {
+            // Đã offline quá 10 phút -> TÍNH CHUYẾN MỚI
+            session.firstLogon = currentLogon;
+            session.lastSeen = now;
+          }
+        } else {
+          // Lần đầu tiên xuất hiện trên radar
+          global.pilotSessionCache.set(cidStr, {
+            firstLogon: currentLogon,
+            lastSeen: now
+          });
+        }
+      });
+
+      // Dọn rác: Xóa sạch những ông nội đã offline quá 10 phút khỏi RAM
+      for (const [cid, session] of global.pilotSessionCache.entries()) {
+        if (now - session.lastSeen > tenMins) {
+          global.pilotSessionCache.delete(cid);
+        }
+      }
+
+      // Lưu âm thầm lên MongoDB để lỡ restart bot không bị mất
+      db.saveBotConfig('pilot_sessions', Object.fromEntries(global.pilotSessionCache)).catch(()=>{});
+    }
+    // =======================================================
     // Helper: Rút gọn Aircraft Type (VD: H/B77W/L -> B77W | A320/M-SDE... -> A320)
     function getShortAircraft(acftStr) {
       if (!acftStr) return 'N/A';
@@ -2627,7 +2668,6 @@ let acdmMessageStore = fs.existsSync(ACDM_MSG_FILE) ? JSON.parse(fs.readFileSync
 let acdmData = new Map();
 let acdmUpdateTimeout = null;
 
-// Hàm lắng nghe luồng Server-Sent Events từ API
 async function setupACDMStream() {
   const url = 'https://api.vclvacc.net/api/v1/pilots/sse';
   console.log(`[ACDM] Bắt đầu kết nối đến luồng: ${url}`);
@@ -2643,11 +2683,26 @@ async function setupACDMStream() {
 
   const es = new ES(url);
 
+  // === CHÓ CANH GÁC (WATCHDOG) CHỐNG ĐỨNG ACDM ===
+  let acdmWatchdog;
+  const resetWatchdog = () => {
+    clearTimeout(acdmWatchdog);
+    // Nếu quá 4 phút không nhận được tín hiệu nào từ server -> Ép chết kết nối để nối lại
+    acdmWatchdog = setTimeout(() => {
+      console.log('🔴 [ACDM] Luồng dữ liệu bị CHẾT LÂM SÀNG! Đang ép khởi động lại...');
+      es.close();
+      setupACDMStream();
+    }, 4 * 60 * 1000);
+  };
+  // ================================================
+
   es.onopen = () => {
     console.log('🟢 [ACDM] Đã kết nối thành công tới luồng dữ liệu (Live)!');
+    resetWatchdog(); // Khởi động chó canh gác
   };
 
   const handleData = (event) => {
+    resetWatchdog(); // Có tín hiệu sống -> Reset chó canh gác
     try {
       const parsed = JSON.parse(event.data);
       const data = parsed.data ? parsed.data : parsed;
@@ -3077,6 +3132,17 @@ client.once('ready', async () => {
   // Đảm bảo role event tồn tại
   await ensureEventRoleExists();
 
+  // Khởi tạo bộ nhớ đệm lưu phiên bay của Pilot (chống rớt mạng)
+  global.pilotSessionCache = new Map();
+  try {
+    const savedSessions = await db.getBotConfig('pilot_sessions');
+    if (savedSessions) {
+      global.pilotSessionCache = new Map(Object.entries(savedSessions));
+      console.log(`✅ Đã nạp ${global.pilotSessionCache.size} phiên bay Pilot từ MongoDB để chống mất giờ.`);
+    }
+  } catch (e) {
+    console.error('Lỗi nạp config pilot_sessions:', e);
+  }
 
   // Register slash commands
   const commands = [
@@ -3503,18 +3569,12 @@ client.once('ready', async () => {
     updateServerStats(client);
   }, 15 * 60 * 1000);
 
-  // VATSIM update scheduling
-  const vatsimPeriodMs = (process.env.VATSIM_UPDATE_MINUTES ? parseInt(process.env.VATSIM_UPDATE_MINUTES) : 1) * 60 * 1000;
+  // Kích hoạt quét VATSIM an toàn (1 phút 1 lần)
   vatsimWorker.postMessage('update');
-  setInterval(() => vatsimWorker.postMessage('update'), vatsimPeriodMs);
-  console.log(`VATSIM updater running: immediate + every ${vatsimPeriodMs / 60000} minutes`);
-
-
-  // Cập nhật dữ liệu thường xuyên hơn (mỗi phút)
   setInterval(() => {
-    // Gọi VATSIM worker để cập nhật controllers và pilots
     vatsimWorker.postMessage('update');
-  }, 60 * 1000); // Mỗi phút
+  }, 60 * 1000);
+  console.log('✅ VATSIM Radar đã kích hoạt, quét mỗi 60 giây.');
 
 
   console.log('Leaderboard updater scheduled: data every minute, embed every hour');
