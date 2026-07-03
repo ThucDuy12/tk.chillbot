@@ -8858,7 +8858,13 @@ async function handleIvaoAtis(interaction) {
 }
 
 // ===================== LOGIN =====================
-client.login(TOKEN);
+client.on('debug', info => console.log(`[DISCORD DEBUG] ${info}`));
+client.on('warn', warning => console.log(`[DISCORD WARN] ${warning}`));
+client.on('error', error => console.error(`[DISCORD ERROR]`, error));
+
+client.login(TOKEN).catch(err => {
+  console.error("❌ LỖI ĐĂNG NHẬP:", err);
+});
 
 // === WEB SERVER & PING CHÉO ===
 const port = process.env.PORT || 3000;
