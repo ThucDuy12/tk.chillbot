@@ -2668,6 +2668,7 @@ let acdmMessageStore = fs.existsSync(ACDM_MSG_FILE) ? JSON.parse(fs.readFileSync
 let acdmData = new Map();
 let acdmUpdateTimeout = null;
 
+// Hàm lắng nghe luồng Server-Sent Events từ API
 async function setupACDMStream() {
   const url = 'https://api.vclvacc.net/api/v1/pilots/sse';
   console.log(`[ACDM] Bắt đầu kết nối đến luồng: ${url}`);
@@ -2683,26 +2684,11 @@ async function setupACDMStream() {
 
   const es = new ES(url);
 
-  // === CHÓ CANH GÁC (WATCHDOG) CHỐNG ĐỨNG ACDM ===
-  let acdmWatchdog;
-  const resetWatchdog = () => {
-    clearTimeout(acdmWatchdog);
-    // Nếu quá 4 phút không nhận được tín hiệu nào từ server -> Ép chết kết nối để nối lại
-    acdmWatchdog = setTimeout(() => {
-      console.log('🔴 [ACDM] Luồng dữ liệu bị CHẾT LÂM SÀNG! Đang ép khởi động lại...');
-      es.close();
-      setupACDMStream();
-    }, 4 * 60 * 1000);
-  };
-  // ================================================
-
   es.onopen = () => {
     console.log('🟢 [ACDM] Đã kết nối thành công tới luồng dữ liệu (Live)!');
-    resetWatchdog(); // Khởi động chó canh gác
   };
 
   const handleData = (event) => {
-    resetWatchdog(); // Có tín hiệu sống -> Reset chó canh gác
     try {
       const parsed = JSON.parse(event.data);
       const data = parsed.data ? parsed.data : parsed;
@@ -3569,12 +3555,18 @@ client.once('ready', async () => {
     updateServerStats(client);
   }, 15 * 60 * 1000);
 
-  // Kích hoạt quét VATSIM an toàn (1 phút 1 lần)
+  // VATSIM update scheduling
+  const vatsimPeriodMs = (process.env.VATSIM_UPDATE_MINUTES ? parseInt(process.env.VATSIM_UPDATE_MINUTES) : 1) * 60 * 1000;
   vatsimWorker.postMessage('update');
+  setInterval(() => vatsimWorker.postMessage('update'), vatsimPeriodMs);
+  console.log(`VATSIM updater running: immediate + every ${vatsimPeriodMs / 60000} minutes`);
+
+
+  // Cập nhật dữ liệu thường xuyên hơn (mỗi phút)
   setInterval(() => {
+    // Gọi VATSIM worker để cập nhật controllers và pilots
     vatsimWorker.postMessage('update');
-  }, 60 * 1000);
-  console.log('✅ VATSIM Radar đã kích hoạt, quét mỗi 60 giây.');
+  }, 60 * 1000); // Mỗi phút
 
 
   console.log('Leaderboard updater scheduled: data every minute, embed every hour');
