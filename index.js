@@ -3281,6 +3281,10 @@ client.once('ready', async () => {
       .setName('ivao_atis')
       .setDescription('Đọc ATIS trực tiếp từ mạng bay IVAO')
       .addStringOption(option => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS, VVNB)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('real_flight')
+      .setDescription('Tra cứu các chuyến bay cất/hạ cánh ngoài đời thực tại sân bay')
+      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3758,6 +3762,9 @@ client.on('interactionCreate', async (interaction) => {
           break;
         case 'ivao_atis':
           await handleIvaoAtis(interaction);
+          break;
+        case 'real_flight':
+          await handleRealFlight(interaction);
           break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
@@ -5708,8 +5715,9 @@ async function handleModal(interaction) {
       const embed = new EmbedBuilder()
         .setTitle('Role Request')
         .setDescription(
-          `User ${interaction.user.tag} (${interaction.user.id}) requests role ${roleName}.\n\n**Tên:** ${name}\n**Giới thiệu:** ${intro}\n**Thời gian:** ${timestamp}`
-        );
+          `User <@${interaction.user.id}> (${interaction.user.tag}) requests role **${roleName}**.\n\n**Tên:** ${name}\n**Giới thiệu:** ${intro}\n**Thời gian:** ${timestamp}`
+        )
+        .setColor(0x3498db); // Thêm màu cho đẹp
 
       // Thêm ping DEV và Admin
       const mentionText = `<@&${roles.adminRoleId}> <@&${roles.devRoleId}> <@&${roles.verifiedMemberRoleId}>`;
@@ -8855,6 +8863,88 @@ async function handleIvaoAtis(interaction) {
   } catch (err) {
     console.error('Lỗi lệnh ivao_atis:', err);
     await interaction.editReply('❌ Đã có lỗi xảy ra khi kéo dữ liệu ATIS từ mạng bay IVAO.');
+  }
+}
+
+// ===================== COMMAND: REAL FLIGHT =====================
+async function handleRealFlight(interaction) {
+  const icao = interaction.options.getString('icao').toUpperCase();
+  await interaction.deferReply();
+
+  try {
+    const fetch = (await import('node-fetch')).default;
+    
+    // Sử dụng API nội bộ của FlightRadar24 để lấy lịch trình bay thực tế
+    const url = `https://api.flightradar24.com/common/v1/airport.json?code=${icao}&plugin[]=schedule&plugin-setting[schedule][mode]=&page=1&limit=5`;
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      return await interaction.editReply({ content: `❌ Lỗi kết nối đến máy chủ FlightRadar24 (Status: ${response.status}).` });
+    }
+
+    const data = await response.json();
+    const airportData = data?.result?.response?.airport;
+
+    if (!airportData || !airportData.pluginData?.schedule) {
+      return await interaction.editReply({ content: `❌ Không tìm thấy dữ liệu sân bay ngoài đời thực cho mã **${icao}**. (Có thể sân bay quá nhỏ hoặc sai mã)` });
+    }
+
+    const arrivals = airportData.pluginData.schedule.arrivals?.data || [];
+    const departures = airportData.pluginData.schedule.departures?.data || [];
+
+    const embed = new EmbedBuilder()
+      .setTitle(`✈️ Bảng Lịch Trình Bay Thực Tế - ${icao}`)
+      .setDescription(`Dữ liệu chuyến bay thương mại tại **${airportData.pluginData?.details?.name || icao}**`)
+      .setColor(0xF1C40F)
+      .setThumbnail('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQfg9dUNts7zwTeA9GCPFIegoQsUMrgPRgrUwYHnv1QSb04sP9U7KE2424&s=10')
+      .setFooter({ text: 'Dữ liệu được cập nhật trực tiếp từ FlightRadar24' })
+      .setTimestamp();
+
+    // 📤 Xử lý Cất Cánh (Departures)
+    let depText = '';
+    if (departures.length > 0) {
+      departures.slice(0, 5).forEach(f => {
+        const flight = f.flight;
+        const flightNum = flight.identification?.number?.default || 'N/A';
+        const arrAirport = flight.airport?.destination?.code?.icao || flight.airport?.destination?.name || 'N/A';
+        const acft = flight.aircraft?.model?.code || 'N/A';
+        const status = flight.status?.text || 'Scheduled';
+        const std = flight.time?.scheduled?.departure ? `<t:${flight.time.scheduled.departure}:t>` : 'N/A';
+
+        depText += `🛫 **${flightNum}** đi ${arrAirport} | 🛩️ ${acft}\n> ⏰ ${std} - 📌 ${status}\n`;
+      });
+    } else {
+      depText = '> *Không có chuyến bay cất cánh nào sắp tới.*';
+    }
+    embed.addFields({ name: '📤 CHUẨN BỊ CẤT CÁNH (DEPARTURES)', value: depText, inline: false });
+
+    // 📥 Xử lý Hạ Cánh (Arrivals)
+    let arrText = '';
+    if (arrivals.length > 0) {
+      arrivals.slice(0, 5).forEach(f => {
+        const flight = f.flight;
+        const flightNum = flight.identification?.number?.default || 'N/A';
+        const depAirport = flight.airport?.origin?.code?.icao || flight.airport?.origin?.name || 'N/A';
+        const acft = flight.aircraft?.model?.code || 'N/A';
+        const status = flight.status?.text || 'Scheduled';
+        const sta = flight.time?.scheduled?.arrival ? `<t:${flight.time.scheduled.arrival}:t>` : 'N/A';
+
+        arrText += `🛬 **${flightNum}** từ ${depAirport} | 🛩️ ${acft}\n> ⏰ ${sta} - 📌 ${status}\n`;
+      });
+    } else {
+      arrText = '> *Không có chuyến bay hạ cánh nào sắp tới.*';
+    }
+    embed.addFields({ name: '📥 CHUẨN BỊ HẠ CÁNH (ARRIVALS)', value: arrText, inline: false });
+
+    await interaction.editReply({ embeds: [embed] });
+  } catch (err) {
+    console.error('Lỗi lấy real flight:', err);
+    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu chuyến bay thực tế.' });
   }
 }
 
