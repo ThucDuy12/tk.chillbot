@@ -401,47 +401,6 @@ vatsimWorker.on('message', async (data) => {
 
     const controllers = data.controllers || [];
     const pilots = data.pilots || [];
-    const now = Date.now();
-    const tenMins = 10 * 60 * 1000;
-
-    // === THUẬT TOÁN BỌC THÉP: NỐI GIỜ BAY KHI RỚT MẠNG ===
-    if (global.pilotSessionCache) {
-      pilots.forEach(p => {
-        const cidStr = p.cid.toString();
-        const currentLogon = new Date(p.logon_time).getTime();
-        let session = global.pilotSessionCache.get(cidStr);
-
-        if (session) {
-          // Nếu rớt mạng dưới 10 phút -> NỐI CHUYẾN
-          if (now - session.lastSeen <= tenMins) {
-            // Ép giờ logon của API VATSIM quay về giờ gốc đã lưu
-            p.logon_time = new Date(session.firstLogon).toISOString();
-            session.lastSeen = now; 
-          } else {
-            // Đã offline quá 10 phút -> TÍNH CHUYẾN MỚI
-            session.firstLogon = currentLogon;
-            session.lastSeen = now;
-          }
-        } else {
-          // Lần đầu tiên xuất hiện trên radar
-          global.pilotSessionCache.set(cidStr, {
-            firstLogon: currentLogon,
-            lastSeen: now
-          });
-        }
-      });
-
-      // Dọn rác: Xóa sạch những ông nội đã offline quá 10 phút khỏi RAM
-      for (const [cid, session] of global.pilotSessionCache.entries()) {
-        if (now - session.lastSeen > tenMins) {
-          global.pilotSessionCache.delete(cid);
-        }
-      }
-
-      // Lưu âm thầm lên MongoDB để lỡ restart bot không bị mất
-      db.saveBotConfig('pilot_sessions', Object.fromEntries(global.pilotSessionCache)).catch(()=>{});
-    }
-    // =======================================================
     // Helper: Rút gọn Aircraft Type (VD: H/B77W/L -> B77W | A320/M-SDE... -> A320)
     function getShortAircraft(acftStr) {
       if (!acftStr) return 'N/A';
@@ -3118,17 +3077,6 @@ client.once('ready', async () => {
   // Đảm bảo role event tồn tại
   await ensureEventRoleExists();
 
-  // Khởi tạo bộ nhớ đệm lưu phiên bay của Pilot (chống rớt mạng)
-  global.pilotSessionCache = new Map();
-  try {
-    const savedSessions = await db.getBotConfig('pilot_sessions');
-    if (savedSessions) {
-      global.pilotSessionCache = new Map(Object.entries(savedSessions));
-      console.log(`✅ Đã nạp ${global.pilotSessionCache.size} phiên bay Pilot từ MongoDB để chống mất giờ.`);
-    }
-  } catch (e) {
-    console.error('Lỗi nạp config pilot_sessions:', e);
-  }
 
   // Register slash commands
   const commands = [
@@ -5609,7 +5557,7 @@ async function handleSendAward(interaction) {
         ephemeral: true
       });
 
-    } else if (subcommand === 'reset_status') {
+    } } else if (subcommand === 'reset_status') {
       await resetAwardStatus();
       await interaction.editReply({
         content: '✅ Đã reset trạng thái award! Có thể gửi lại award cho tháng này.'
