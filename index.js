@@ -5557,7 +5557,7 @@ async function handleSendAward(interaction) {
         ephemeral: true
       });
 
-    } } else if (subcommand === 'reset_status') {
+    } else if (subcommand === 'reset_status') {
       await resetAwardStatus();
       await interaction.editReply({
         content: '✅ Đã reset trạng thái award! Có thể gửi lại award cho tháng này.'
