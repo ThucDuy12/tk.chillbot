@@ -6459,37 +6459,35 @@ async function fetchATIS(icao) {
     }
 
     // -------------------------------------------------------------
-    // BƯỚC 2: MỔ BỤNG ATIS.GURU BẰNG FETCH NỘI BỘ VÀ REGEX
+    // BƯỚC 2: CÀO BẰNG HTTPS NGUYÊN THỦY (LÁCH CLOUDFLARE)
     // -------------------------------------------------------------
-    const url = `https://atis.guru/atis/${icao.toUpperCase()}`;
-    
-    // SỬ DỤNG FETCH NỘI BỘ CỦA NODE.JS (Không dùng thư viện node-fetch nữa để lách Cloudflare)
-    const response = await globalThis.fetch(url, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'vi-VN,vi;q=0.8,en-US;q=0.5,en;q=0.3',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Priority': 'u=1'
-      },
-      // Bọc lệnh timeout an toàn cho Native Fetch
-      signal: AbortSignal.timeout(8000) 
+    // Dùng lõi https nguyên thủy thay vì fetch để tuân thủ luật IPv4 và qua mặt Cloudflare
+    const html = await new Promise((resolve, reject) => {
+      const https = require('https');
+      const req = https.get(`https://atis.guru/atis/${icao.toUpperCase()}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
+          'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7'
+        },
+        timeout: 8000
+      }, (res) => {
+        if (res.statusCode !== 200) {
+          return reject(new Error(`[ATIS.GURU] Bị chặn (Mã lỗi HTTP: ${res.statusCode})`));
+        }
+        let rawData = '';
+        res.on('data', chunk => rawData += chunk);
+        res.on('end', () => resolve(rawData));
+      });
+      
+      req.on('error', err => reject(err));
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Hết thời gian chờ 8 giây'));
+      });
     });
 
-    if (!response.ok) {
-      console.log(`[ATIS.GURU] Phản hồi lỗi: ${response.status}`);
-      return null;
-    }
-
-    const html = await response.text();
-
-    // SỬ DỤNG REGEX CHÉM THẲNG VÀO HTML (Chính xác 100% theo mẫu mã HTML sếp vừa gửi)
+    // SỬ DỤNG REGEX CHÉM THẲNG VÀO HTML (Chính xác 100% theo mẫu mã HTML)
     const atisRegex = /<div class="atis">(.*?)<\/div>/gis;
     let match;
     const atisBlocks = [];
@@ -6497,9 +6495,9 @@ async function fetchATIS(icao) {
     // Quét từng thẻ div class="atis" tìm được
     while ((match = atisRegex.exec(html)) !== null) {
       let text = match[1]
-        .replace(/&#xA;/gi, '\n')      // Giải mã dấu &#xA; thành ký tự xuống dòng (Đúng như ảnh sếp chụp)
+        .replace(/&#xA;/gi, '\n')      // Giải mã dấu &#xA; thành ký tự xuống dòng
         .replace(/<br\s*\/?>/gi, '\n') // Quét sạch thẻ <br>
-        .replace(/<[^>]*>?/gm, '')     // Xóa tất cả các thẻ HTML rác còn sót lại (Thẻ <script>, <span>,...)
+        .replace(/<[^>]*>?/gm, '')     // Xóa tất cả các thẻ HTML rác còn sót lại
         .replace(/&amp;/gi, '&')       // Giải mã dấu &
         .trim();
       
@@ -6507,7 +6505,7 @@ async function fetchATIS(icao) {
     }
 
     if (atisBlocks.length === 0) {
-      console.log("[ATIS.GURU] Cào được web nhưng không thấy nội dung class ATIS bên trong.");
+      console.log("[ATIS.GURU] Cào được web nhưng không thấy nội dung ATIS bên trong.");
       return null; 
     }
 
