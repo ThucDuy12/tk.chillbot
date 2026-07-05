@@ -6417,84 +6417,134 @@ function convertAtisToMetar(atisText, icao) {
   return metarParts.join(' ');
 }
 
-// 3. Crawler chính
+// 3. Crawler chính (Hybrid: VATSIM API -> Fallback to atis.guru Blazor Scraper)
 async function fetchATIS(icao) {
   try {
     const fetch = (await import('node-fetch')).default;
-    const url = `https://atis.guru/atis/${icao.toUpperCase()}`;
+    
+    // -------------------------------------------------------------
+    // BƯỚC 1: LẤY TRỰC TIẾP TỪ VATSIM API (SIÊU NHANH)
+    // -------------------------------------------------------------
+    try {
+      const vatsimRes = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
+      if (vatsimRes.ok) {
+        const data = await vatsimRes.json();
+        const atisList = data.atis.filter(a => a.callsign.startsWith(icao.toUpperCase()) && a.callsign.includes('ATIS'));
 
+        if (atisList && atisList.length > 0) {
+          let arrival = null;
+          let departure = null;
+          let arrTimestamp = 0;
+          let depTimestamp = 0;
+
+          atisList.forEach(atis => {
+            let textInfo = Array.isArray(atis.text_atis) ? atis.text_atis.join(' ') : (atis.text_atis || '');
+            textInfo = textInfo.replace(/\^§/g, '').trim(); 
+            const logonUnix = new Date(atis.logon_time).getTime();
+            const callsign = atis.callsign.toUpperCase();
+            const textUpper = textInfo.toUpperCase();
+
+            if (callsign.includes('_A_') || textUpper.includes('ARRIVAL')) {
+              arrival = textInfo;
+              arrTimestamp = logonUnix;
+            } else if (callsign.includes('_D_') || textUpper.includes('DEPARTURE')) {
+              departure = textInfo;
+              depTimestamp = logonUnix;
+            } else {
+              arrival = textInfo;
+              departure = textInfo;
+              arrTimestamp = logonUnix;
+              depTimestamp = logonUnix;
+            }
+          });
+
+          const rawAtisToConvert = arrival || departure;
+          const metar = rawAtisToConvert ? convertAtisToMetar(rawAtisToConvert, icao.toUpperCase()) : null;
+
+          return { arrival, arrTimestamp, departure, depTimestamp, metar };
+        }
+      }
+    } catch (e) {
+      console.warn("⚠️ VATSIM API lỗi, đang chuyển sang atis.guru...");
+    }
+
+    // -------------------------------------------------------------
+    // BƯỚC 2: NẾU API TRỐNG -> MỔ BỤNG ATIS.GURU BẰNG CÔNG NGHỆ MỚI
+    // -------------------------------------------------------------
+    const url = `https://atis.guru/atis/${icao.toUpperCase()}`;
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache'
       }
     });
 
-    if (!response.ok) {
-      console.warn(`ATIS.guru fetch failed: ${response.status}`);
-      return null;
-    }
+    if (!response.ok) return null;
 
     const html = await response.text();
     const cheerio = require('cheerio');
     const $ = cheerio.load(html);
 
-    let fullText = $('body').text().replace(/\s+/g, ' ');
+    // Kẻ thù nằm ở đây: atis.guru nhét nội dung vào thẻ <template> bên trong <blazor-ssr>
+    // Mình sẽ cào TẤT CẢ các thẻ <div> có class "atis" nằm trong đống hỗn độn này
+    let atisBlocks = [];
+    $('template').each((i, el) => {
+      const templateHtml = $(el).html();
+      if (templateHtml) {
+        const sub$ = cheerio.load(templateHtml);
+        sub$('.atis').each((j, atisEl) => {
+          atisBlocks.push(sub$(atisEl).text().trim());
+        });
+      }
+    });
+
+    // Nếu thẻ template không có, cào thẳng class .atis ở ngoài body
+    if (atisBlocks.length === 0) {
+      $('.atis').each((i, el) => {
+        atisBlocks.push($(el).text().trim());
+      });
+    }
+
+    if (atisBlocks.length === 0) return null; // Thua, web trống trơn thật
 
     let arrival = null;
     let departure = null;
     let metar = null;
 
-    // Khai báo 2 biến để hứng cái Ngày giờ tuyệt đối
-    let arrTimestamp = 0;
-    let depTimestamp = 0;
+    // Phân tích các khối ATIS cào được
+    atisBlocks.forEach(text => {
+      const upper = text.toUpperCase();
+      // Loại bỏ khoảng trắng thừa
+      const cleanText = text.replace(/\s+/g, ' '); 
 
-    const arrMatch = fullText.match(/Arrival ATIS\s*(.*?)(?=Departure ATIS|METAR|VATSIM|$)/i);
-    if (arrMatch) {
-      // Bóc lấy cái "2026-06-20 05:12 UTC" trước khi xóa nó đi
-      const tMatch = arrMatch[1].match(/^\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\sUTC/i);
-      if (tMatch) arrTimestamp = new Date(tMatch[1] + 'Z').getTime(); // Thêm 'Z' để máy tính hiểu là giờ UTC
-
-      arrival = arrMatch[1].replace(/^\s*\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\sUTC\s*/i, '').trim();
-      fullText = fullText.replace(arrMatch[0], '');
-    }
-
-    const depMatch = fullText.match(/Departure ATIS\s*(.*?)(?=Arrival ATIS|METAR|VATSIM|$)/i);
-    if (depMatch) {
-      // Bóc lấy cái "2026-06-19 23:02 UTC" trước khi xóa nó đi
-      const tMatch = depMatch[1].match(/^\s*(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\sUTC/i);
-      if (tMatch) depTimestamp = new Date(tMatch[1] + 'Z').getTime();
-
-      departure = depMatch[1].replace(/^\s*\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}\sUTC\s*/i, '').trim();
-      fullText = fullText.replace(depMatch[0], '');
-    }
-
-    // Fix lỗi quét dính chữ TAF
-    const metarRegex = new RegExp(`\\b${icao}\\s+\\d{6}Z.*?(TAF|$)`, 'i');
-    const metarMatch = fullText.match(metarRegex);
-
-    if (metarMatch) {
-      metar = metarMatch[0].replace(/TAF$/i, '').trim();
-      metar = metar.replace(/NOSIGTAF$/i, 'NOSIG');
-    } else {
-      const rawAtisToConvert = arrival || departure;
-      if (rawAtisToConvert) {
-        metar = convertAtisToMetar(rawAtisToConvert, icao.toUpperCase());
+      if (upper.startsWith('METAR')) {
+        metar = cleanText.replace(/TAF\s.*/i, '').trim(); // Cắt bỏ rác TAF nếu có dính vào
+      } else if (upper.includes('ARR ATIS') || upper.includes('ARRIVAL')) {
+        arrival = cleanText;
+      } else if (upper.includes('DEP ATIS') || upper.includes('DEPARTURE')) {
+        departure = cleanText;
+      } else if (!metar && !upper.startsWith('TAF')) {
+        // Nếu không phân biệt được và cũng không phải TAF/METAR, cho nó làm Arrival luôn
+        arrival = cleanText;
+        departure = cleanText;
       }
+    });
+
+    // Nếu có D-ATIS nhưng lại rỗng METAR, tự động convert từ D-ATIS ra
+    if (!metar && (arrival || departure)) {
+      metar = convertAtisToMetar(arrival || departure, icao.toUpperCase());
     }
 
     return {
-      arrival: arrival && arrival.length > 10 ? arrival : null,
-      arrTimestamp: arrTimestamp, // Gửi kèm thời gian tuyệt đối của Arrival
-      departure: departure && departure.length > 10 ? departure : null,
-      depTimestamp: depTimestamp, // Gửi kèm thời gian tuyệt đối của Departure
-      metar: metar && metar.length > 10 ? metar : null
+      arrival: arrival,
+      arrTimestamp: Date.now(), 
+      departure: departure,
+      depTimestamp: Date.now(),
+      metar: metar
     };
 
   } catch (err) {
-    console.error(`Error fetching ATIS from guru for ${icao}:`, err.message);
+    console.error(`Lỗi fetching ATIS tổng hợp cho ${icao}:`, err.message);
     return null;
   }
 }
@@ -8874,24 +8924,35 @@ async function handleRealFlight(interaction) {
   try {
     const fetch = (await import('node-fetch')).default;
     
-    // Sử dụng API nội bộ của FlightRadar24 để lấy lịch trình bay thực tế
     const url = `https://api.flightradar24.com/common/v1/airport.json?code=${icao}&plugin[]=schedule&plugin-setting[schedule][mode]=&page=1&limit=5`;
+    
+    // NGUỴ TRANG THÀNH TRÌNH DUYỆT THẬT ĐỂ VƯỢT CLOUDFLARE 403
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Origin': 'https://www.flightradar24.com',
+        'Referer': `https://www.flightradar24.com/data/airports/${icao.toLowerCase()}`,
+        'Connection': 'keep-alive',
+        'sec-ch-ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-site'
       }
     });
 
     if (!response.ok) {
-      return await interaction.editReply({ content: `❌ Lỗi kết nối đến máy chủ FlightRadar24 (Status: ${response.status}).` });
+      return await interaction.editReply({ content: `❌ Lỗi kết nối đến FlightRadar24 (Status: ${response.status}). Có thể IP của bot đang bị hệ thống chống bot tạm thời chặn.` });
     }
 
     const data = await response.json();
     const airportData = data?.result?.response?.airport;
 
     if (!airportData || !airportData.pluginData?.schedule) {
-      return await interaction.editReply({ content: `❌ Không tìm thấy dữ liệu sân bay ngoài đời thực cho mã **${icao}**. (Có thể sân bay quá nhỏ hoặc sai mã)` });
+      return await interaction.editReply({ content: `❌ Không tìm thấy dữ liệu sân bay ngoài đời thực cho mã **${icao}**.` });
     }
 
     const arrivals = airportData.pluginData.schedule.arrivals?.data || [];
@@ -8901,7 +8962,7 @@ async function handleRealFlight(interaction) {
       .setTitle(`✈️ Bảng Lịch Trình Bay Thực Tế - ${icao}`)
       .setDescription(`Dữ liệu chuyến bay thương mại tại **${airportData.pluginData?.details?.name || icao}**`)
       .setColor(0xF1C40F)
-      .setThumbnail('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQfg9dUNts7zwTeA9GCPFIegoQsUMrgPRgrUwYHnv1QSb04sP9U7KE2424&s=10')
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/3180/3180118.png')
       .setFooter({ text: 'Dữ liệu được cập nhật trực tiếp từ FlightRadar24' })
       .setTimestamp();
 
