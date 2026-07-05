@@ -6417,25 +6417,22 @@ function convertAtisToMetar(atisText, icao) {
   return metarParts.join(' ');
 }
 
-// 3. Crawler chính (Hybrid: VATSIM API -> Fallback to atis.guru Blazor Scraper)
+// 3. Crawler chính (Hybrid: VATSIM API -> Fallback to atis.guru Regex Scraper)
 async function fetchATIS(icao) {
   try {
     const fetch = (await import('node-fetch')).default;
-    
+
     // -------------------------------------------------------------
     // BƯỚC 1: LẤY TRỰC TIẾP TỪ VATSIM API (SIÊU NHANH)
     // -------------------------------------------------------------
     try {
-      const vatsimRes = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
+      const vatsimRes = await fetch('https://data.vatsim.net/v3/vatsim-data.json', { timeout: 5000 });
       if (vatsimRes.ok) {
         const data = await vatsimRes.json();
         const atisList = data.atis.filter(a => a.callsign.startsWith(icao.toUpperCase()) && a.callsign.includes('ATIS'));
 
         if (atisList && atisList.length > 0) {
-          let arrival = null;
-          let departure = null;
-          let arrTimestamp = 0;
-          let depTimestamp = 0;
+          let arrival = null, departure = null, arrTimestamp = 0, depTimestamp = 0;
 
           atisList.forEach(atis => {
             let textInfo = Array.isArray(atis.text_atis) ? atis.text_atis.join(' ') : (atis.text_atis || '');
@@ -6445,92 +6442,83 @@ async function fetchATIS(icao) {
             const textUpper = textInfo.toUpperCase();
 
             if (callsign.includes('_A_') || textUpper.includes('ARRIVAL')) {
-              arrival = textInfo;
-              arrTimestamp = logonUnix;
+              arrival = textInfo; arrTimestamp = logonUnix;
             } else if (callsign.includes('_D_') || textUpper.includes('DEPARTURE')) {
-              departure = textInfo;
-              depTimestamp = logonUnix;
+              departure = textInfo; depTimestamp = logonUnix;
             } else {
-              arrival = textInfo;
-              departure = textInfo;
-              arrTimestamp = logonUnix;
-              depTimestamp = logonUnix;
+              arrival = textInfo; departure = textInfo; arrTimestamp = logonUnix; depTimestamp = logonUnix;
             }
           });
 
           const rawAtisToConvert = arrival || departure;
           const metar = rawAtisToConvert ? convertAtisToMetar(rawAtisToConvert, icao.toUpperCase()) : null;
-
           return { arrival, arrTimestamp, departure, depTimestamp, metar };
         }
       }
     } catch (e) {
-      console.warn("⚠️ VATSIM API lỗi, đang chuyển sang atis.guru...");
+      console.warn("⚠️ VATSIM API lỗi hoặc trống, đang chuyển sang atis.guru...");
     }
 
     // -------------------------------------------------------------
-    // BƯỚC 2: NẾU API TRỐNG -> MỔ BỤNG ATIS.GURU BẰNG CÔNG NGHỆ MỚI
+    // BƯỚC 2: MỔ BỤNG ATIS.GURU BẰNG CÔNG NGHỆ REGEX
     // -------------------------------------------------------------
     const url = `https://atis.guru/atis/${icao.toUpperCase()}`;
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
-      }
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+      },
+      timeout: 8000 // Ép tự ngắt nếu quá 8 giây để tránh treo bot
     });
 
     if (!response.ok) return null;
 
     const html = await response.text();
-    const cheerio = require('cheerio');
-    const $ = cheerio.load(html);
 
-    // Kẻ thù nằm ở đây: atis.guru nhét nội dung vào thẻ <template> bên trong <blazor-ssr>
-    // Mình sẽ cào TẤT CẢ các thẻ <div> có class "atis" nằm trong đống hỗn độn này
-    let atisBlocks = [];
-    $('template').each((i, el) => {
-      const templateHtml = $(el).html();
-      if (templateHtml) {
-        const sub$ = cheerio.load(templateHtml);
-        sub$('.atis').each((j, atisEl) => {
-          atisBlocks.push(sub$(atisEl).text().trim());
-        });
-      }
-    });
+    // SỬ DỤNG REGEX CHÉM THẲNG VÀO HTML (Bỏ qua cấu trúc DOM phức tạp của Blazor)
+    const atisRegex = /<div class="atis">(.*?)<\/div>/gis;
+    let match;
+    const atisBlocks = [];
 
-    // Nếu thẻ template không có, cào thẳng class .atis ở ngoài body
-    if (atisBlocks.length === 0) {
-      $('.atis').each((i, el) => {
-        atisBlocks.push($(el).text().trim());
-      });
+    // Quét từng thẻ div class="atis" tìm được
+    while ((match = atisRegex.exec(html)) !== null) {
+      let text = match[1]
+        .replace(/&#xA;/gi, '\n')      // Giải mã dấu &#xA; thành ký tự xuống dòng
+        .replace(/<br\s*\/?>/gi, '\n') // Quét sạch thẻ <br>
+        .replace(/<[^>]*>?/gm, '')     // Xóa tất cả các thẻ HTML rác còn sót lại
+        .replace(/&amp;/gi, '&')       // Giải mã dấu &
+        .trim();
+      
+      if (text) atisBlocks.push(text);
     }
 
-    if (atisBlocks.length === 0) return null; // Thua, web trống trơn thật
+    if (atisBlocks.length === 0) return null; // Nếu không tìm thấy, nghĩa là web trống
 
-    let arrival = null;
-    let departure = null;
-    let metar = null;
+    let arrival = null, departure = null, metar = null;
 
-    // Phân tích các khối ATIS cào được
+    // Phân loại khối dữ liệu ATIS vừa cào được
     atisBlocks.forEach(text => {
       const upper = text.toUpperCase();
-      // Loại bỏ khoảng trắng thừa
-      const cleanText = text.replace(/\s+/g, ' '); 
+      // Loại bỏ khoảng trắng thừa để check dễ hơn
+      const cleanText = text.replace(/[ \t]+/g, ' ').trim(); 
 
       if (upper.startsWith('METAR')) {
-        metar = cleanText.replace(/TAF\s.*/i, '').trim(); // Cắt bỏ rác TAF nếu có dính vào
+        metar = cleanText.replace(/TAF\s.*/i, '').trim(); 
       } else if (upper.includes('ARR ATIS') || upper.includes('ARRIVAL')) {
         arrival = cleanText;
       } else if (upper.includes('DEP ATIS') || upper.includes('DEPARTURE')) {
         departure = cleanText;
       } else if (!metar && !upper.startsWith('TAF')) {
-        // Nếu không phân biệt được và cũng không phải TAF/METAR, cho nó làm Arrival luôn
         arrival = cleanText;
         departure = cleanText;
       }
     });
 
-    // Nếu có D-ATIS nhưng lại rỗng METAR, tự động convert từ D-ATIS ra
+    // Nếu không cào được METAR riêng, thì tự dịch từ nội dung D-ATIS ra
     if (!metar && (arrival || departure)) {
       metar = convertAtisToMetar(arrival || departure, icao.toUpperCase());
     }
