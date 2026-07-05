@@ -6420,13 +6420,12 @@ function convertAtisToMetar(atisText, icao) {
 // 3. Crawler chính (Hybrid: VATSIM API -> Fallback to atis.guru Regex Scraper)
 async function fetchATIS(icao) {
   try {
-    const fetch = (await import('node-fetch')).default;
-
     // -------------------------------------------------------------
     // BƯỚC 1: LẤY TRỰC TIẾP TỪ VATSIM API (SIÊU NHANH)
     // -------------------------------------------------------------
     try {
-      const vatsimRes = await fetch('https://data.vatsim.net/v3/vatsim-data.json', { timeout: 5000 });
+      const nodeFetch = (await import('node-fetch')).default;
+      const vatsimRes = await nodeFetch('https://data.vatsim.net/v3/vatsim-data.json', { timeout: 4000 });
       if (vatsimRes.ok) {
         const data = await vatsimRes.json();
         const atisList = data.atis.filter(a => a.callsign.startsWith(icao.toUpperCase()) && a.callsign.includes('ATIS'));
@@ -6456,30 +6455,41 @@ async function fetchATIS(icao) {
         }
       }
     } catch (e) {
-      console.warn("⚠️ VATSIM API lỗi hoặc trống, đang chuyển sang atis.guru...");
+      console.warn("⚠️ Không lấy được từ VATSIM, bắt đầu cào atis.guru...");
     }
 
     // -------------------------------------------------------------
-    // BƯỚC 2: MỔ BỤNG ATIS.GURU BẰNG CÔNG NGHỆ REGEX
+    // BƯỚC 2: MỔ BỤNG ATIS.GURU BẰNG FETCH NỘI BỘ VÀ REGEX
     // -------------------------------------------------------------
     const url = `https://atis.guru/atis/${icao.toUpperCase()}`;
-    const response = await fetch(url, {
+    
+    // SỬ DỤNG FETCH NỘI BỘ CỦA NODE.JS (Không dùng thư viện node-fetch nữa để lách Cloudflare)
+    const response = await globalThis.fetch(url, {
+      method: 'GET',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Cache-Control': 'no-cache',
+        'Accept-Language': 'vi-VN,vi;q=0.8,en-US;q=0.5,en;q=0.3',
         'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Priority': 'u=1'
       },
-      timeout: 8000 // Ép tự ngắt nếu quá 8 giây để tránh treo bot
+      // Bọc lệnh timeout an toàn cho Native Fetch
+      signal: AbortSignal.timeout(8000) 
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.log(`[ATIS.GURU] Phản hồi lỗi: ${response.status}`);
+      return null;
+    }
 
     const html = await response.text();
 
-    // SỬ DỤNG REGEX CHÉM THẲNG VÀO HTML (Bỏ qua cấu trúc DOM phức tạp của Blazor)
+    // SỬ DỤNG REGEX CHÉM THẲNG VÀO HTML (Chính xác 100% theo mẫu mã HTML sếp vừa gửi)
     const atisRegex = /<div class="atis">(.*?)<\/div>/gis;
     let match;
     const atisBlocks = [];
@@ -6487,16 +6497,19 @@ async function fetchATIS(icao) {
     // Quét từng thẻ div class="atis" tìm được
     while ((match = atisRegex.exec(html)) !== null) {
       let text = match[1]
-        .replace(/&#xA;/gi, '\n')      // Giải mã dấu &#xA; thành ký tự xuống dòng
+        .replace(/&#xA;/gi, '\n')      // Giải mã dấu &#xA; thành ký tự xuống dòng (Đúng như ảnh sếp chụp)
         .replace(/<br\s*\/?>/gi, '\n') // Quét sạch thẻ <br>
-        .replace(/<[^>]*>?/gm, '')     // Xóa tất cả các thẻ HTML rác còn sót lại
+        .replace(/<[^>]*>?/gm, '')     // Xóa tất cả các thẻ HTML rác còn sót lại (Thẻ <script>, <span>,...)
         .replace(/&amp;/gi, '&')       // Giải mã dấu &
         .trim();
       
       if (text) atisBlocks.push(text);
     }
 
-    if (atisBlocks.length === 0) return null; // Nếu không tìm thấy, nghĩa là web trống
+    if (atisBlocks.length === 0) {
+      console.log("[ATIS.GURU] Cào được web nhưng không thấy nội dung class ATIS bên trong.");
+      return null; 
+    }
 
     let arrival = null, departure = null, metar = null;
 
@@ -6518,7 +6531,7 @@ async function fetchATIS(icao) {
       }
     });
 
-    // Nếu không cào được METAR riêng, thì tự dịch từ nội dung D-ATIS ra
+    // Nếu atis.guru không có METAR riêng, thì tự dịch từ nội dung D-ATIS ra
     if (!metar && (arrival || departure)) {
       metar = convertAtisToMetar(arrival || departure, icao.toUpperCase());
     }
@@ -6532,7 +6545,7 @@ async function fetchATIS(icao) {
     };
 
   } catch (err) {
-    console.error(`Lỗi fetching ATIS tổng hợp cho ${icao}:`, err.message);
+    console.error(`[ATIS.GURU] Cú cào thất bại cho ${icao}:`, err.message);
     return null;
   }
 }
