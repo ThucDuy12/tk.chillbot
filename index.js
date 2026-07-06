@@ -6417,7 +6417,7 @@ function convertAtisToMetar(atisText, icao) {
   return metarParts.join(' ');
 }
 
-// 3. Crawler chính (Hybrid: VATSIM API -> Fallback to atis.guru Regex Scraper)
+// 3. Crawler chính (VŨ KHÍ TỐI THƯỢNG: cURL LINUX Bypasses Cloudflare)
 async function fetchATIS(icao) {
   try {
     // -------------------------------------------------------------
@@ -6459,35 +6459,30 @@ async function fetchATIS(icao) {
     }
 
     // -------------------------------------------------------------
-    // BƯỚC 2: CÀO BẰNG HTTPS NGUYÊN THỦY (LÁCH CLOUDFLARE)
+    // BƯỚC 2: CÀO BẰNG LỆNH cURL CỦA HỆ ĐIỀU HÀNH LINUX (100% LÁCH LUẬT)
     // -------------------------------------------------------------
-    // Dùng lõi https nguyên thủy thay vì fetch để tuân thủ luật IPv4 và qua mặt Cloudflare
-    const html = await new Promise((resolve, reject) => {
-      const https = require('https');
-      const req = https.get(`https://atis.guru/atis/${icao.toUpperCase()}`, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
-          'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7'
-        },
-        timeout: 8000
-      }, (res) => {
-        if (res.statusCode !== 200) {
-          return reject(new Error(`[ATIS.GURU] Bị chặn (Mã lỗi HTTP: ${res.statusCode})`));
-        }
-        let rawData = '';
-        res.on('data', chunk => rawData += chunk);
-        res.on('end', () => resolve(rawData));
-      });
-      
-      req.on('error', err => reject(err));
-      req.on('timeout', () => {
-        req.destroy();
-        reject(new Error('Hết thời gian chờ 8 giây'));
-      });
-    });
+    const util = require('util');
+    const exec = util.promisify(require('child_process').exec);
+    
+    const url = `https://atis.guru/atis/${icao.toUpperCase()}`;
+    let html = '';
 
-    // SỬ DỤNG REGEX CHÉM THẲNG VÀO HTML (Chính xác 100% theo mẫu mã HTML)
+    try {
+      // Ép máy chủ Linux dùng cURL tải HTML, bọc áo giáp Chrome cực mạnh
+      const command = `curl -k -s -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" -H "Accept-Language: vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7" --compressed "${url}"`;
+      
+      const { stdout } = await exec(command, { timeout: 10000 }); // Đợi tối đa 10s
+      html = stdout;
+    } catch (execErr) {
+      throw new Error(`Mạng Linux cURL bị lỗi: ${execErr.message}`);
+    }
+
+    if (!html || html.trim() === '') {
+      console.log("[ATIS.GURU] Web rỗng, có thể sân bay không có dữ liệu.");
+      return null;
+    }
+
+    // SỬ DỤNG REGEX CHÉM THẲNG VÀO HTML ĐỂ MÓC RUỘT D-ATIS
     const atisRegex = /<div class="atis">(.*?)<\/div>/gis;
     let match;
     const atisBlocks = [];
@@ -6505,7 +6500,7 @@ async function fetchATIS(icao) {
     }
 
     if (atisBlocks.length === 0) {
-      console.log("[ATIS.GURU] Cào được web nhưng không thấy nội dung ATIS bên trong.");
+      console.log("[ATIS.GURU] Đã kéo được giao diện web nhưng không thấy text ATIS.");
       return null; 
     }
 
@@ -6514,7 +6509,6 @@ async function fetchATIS(icao) {
     // Phân loại khối dữ liệu ATIS vừa cào được
     atisBlocks.forEach(text => {
       const upper = text.toUpperCase();
-      // Loại bỏ khoảng trắng thừa để check dễ hơn
       const cleanText = text.replace(/[ \t]+/g, ' ').trim(); 
 
       if (upper.startsWith('METAR')) {
@@ -6543,7 +6537,7 @@ async function fetchATIS(icao) {
     };
 
   } catch (err) {
-    console.error(`[ATIS.GURU] Cú cào thất bại cho ${icao}:`, err.message);
+    console.error(`[ATIS.GURU] Thất bại cuối cùng cho ${icao}:`, err.message);
     return null;
   }
 }
