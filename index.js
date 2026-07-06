@@ -6417,7 +6417,7 @@ function convertAtisToMetar(atisText, icao) {
   return metarParts.join(' ');
 }
 
-// 3. Crawler chính (VŨ KHÍ TỐI THƯỢNG: cURL LINUX Bypasses Cloudflare)
+// 3. Crawler chính (VŨ KHÍ TỐI THƯỢNG: cURL LINUX Bypasses Cloudflare + DỌN RÁC HTML)
 async function fetchATIS(icao) {
   try {
     // -------------------------------------------------------------
@@ -6435,7 +6435,8 @@ async function fetchATIS(icao) {
 
           atisList.forEach(atis => {
             let textInfo = Array.isArray(atis.text_atis) ? atis.text_atis.join(' ') : (atis.text_atis || '');
-            textInfo = textInfo.replace(/\^§/g, '').trim(); 
+            // Dọn dẹp rác từ VATSIM
+            textInfo = textInfo.replace(/\^§/g, '').replace(/\s+/g, ' ').trim(); 
             const logonUnix = new Date(atis.logon_time).getTime();
             const callsign = atis.callsign.toUpperCase();
             const textUpper = textInfo.toUpperCase();
@@ -6490,10 +6491,12 @@ async function fetchATIS(icao) {
     // Quét từng thẻ div class="atis" tìm được
     while ((match = atisRegex.exec(html)) !== null) {
       let text = match[1]
-        .replace(/&#xA;/gi, '\n')      // Giải mã dấu &#xA; thành ký tự xuống dòng
-        .replace(/<br\s*\/?>/gi, '\n') // Quét sạch thẻ <br>
+        .replace(/&#xA;/gi, ' ')       // Đổi mã xuống dòng HTML thành khoảng trắng
+        .replace(/&#x9;/gi, ' ')       // XÓA SẠCH MÃ TAB (Thủ phạm gây lỗi hiển thị)
+        .replace(/<br\s*\/?>/gi, ' ')  // Biến thẻ <br> thành khoảng trắng
         .replace(/<[^>]*>?/gm, '')     // Xóa tất cả các thẻ HTML rác còn sót lại
-        .replace(/&amp;/gi, '&')       // Giải mã dấu &
+        .replace(/&amp;/gi, '&')       // Dịch mã dấu &
+        .replace(/\s+/g, ' ')          // GỘP TẤT CẢ KHOẢNG TRẮNG THỪA THÃI THÀNH 1 DẤU CÁCH DUY NHẤT
         .trim();
       
       if (text) atisBlocks.push(text);
@@ -6509,17 +6512,16 @@ async function fetchATIS(icao) {
     // Phân loại khối dữ liệu ATIS vừa cào được
     atisBlocks.forEach(text => {
       const upper = text.toUpperCase();
-      const cleanText = text.replace(/[ \t]+/g, ' ').trim(); 
 
       if (upper.startsWith('METAR')) {
-        metar = cleanText.replace(/TAF\s.*/i, '').trim(); 
+        metar = text.replace(/TAF\s.*/i, '').trim(); 
       } else if (upper.includes('ARR ATIS') || upper.includes('ARRIVAL')) {
-        arrival = cleanText;
+        arrival = text;
       } else if (upper.includes('DEP ATIS') || upper.includes('DEPARTURE')) {
-        departure = cleanText;
+        departure = text;
       } else if (!metar && !upper.startsWith('TAF')) {
-        arrival = cleanText;
-        departure = cleanText;
+        arrival = text;
+        departure = text;
       }
     });
 
