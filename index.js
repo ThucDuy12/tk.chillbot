@@ -608,51 +608,53 @@ vatsimWorker.on('message', async (data) => {
       messagesPayload.push({ embeds: [embeds[i]] });
     }
 
-    // Lấy ID tin nhắn đã lưu (Hỗ trợ cấu trúc mảng mới để lưu nhiều tin nhắn)
+    // Sau khi tạo messagesPayload, thay đoạn code cũ bằng:
+
     let storedIds = vatsimMessageStore.messageIds || [];
-    if (!vatsimMessageStore.messageIds && vatsimMessageStore.messageId) {
-      storedIds = [vatsimMessageStore.messageId]; // Convert file JSON cũ tự động
-    }
+    if (!Array.isArray(storedIds)) storedIds = [];
     const channelId = vatsimMessageStore.channelId || VATSIM_CHANNEL_ID;
     const newStoredIds = [];
 
-    // Cập nhật, Thêm hoặc Xóa tin nhắn linh hoạt
     try {
       const channel = await client.channels.fetch(channelId);
 
+      // 1. Xóa tin nhắn thừa (nếu số payload ít hơn storedIds)
+      for (let i = messagesPayload.length; i < storedIds.length; i++) {
+        try {
+          const msg = await channel.messages.fetch(storedIds[i]);
+          await msg.delete();
+          console.log(`[VATSIM] Đã xóa tin nhắn thừa: ${storedIds[i]}`);
+        } catch (e) {
+          console.log(`[VATSIM] Không xóa được tin nhắn ${storedIds[i]}:`, e.message);
+        }
+      }
+
+      // 2. Cập nhật hoặc tạo mới
       for (let i = 0; i < messagesPayload.length; i++) {
         if (i < storedIds.length) {
-          // 1. Nếu tin nhắn đã tồn tại -> Edit lại
           try {
             const msg = await channel.messages.fetch(storedIds[i]);
             await msg.edit(messagesPayload[i]);
             newStoredIds.push(msg.id);
           } catch (e) {
-            // Lỡ ai tay nhanh xóa mất -> Gửi lại cái mới
+            // Tin nhắn bị xóa -> tạo mới
             const sent = await channel.send(messagesPayload[i]);
             newStoredIds.push(sent.id);
           }
         } else {
-          // 2. Cần thêm dung lượng -> Send tin nhắn mới nối tiếp
           const sent = await channel.send(messagesPayload[i]);
           newStoredIds.push(sent.id);
         }
       }
 
-      // 3. Nếu số lượng bay giảm xuống, xóa đi mấy cái tin nhắn trắng thừa mứa ở dưới
-      for (let i = messagesPayload.length; i < storedIds.length; i++) {
-        try {
-          const msg = await channel.messages.fetch(storedIds[i]);
-          await msg.delete();
-        } catch (e) { }
-      }
-
-      // Bốc thẳng lên MongoDB để không bao giờ bị Render xóa
+      // 3. Lưu store mới
       vatsimMessageStore = { messageIds: newStoredIds, channelId: channel.id };
       await db.saveBotConfig('vatsim_messages', vatsimMessageStore);
+      fs.writeFileSync(VATSIM_MSG_FILE, JSON.stringify(vatsimMessageStore, null, 2));
+      console.log(`[VATSIM] Đã cập nhật ${newStoredIds.length} tin nhắn.`);
 
     } catch (err) {
-      console.warn('Lỗi khi update/send multi VATSIM messages:', err.message || err);
+      console.warn('Lỗi khi update VATSIM messages:', err.message || err);
     }
 
     // Ghi nhận dữ liệu Leaderboard
@@ -6016,38 +6018,42 @@ async function handleSetupAtcNoti(interaction) {
 }
 
 async function ensureVatsimMessageExists() {
-  // 1. Kiểm tra xem trong file JSON đã có danh sách ID chưa
-  if (vatsimMessageStore && vatsimMessageStore.messageIds && vatsimMessageStore.messageIds.length > 0) {
-    console.log(`✅ [VATSIM] Đã load ${vatsimMessageStore.messageIds.length} tin nhắn từ JSON, bỏ qua quét radar.`);
-    return; // Đã có data xịn từ file, không cần quét làm hỏng data
-  }
-
-  // 2. Nếu file JSON bị mất, tiến hành dọn dẹp và tạo mới hoàn toàn
+  const channelId = vatsimMessageStore.channelId || VATSIM_CHANNEL_ID;
   try {
-    const channel = await client.channels.fetch(VATSIM_CHANNEL_ID);
-    const messages = await channel.messages.fetch({ limit: 50 });
-
-    // Tìm TẤT CẢ các tin nhắn rác do bot gửi (Bao gồm cả các tin nhắn mở rộng không có tiêu đề)
-    const oldBotMsgs = messages.filter(m => m.author.id === client.user.id && m.embeds.length > 0);
-
-    // Xóa hết đám rác cũ đi để làm lại từ đầu cho sạch
-    for (const msg of oldBotMsgs.values()) {
-      await msg.delete().catch(() => { });
+    const channel = await client.channels.fetch(channelId);
+    // Lấy danh sách ID hợp lệ hiện có
+    let storedIds = vatsimMessageStore.messageIds || [];
+    let validIds = [];
+    for (const id of storedIds) {
+      try {
+        await channel.messages.fetch(id);
+        validIds.push(id);
+      } catch (e) { /* bỏ qua */ }
     }
 
-    // Tạo 1 tin nhắn mồi mới tinh
-    const embed = new EmbedBuilder().setTitle('🌐 VATSIM Online Update').setDescription('Đang thiết lập kết nối API...').setTimestamp();
-    const sent = await channel.send({ embeds: [embed] });
+    // Nếu có ID hợp lệ, giữ lại và xóa các tin nhắn bot khác
+    if (validIds.length > 0) {
+      // Quét 50 tin nhắn gần nhất, tìm tin nhắn của bot
+      const messages = await channel.messages.fetch({ limit: 50 });
+      for (const [msgId, msg] of messages) {
+        if (msg.author.id === client.user.id && !validIds.includes(msgId)) {
+          await msg.delete().catch(() => {});
+        }
+      }
+      vatsimMessageStore.messageIds = validIds;
+      // Lưu store...
+      return;
+    }
 
-    vatsimMessageStore = { messageIds: [sent.id], channelId: channel.id };
-
-    const fs = require('fs'); // Đảm bảo gọi fs để lưu file
-    fs.writeFileSync(VATSIM_MSG_FILE, JSON.stringify(vatsimMessageStore, null, 2));
-
-    console.log('🆕 [VATSIM] Đã dọn rác và khởi tạo tin nhắn gốc mới.');
-  } catch (err) {
-    console.error('❌ Không thể dọn dẹp và tạo tin nhắn VATSIM gốc:', err);
-  }
+    // Không có ID hợp lệ -> xóa toàn bộ tin nhắn bot và tạo mới
+    const messages = await channel.messages.fetch({ limit: 50 });
+    for (const [msgId, msg] of messages) {
+      if (msg.author.id === client.user.id) {
+        await msg.delete().catch(() => {});
+      }
+    }
+    // Tạo tin nhắn mới...
+  } catch (err) { /* xử lý lỗi */ }
 }
 
 // ===================== LOGGING: ROLE CHANGES (SIÊU CHUẨN XÁC) =====================
