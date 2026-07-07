@@ -9,9 +9,8 @@ const {
   initGoogleSheets, loadControllerLeaderboard, loadPilotLeaderboard,
   saveControllerLeaderboard, savePilotLeaderboard, loadPendingUsersSheet,
   savePendingUsersSheet, loadSimbriefUsersSheet, saveSimbriefUsersSheet,
-  loadProfilesSheet, saveProfilesSheet,
-  // Thêm 2 cái này vào:
-  loadVatsimLinksSheet, saveVatsimLinksSheet
+  loadProfilesSheet, saveProfilesSheet, loadVatsimLinksSheet, saveVatsimLinksSheet,
+  getPilotBalance // <--- THÊM CÁI NÀY
 } = require('./googleSheets');
 const { createCanvas, loadImage, GlobalFonts } = require('canvas');
 const fetch = require('node-fetch'); // Thêm nếu chưa có
@@ -3287,6 +3286,10 @@ client.once('ready', async () => {
       .setName('real_flight')
       .setDescription('Tra cứu các chuyến bay cất/hạ cánh ngoài đời thực tại sân bay')
       .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('balance')
+      .setDescription('💳 Tra cứu hồ sơ tk.chill Cash và thống kê chuyến bay của bạn.')
+      .toJSON()
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3768,6 +3771,9 @@ client.on('interactionCreate', async (interaction) => {
         case 'real_flight':
           await handleRealFlight(interaction);
           break;
+        case 'balance':
+            await handleBalance(interaction);
+            break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
           const anh2 = interaction.options.getAttachment('anh2');
@@ -9008,6 +9014,50 @@ async function handleRealFlight(interaction) {
     console.error('Lỗi lấy real flight:', err);
     await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu chuyến bay thực tế.' });
   }
+}
+
+// ==========================================
+// FUNCTION: XỬ LÝ LỆNH /BALANCE
+// ==========================================
+async function handleBalance(interaction) {
+    // Phản hồi tạm thời để Discord không báo "Ứng dụng không phản hồi" do tải API lâu
+    await interaction.deferReply();
+    
+    try {
+        const discordId = interaction.user.id;
+        
+        // Gọi hàm từ googleSheets.js (Đảm bảo ông đã require getPilotBalance ở đầu file index.js)
+        const balanceData = await getPilotBalance(discordId);
+
+        if (!balanceData) {
+            return interaction.editReply("❌ **KHÔNG TÌM THẤY HỒ SƠ!**\nCó vẻ cơ trưởng chưa liên kết tài khoản Discord với hệ thống **tk.chill**.\n👉 *Mở ứng dụng tk.chill Launcher -> Chọn Flypad EFB -> Settings để Đồng bộ Discord nha!*");
+        }
+
+        // Ráp lên khung Embed chuẩn hàng không
+        const embed = new EmbedBuilder()
+            .setTitle(`💳 BÁO CÁO TÀI KHOẢN TK.CHILL CASH`)
+            .setDescription(`Kính chào cơ trưởng **${interaction.user.username.toUpperCase()}**! Dưới đây là thông số tích lũy từ các chuyến bay thực tế của bạn:`)
+            .setColor('#10b981') // Màu xanh lá mượt mà
+            .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
+            .addFields(
+                { name: '👤 Hồ Sơ Phi Công', value: `\`${balanceData.username}\`\n*(UID: ${balanceData.uid.substring(0, 8)})*`, inline: false },
+                { name: '💰 Số Dư Khả Dụng', value: `**${Number(balanceData.currentCash).toLocaleString()}** Cash`, inline: true },
+                { name: '📈 Tổng Tích Lũy', value: `${Number(balanceData.totalEarned).toLocaleString()} Cash`, inline: true },
+                { name: '💸 Đã Tiêu Xài', value: `${Number(balanceData.usedCash).toLocaleString()} Cash`, inline: true },
+                { name: '✈️ Số Chuyến Bay', value: `**${balanceData.completedFlights}** chuyến`, inline: true },
+                { name: '⏱️ Thời Gian Bay', value: `**${Number(balanceData.totalHours).toFixed(1)}** giờ`, inline: true },
+                { name: '📏 Quãng Đường', value: `**${Number(balanceData.totalDistance).toLocaleString()}** NM`, inline: true }
+            )
+            .setFooter({ text: 'Dữ liệu được cập nhật tự động & theo thời gian thực từ tk.chill EFB', iconURL: 'https://i.ibb.co/NgBG1Qss/logo-tk-chill-3.png' })
+            .setTimestamp();
+
+        // Gửi kết quả cuối cùng
+        await interaction.editReply({ embeds: [embed] });
+
+    } catch (err) {
+        console.error('Lỗi khi tra cứu balance:', err);
+        await interaction.editReply("❌ Máy chủ Data đang bận hoặc tắc nghẽn, vui lòng chờ một lát rồi thử lại nha cơ trưởng!");
+    }
 }
 
 // ===================== LOGIN =====================
