@@ -9025,12 +9025,20 @@ async function handleBalance(interaction) {
     try {
         const discordId = interaction.user.id;
         
-        // Gọi hàm từ googleSheets.js (Đảm bảo ông đã require getPilotBalance ở đầu file index.js)
+        // Gọi hàm từ googleSheets.js 
         const balanceData = await getPilotBalance(discordId);
 
         if (!balanceData) {
             return interaction.editReply("❌ **KHÔNG TÌM THẤY HỒ SƠ!**\nCó vẻ cơ trưởng chưa liên kết tài khoản Discord với hệ thống **tk.chill**.\n👉 *Mở ứng dụng tk.chill Launcher -> Chọn Flypad EFB -> Settings để Đồng bộ Discord nha!*");
         }
+
+        // --- CỖ MÁY DỌN DẸP SỐ LIỆU CHỐNG LỖI NaN ---
+        const safeNum = (val) => {
+            if (!val) return 0;
+            // Xóa dấu chấm phân cách hàng ngàn (nếu có), đổi dấu phẩy thành dấu chấm thập phân
+            const cleanStr = String(val).replace(/\./g, '').replace(',', '.');
+            return Number(cleanStr) || 0;
+        };
 
         // Ráp lên khung Embed chuẩn hàng không
         const embed = new EmbedBuilder()
@@ -9039,13 +9047,13 @@ async function handleBalance(interaction) {
             .setColor('#10b981') // Màu xanh lá mượt mà
             .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
             .addFields(
-                { name: '👤 Hồ Sơ Phi Công', value: `\`${balanceData.username}\`\n*(UID: ${balanceData.uid.substring(0, 8)})*`, inline: false },
-                { name: '💰 Số Dư Khả Dụng', value: `**${Number(balanceData.currentCash).toLocaleString()}** Cash`, inline: true },
-                { name: '📈 Tổng Tích Lũy', value: `${Number(balanceData.totalEarned).toLocaleString()} Cash`, inline: true },
-                { name: '💸 Đã Tiêu Xài', value: `${Number(balanceData.usedCash).toLocaleString()} Cash`, inline: true },
-                { name: '✈️ Số Chuyến Bay', value: `**${balanceData.completedFlights}** chuyến`, inline: true },
-                { name: '⏱️ Thời Gian Bay', value: `**${Number(balanceData.totalHours).toFixed(1)}** giờ`, inline: true },
-                { name: '📏 Quãng Đường', value: `**${Number(balanceData.totalDistance).toLocaleString()}** NM`, inline: true }
+                { name: '👤 Hồ Sơ Phi Công', value: `\`${balanceData.username}\`\n*(UID: ${String(balanceData.uid).substring(0, 8)})*`, inline: false },
+                { name: '💰 Số Dư Khả Dụng', value: `**${safeNum(balanceData.currentCash).toLocaleString()}** Cash`, inline: true },
+                { name: '📈 Tổng Tích Lũy', value: `${safeNum(balanceData.totalEarned).toLocaleString()} Cash`, inline: true },
+                { name: '💸 Đã Tiêu Xài', value: `${safeNum(balanceData.usedCash).toLocaleString()} Cash`, inline: true },
+                { name: '✈️ Số Chuyến Bay', value: `**${safeNum(balanceData.completedFlights)}** chuyến`, inline: true },
+                { name: '⏱️ Thời Gian Bay', value: `**${safeNum(balanceData.totalHours).toFixed(1)}** giờ`, inline: true },
+                { name: '📏 Quãng Đường', value: `**${safeNum(balanceData.totalDistance).toLocaleString()}** NM`, inline: true }
             )
             .setFooter({ text: 'Dữ liệu được cập nhật tự động & theo thời gian thực từ tk.chill EFB', iconURL: 'https://i.ibb.co/NgBG1Qss/logo-tk-chill-3.png' })
             .setTimestamp();
