@@ -2,8 +2,13 @@ const { google } = require('googleapis');
 const path = require('path');
 
 // ========== CONFIG ==========
+// ========== CONFIG ==========
 const CREDENTIALS_PATH = path.join(__dirname, 'gen-lang-client-0170849728-d9d0d8741c5f.json');
-const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
+const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID; // <-- Đây là Sheet cũ đang chạy
+
+// THÊM 2 DÒNG NÀY ĐỂ TRỎ TỚI SHEET CHỨA CASH:
+const CASH_SPREADSHEET_ID = '1O_rJz2r9BY5w-A_5ga-azAthZ2oOr2Ao7v6pLBmDcfQ'; 
+const CASH_DATABASE_SHEET_NAME = 'tk.chill cash Database';
 
 const CONTROLLER_SHEET_PREFIX = 'ATC_';
 const PILOT_SHEET_PREFIX = 'PILOT_';
@@ -815,6 +820,43 @@ async function saveVatsimLinksSheet(data) {
   }
 }
 
+// =====================================
+// ĐỌC THÔNG TIN TÀI KHOẢN TK.CHILL CASH (TỪ SHEET KHÁC)
+// =====================================
+async function getPilotBalance(discordId) {
+  const sheets = await initGoogleSheets();
+  try {
+    // Gọi thẳng vào cái CASH_SPREADSHEET_ID
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: CASH_SPREADSHEET_ID, 
+      range: `${CASH_DATABASE_SHEET_NAME}!A2:T`,
+    });
+
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) return null;
+
+    // Quét từng dòng tìm Discord ID (nằm ở cột S - index 18)
+    for (const row of rows) {
+      if (row[18] === String(discordId)) {
+        return {
+          uid: row[0] || 'N/A',
+          username: row[2] || 'N/A',
+          currentCash: row[3] || 0,
+          totalEarned: row[4] || 0,
+          usedCash: row[5] || 0,
+          completedFlights: row[7] || 0,
+          totalDistance: row[8] || 0,
+          totalHours: row[9] || 0
+        };
+      }
+    }
+    return null; // Không tìm thấy user
+  } catch (error) {
+    console.error('Lỗi khi lấy dữ liệu balance từ Sheet 2:', error);
+    throw error;
+  }
+}
+
 // ========== EXPORTS ==========
 module.exports = {
   initGoogleSheets,
@@ -832,5 +874,6 @@ module.exports = {
   loadProfilesSheet,   
   saveProfilesSheet,
   loadVatsimLinksSheet,
-  saveVatsimLinksSheet
+  saveVatsimLinksSheet,
+  getPilotBalance
 };
