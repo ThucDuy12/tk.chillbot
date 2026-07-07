@@ -3289,7 +3289,6 @@ client.once('ready', async () => {
     new SlashCommandBuilder()
       .setName('balance')
       .setDescription('💳 Tra cứu hồ sơ tk.chill Cash và thống kê chuyến bay của bạn.')
-      .toJSON()
   ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
