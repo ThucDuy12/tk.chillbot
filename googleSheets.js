@@ -956,6 +956,30 @@ async function registerPilot(discordId, discordName) {
   }
 }
 
+// =====================================
+// ĐỌC TOÀN BỘ SỐ DƯ (DÀNH CHO BẢNG XẾP HẠNG)
+// =====================================
+async function getAllPilotBalances() {
+  const sheets = await initGoogleSheets();
+  try {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: CASH_SPREADSHEET_ID, 
+      range: `${CASH_DATABASE_SHEET_NAME}!A2:T`,
+    });
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) return [];
+
+    return rows.map(row => ({
+      discordId: row[18],
+      username: row[19] || row[2] || 'Unknown',
+      currentCash: parseFloat(String(row[3]).replace(/,/g, '')) || 0
+    })).filter(u => u.discordId);
+  } catch (error) {
+    console.error('Lỗi khi lấy dữ liệu Leaderboard từ Sheet:', error);
+    return [];
+  }
+}
+
 // ========== EXPORTS ==========
 module.exports = {
   initGoogleSheets,
