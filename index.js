@@ -3357,7 +3357,7 @@ client.once('ready', async () => {
 
     new SlashCommandBuilder()
       .setName('vietlott')
-      .setDescription('Đại lý Lô Tô'),
+      .setDescription('Gánh hát Lô Tô'),
     ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -10310,21 +10310,53 @@ async function handleOanTuTi(interaction) {
     });
 }
 
-// ===================== TRÒ CHƠI: ĐẠI LÝ LÔ ĐỀ / VIETLOTT =====================
+// ===================== TRÒ CHƠI: LÔ TÔ 5x5 (GACHA) =====================
+// Hàm tạo giao diện bảng Lô Tô
+function renderLotoBoard(board, drawnSet) {
+  let str = "";
+  for (let r = 0; r < 5; r++) {
+      let rowStr = [];
+      for (let c = 0; c < 5; c++) {
+          let num = board[r * 5 + c];
+          if (drawnSet.has(num)) {
+              rowStr.push(`[XX]`); // Dấu XX thể hiện số đã được gọi và đánh dấu
+          } else {
+              rowStr.push(`[${String(num).padStart(2, '0')}]`);
+          }
+      }
+      str += rowStr.join(" ") + "\n";
+  }
+  return `\`\`\`text\n${str}\`\`\``;
+}
+
+// Hàm kiểm tra xem có đường nào "KINH" (Bingo) chưa
+function checkLotoKinh(board, drawnSet) {
+  const lines = [
+      // Hàng ngang
+      [0,1,2,3,4], [5,6,7,8,9], [10,11,12,13,14], [15,16,17,18,19], [20,21,22,23,24],
+      // Hàng dọc
+      [0,5,10,15,20], [1,6,11,16,21], [2,7,12,17,22], [3,8,13,18,23], [4,9,14,19,24],
+      // Hai đường chéo
+      [0,6,12,18,24], [4,8,12,16,20]
+  ];
+  for (let line of lines) {
+      if (line.every(idx => drawnSet.has(board[idx]))) return true; // Trúng trọn vẹn 1 hàng 5 số
+  }
+  return false;
+}
+
 async function handleVietlott(interaction) {
   await interaction.deferReply(); 
   const balance = await checkAndRegisterUser(interaction);
   if (!balance) return;
 
-  // BƯỚC 1: HIỂN THỊ NÚT CHỌN LOẠI HÌNH
+  // NÚT MỞ QUẦY BÁN VÉ
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('vl_lo').setLabel('Ghi Lô (x3.5)').setStyle(ButtonStyle.Secondary).setEmoji('🎫'),
-    new ButtonBuilder().setCustomId('vl_de').setLabel('Đánh Đề (x70)').setStyle(ButtonStyle.Primary).setEmoji('🎯'),
-    new ButtonBuilder().setCustomId('vl_3c').setLabel('Ba Càng (x400)').setStyle(ButtonStyle.Danger).setEmoji('🔥')
+    new ButtonBuilder().setCustomId('btn_mua_ve_loto').setLabel('🎫 Mua Vé Lô Tô (25 số)').setStyle(ButtonStyle.Primary).setEmoji('🎪')
   );
 
   const msg = await interaction.editReply({
-    content: `🏦 **ĐẠI LÝ SỔ XỐ KIẾN THIẾT TK.CHILL** 🏦\nCơ trưởng **${balance.displayName}** muốn thử vận may hôm nay?\n*(Tài khoản hiện có: **${balance.currentCash.toLocaleString()} Cash**)*\n👇 **BẤM NÚT ĐỂ CHỌN HÌNH THỨC GHI:**`,
+    content: `🎪 **GÁNH HÁT LÔ TÔ TK.CHILL** 🎪\nCơ trưởng **${balance.displayName}** đã sẵn sàng dò số chưa?\n*(Tài khoản hiện có: **${balance.currentCash.toLocaleString()} Cash**)*\n👇 **BẤM NÚT ĐỂ MUA VÉ VÀ ĐIỀN SỐ:**`,
     components: [row]
   });
 
@@ -10332,27 +10364,19 @@ async function handleVietlott(interaction) {
   const collector = msg.createMessageComponentCollector({ filter, time: 60000 });
 
   collector.on('collect', async btnInt => {
-    const type = btnInt.customId; // 'vl_lo', 'vl_de', 'vl_3c'
-    
-    let title, labelNum, maxLen;
-    if (type === 'vl_lo') { title = 'Ghi Lô (1 điểm = Tiền cược)'; labelNum = 'Nhập 2 số (VD: 45)'; maxLen = 2; }
-    else if (type === 'vl_de') { title = 'Đánh Đề (Giải Đặc Biệt)'; labelNum = 'Nhập 2 số (VD: 86)'; maxLen = 2; }
-    else { title = 'Ba Càng (3 Số Cuối Đặc Biệt)'; labelNum = 'Nhập 3 số (VD: 123)'; maxLen = 3; }
+    // FORM ĐIỀN VÉ LÔ TÔ
+    const modal = new ModalBuilder().setCustomId(`modal_loto`).setTitle('Mua Vé Lô Tô 5x5');
 
-    // BƯỚC 2: MỞ MODAL CHO USER NHẬP SỐ VÀ TIỀN
-    const modal = new ModalBuilder().setCustomId(`modal_${type}`).setTitle(title);
-    
     const numInput = new TextInputBuilder()
-      .setCustomId('number')
-      .setLabel(labelNum)
-      .setStyle(TextInputStyle.Short)
-      .setMaxLength(maxLen)
-      .setMinLength(maxLen)
+      .setCustomId('numbers')
+      .setLabel('Nhập 25 số (1-90). Gõ AUTO để máy tự chọn')
+      .setStyle(TextInputStyle.Paragraph)
+      .setPlaceholder('Ví dụ: 5 12 45 88 ... (Khoảng cách bằng dấu cách) HOẶC gõ chữ AUTO')
       .setRequired(true);
-      
+
     const amtInput = new TextInputBuilder()
       .setCustomId('amount')
-      .setLabel('Số tiền cược (Nhập số, all hoặc half)')
+      .setLabel('Số tiền mua vé (Nhập số, all hoặc half)')
       .setStyle(TextInputStyle.Short)
       .setRequired(true);
 
@@ -10360,82 +10384,122 @@ async function handleVietlott(interaction) {
     await btnInt.showModal(modal);
 
     try {
-      // BƯỚC 3: CHỜ USER NỘP MODAL VÀ XỬ LÝ
-      const modalSubmit = await btnInt.awaitModalSubmit({ filter: i => i.user.id === interaction.user.id, time: 60000 });
-      await modalSubmit.deferUpdate(); // Đóng modal trơn tru
+      const modalSubmit = await btnInt.awaitModalSubmit({ filter: i => i.user.id === interaction.user.id, time: 120000 });
+      await modalSubmit.deferUpdate();
 
-      const numberStr = modalSubmit.fields.getTextInputValue('number');
       const amountStr = modalSubmit.fields.getTextInputValue('amount');
+      const numberStr = modalSubmit.fields.getTextInputValue('numbers').trim().toUpperCase();
 
-      // Check lại tiền lỡ họ vừa tiêu ở lệnh khác
       const currentBal = await getPilotBalance(interaction.user.id);
       const amount = parseBetAmount(amountStr, currentBal.currentCash);
 
-      // Validate
+      // Validate tiền
       if (amount <= 0) return interaction.editReply({ content: '❌ Số tiền cược không hợp lệ!', components: [] });
-      if (currentBal.currentCash < amount) return interaction.editReply({ content: `❌ Tiền đâu mà đòi ghi sổ sếp ơi! Hiện có: **${currentBal.currentCash.toLocaleString()} Cash**.`, components: [] });
-      if (!/^\d+$/.test(numberStr)) return interaction.editReply({ content: '❌ Sếp phải nhập bằng SỐ chứ không được ghi chữ!', components: [] });
+      if (currentBal.currentCash < amount) return interaction.editReply({ content: `❌ Tiền đâu mà đòi mua vé sếp ơi! Hiện có: **${currentBal.currentCash.toLocaleString()} Cash**.`, components: [] });
 
-      collector.stop('done'); // Dừng collector nút bấm
+      // Xử lý vé (Tự động hoặc Nhập tay)
+      let boardNumbers = [];
+      if (numberStr === 'AUTO') {
+          // Bốc tự động 25 số ngẫu nhiên từ 1 -> 90
+          let pool = Array.from({length: 90}, (_, i) => i + 1);
+          for(let i = pool.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [pool[i], pool[j]] = [pool[j], pool[i]];
+          }
+          boardNumbers = pool.slice(0, 25);
+      } else {
+          // Dịch số sếp tự gõ
+          boardNumbers = numberStr.split(/[\s,]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
+          if (boardNumbers.length !== 25) {
+              return interaction.editReply({ content: `❌ **Lỗi:** Bạn đã nhập ${boardNumbers.length} số. Vé Lô Tô yêu cầu CHÍNH XÁC **25 số**!`, components: [] });
+          }
+          let unique = new Set(boardNumbers);
+          if (unique.size !== 25) {
+              return interaction.editReply({ content: `❌ **Lỗi:** Có số bị trùng lặp trong vé của bạn! Phải là 25 số khác nhau hoàn toàn.`, components: [] });
+          }
+          if (!boardNumbers.every(n => n >= 1 && n <= 90)) {
+              return interaction.editReply({ content: `❌ **Lỗi:** Các số phải nằm trong khoảng từ **1 đến 90**!`, components: [] });
+          }
+      }
 
-      const modeName = type === 'vl_lo' ? 'Lô' : (type === 'vl_de' ? 'Đề' : 'Ba Càng');
-      await interaction.editReply({ 
-        content: `🎫 **${balance.displayName}** đã ghi con **${modeName} [${numberStr}]** với số tiền **${amount.toLocaleString()} Cash**.\n*⏳ Đang quay lồng cầu, chờ kết quả...* 🎰`, 
-        components: [] 
+      collector.stop('done');
+
+      // BẮT ĐẦU SHOW VÉ VÀ QUAY LỒNG CẦU
+      await interaction.editReply({
+          content: `🎤 **ĐOÀN LÔ TÔ BẮT ĐẦU KÊU SỐ!**\nSếp **${balance.displayName}** mua vé với **${amount.toLocaleString()} Cash**.\n*Tấm vé của sếp:* \n${renderLotoBoard(boardNumbers, new Set())}\n*🎤 Số zì ra, con số zì ra, cờ ra con mấy, con mấy zì ra...* 🏃‍♂️`,
+          components: []
       });
 
-      // BƯỚC 4: THUẬT TOÁN QUAY SỐ (BỊP HOÀN TOÀN)
-      setTimeout(async () => {
-        let isWin = false;
-        let resultNumber = "";
-        let payoutMult = (type === 'vl_lo') ? 3.5 : (type === 'vl_de' ? 70 : 400);
-        
-        // Cơ hội cực hiếm (Vì trả thưởng quá cao)
-        let winChance = (type === 'vl_lo') ? 0.20 : (type === 'vl_de' ? 0.05 : 0.01);
-        
-        // Quét cá mập: Nếu tiền thưởng vượt quá 50.000 Cash, hạ tỷ lệ trúng xuống gần bằng 0!
-        if (amount * payoutMult >= 50000) winChance = 0.001; 
+      // SINH SỐ ĐÃ GỌI (Tối đa 50 lượt gọi để giữ lợi thế nhà cái 50/50)
+      let allNumbers = Array.from({length: 90}, (_, i) => i + 1);
+      for(let i = allNumbers.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [allNumbers[i], allNumbers[j]] = [allNumbers[j], allNumbers[i]];
+      }
 
-        if (Math.random() < winChance) {
-          isWin = true;
-          resultNumber = numberStr; // Ép cho ra đúng số sếp ghi
-        } else {
-          // Sinh số giả sao cho KHÔNG TRÙNG với số sếp đã ghi
-          do {
-            if (type === 'vl_3c') resultNumber = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
-            else resultNumber = String(Math.floor(Math.random() * 100)).padStart(2, '0');
-          } while (resultNumber === numberStr);
-        }
+      let drawnSet = new Set();
+      let drawnList = [];
+      let bingoAt = -1;
 
-        let finalStr = `🏦 **KẾT QUẢ QUAY SỐ MỞ THƯỞNG** 🏦\n> 🎯 Lồng cầu dừng lại ở con số: **${resultNumber}**\n\n`;
-
-        if (isWin) {
-          let profit = amount * payoutMult;
-          await updatePilotBalance(interaction.user.id, profit - amount, 0, profit - amount);
-          finalStr += `🎉 **TRÚNG RỒI!!!** Sếp đã trúng con **${modeName} [${numberStr}]**!\n💰 Đại lý trả thưởng: **${profit.toLocaleString()} Cash** (Hệ số x${payoutMult})!`;
-        } else {
-          const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-          finalStr += `💀 **TẠCH!** Sếp đã trượt con **${modeName} [${numberStr}]**.\n💸 Tiền cược **${amount.toLocaleString()} Cash** đã đi về nơi xa lắm.`;
+      // Hát Lô Tô 50 lần liên tiếp
+      for (let i = 0; i < 50; i++) {
+          let num = allNumbers[i];
+          drawnList.push(num);
+          drawnSet.add(num);
           
-          if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
-        }
+          if (checkLotoKinh(boardNumbers, drawnSet)) {
+              bingoAt = i + 1; // Ghi nhận lượt trúng thưởng
+              break;
+          }
+      }
 
-        const embed = new EmbedBuilder()
-          .setColor(isWin ? 0x2ecc71 : 0xe74c3c)
-          .setDescription(finalStr)
-          .setFooter({ text: 'Vietlott tk.chill - Chơi cho vui, thua ráng chịu' });
+      setTimeout(async () => {
+          let finalStr = `🎤 **KẾT QUẢ ĐÊM NHẠC LÔ TÔ** 🎤\n> 🎯 Đã gọi ra **${drawnList.length}** con số.\n${renderLotoBoard(boardNumbers, drawnSet)}\n`;
 
-        await interaction.editReply({ content: null, embeds: [embed] });
-      }, 3500); // Lồng cầu quay 3.5 giây
+          if (bingoAt !== -1) {
+              let mult = 0;
+              // Hệ số thưởng dựa trên tốc độ KINH (Càng sớm càng ăn đậm)
+              if (bingoAt <= 20) mult = 100;     // Kinh kịch độc
+              else if (bingoAt <= 30) mult = 10; // Kinh VIP
+              else if (bingoAt <= 40) mult = 3;  // Kinh thường
+              else if (bingoAt <= 50) mult = 1;  // Kinh muộn (Chỉ lấy lại tiền vé)
+
+              let profit = amount * mult;
+
+              if (mult > 1) {
+                  await updatePilotBalance(interaction.user.id, profit - amount, 0, profit - amount);
+                  finalStr += `🎉 **KINH RỒI!!!** Sếp đã trúng đủ 5 số thẳng hàng ở lượt gọi thứ **${bingoAt}**!\n💰 Gánh hát trả thưởng: **${profit.toLocaleString()} Cash** (Hệ số x${mult})!`;
+              } else {
+                  finalStr += `🤝 **KINH MUỘN!** Sếp trúng ở lượt thứ **${bingoAt}**, được hoàn lại **${amount.toLocaleString()} Cash** tiền vốn (Hệ số x1).`;
+              }
+          } else {
+              // Qua 50 số mà vẫn tạch
+              const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
+              finalStr += `💀 **ĐỨT GÁNH!** Gánh hát gọi khô máu 50 số mà vé của sếp vẫn lủng lỗ chỗ.\n💸 Thu dọn bàn ghế, sếp mất trắng **${amount.toLocaleString()} Cash**.`;
+
+              // Loa réo nếu cháy túi
+              if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+          }
+
+          // Xanh = Thắng, Vàng = Hòa Vốn, Đỏ = Thua Mất Tiền
+          const embedColor = bingoAt !== -1 ? (bingoAt <= 50 && mult > 1 ? 0x2ecc71 : 0xf1c40f) : 0xe74c3c;
+          
+          const embed = new EmbedBuilder()
+              .setColor(embedColor)
+              .setDescription(finalStr)
+              .setFooter({ text: 'Lô Tô tk.chill!' });
+
+          await interaction.editReply({ content: null, embeds: [embed] });
+      }, 5000); // Ngâm 5 giây để mô phỏng thời gian đọc số cho nó hồi hộp
 
     } catch (e) {
-      // Bỏ qua lỗi timeout modal
+      // Hết giờ modal
     }
   });
 
   collector.on('end', (collected, reason) => {
     if (reason === 'time') {
-      interaction.editReply({ content: '⏳ Sếp đứng trước quầy lâu quá người sau còn mua, đại lý đã đóng cửa!', components: [] });
+      interaction.editReply({ content: '⏳ Sếp đứng chọn vé lâu quá Gánh Hát đã dời đi nơi khác rồi!', components: [] });
     }
   });
 }
