@@ -9094,10 +9094,6 @@ async function handleRealFlight(interaction) {
   }
 }
 
-// ===================== ECONOMY & GAMBLING SYSTEM =====================
-const coinflipTracker = new Map();
-const slotTracker = new Map();
-
 // BỘ QUÉT TÂN BINH & CHẶN KÊNH CỜ BẠC
 async function checkAndRegisterUser(interaction) {
   const userId = interaction.user.id;
