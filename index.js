@@ -3367,6 +3367,17 @@ client.once('ready', async () => {
     .setName('baicao')
     .setDescription('Chơi Bài Cào 3 lá với nhà cái')
     .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền cược (hoặc all/half)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('check_balance')
+      .setDescription('Kiểm tra số dư của một người dùng')
+      .addUserOption(opt => opt.setName('target').setDescription('Người muốn kiểm tra').setRequired(true))
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+    new SlashCommandBuilder()
+      .setName('clear_balance')
+      .setDescription('Tịch thu sạch tiền của một người dùng về 0')
+      .addUserOption(opt => opt.setName('target').setDescription('Người muốn reset tiền').setRequired(true))
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
     ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3906,6 +3917,12 @@ client.on('interactionCreate', async (interaction) => {
           break;
         case 'baicao': 
           await handleBaiCao(interaction); 
+          break;
+        case 'check_balance':
+          await handleCheckBalance(interaction);
+          break;
+        case 'clear_balance':
+          await handleClearBalance(interaction);
           break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
@@ -10642,6 +10659,94 @@ async function handleBaiCao(interaction) {
 
         await interaction.editReply({ content: resultMsg, embeds: [embed] });
     }, 2000);
+}
+
+// ===================== LỆNH KIỂM TRA SỐ DƯ (CHECK BALANCE) =====================
+async function handleCheckBalance(interaction) {
+    // 1. Kiểm tra quyền hạn
+    const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+    const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+    const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
+
+    if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
+        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền soi ví người khác!', ephemeral: true });
+    }
+
+    const targetUser = interaction.options.getUser('target');
+    await interaction.deferReply({ ephemeral: true }); // Chế độ ẩn, chỉ người check mới thấy
+
+    // Kéo dữ liệu từ Sheet/Database
+    const balance = await getPilotBalance(targetUser.id);
+    if (!balance) {
+        return interaction.editReply(`❌ Không tìm thấy hồ sơ tài khoản của <@${targetUser.id}> trong hệ thống!`);
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(`💳 KÉT SẮT CỦA ${targetUser.username.toUpperCase()}`)
+        .setColor(0x2ecc71)
+        .addFields(
+            { name: '💰 Số dư hiện tại', value: `**${parseFloat(balance.currentCash).toLocaleString()} Cash**`, inline: false },
+            { name: '📥 Tổng tiền đã kiếm', value: `${parseFloat(balance.totalEarned).toLocaleString()} Cash`, inline: true },
+            { name: '📤 Tổng tiền đã tiêu', value: `${parseFloat(balance.usedCash).toLocaleString()} Cash`, inline: true }
+        )
+        .setThumbnail(targetUser.displayAvatarURL())
+        .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+}
+
+// ===================== LỆNH TỊCH THU TÀI SẢN (CLEAR BALANCE) =====================
+async function handleClearBalance(interaction) {
+    // 1. Kiểm tra quyền hạn
+    const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+    const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+    const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
+
+    if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
+        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền tịch thu tài sản!', ephemeral: true });
+    }
+
+    const targetUser = interaction.options.getUser('target');
+    await interaction.deferReply({ ephemeral: true });
+
+    // Lấy số dư hiện tại
+    const balance = await getPilotBalance(targetUser.id);
+    if (!balance) {
+        return interaction.editReply(`❌ Không tìm thấy hồ sơ tài khoản của <@${targetUser.id}> trong hệ thống!`);
+    }
+
+    const currentCash = parseFloat(balance.currentCash);
+    if (currentCash <= 0) {
+        return interaction.editReply(`⚠️ Khố rách áo ôm! Tài khoản của <@${targetUser.id}> vốn dĩ đã có **0 Cash** rồi, không thể lột thêm được nữa!`);
+    }
+
+    // 2. Trừ đi toàn bộ số dư hiện tại để nó về 0
+    // Cấu trúc hàm: updatePilotBalance(id, cashChange, usedCashChange, earnedCashChange)
+    const updateRes = await updatePilotBalance(targetUser.id, -currentCash, 0, 0);
+
+    if (updateRes && updateRes.success) {
+        await interaction.editReply(`✅ **Đã thi hành án!** Tịch thu sạch sẽ **${currentCash.toLocaleString()} Cash** của <@${targetUser.id}> đưa về 0.`);
+
+        // 3. 🚨 BÁO CÁO MẬT VÀO KÊNH ADMIN BOT
+        const adminChannel = interaction.client.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
+        if (adminChannel) {
+            const logEmbed = new EmbedBuilder()
+                .setTitle('🚨 LỆNH TỊCH THU TÀI SẢN (CLEAR BALANCE)')
+                .setColor(0xe74c3c) // Đỏ báo động
+                .addFields(
+                    { name: '👮 Người thi hành án (Staff)', value: `<@${interaction.user.id}>`, inline: true },
+                    { name: '🎯 Nạn nhân', value: `<@${targetUser.id}>`, inline: true },
+                    { name: '💸 Số tiền vừa bị bay màu', value: `**-${currentCash.toLocaleString()} Cash**`, inline: false }
+                )
+                .setThumbnail(targetUser.displayAvatarURL())
+                .setFooter({ text: 'Biên bản xử lý vi phạm kinh tế' })
+                .setTimestamp();
+
+            await adminChannel.send({ embeds: [logEmbed] }).catch(() => {});
+        }
+    } else {
+        await interaction.editReply('❌ Có lỗi xảy ra khi thao tác với Database. Vui lòng thử lại sau!');
+    }
 }
 
 // ===================== LOGIN =====================
