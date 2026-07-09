@@ -10455,33 +10455,6 @@ async function handleAddCash(interaction) {
         return interaction.reply({ content: '❌ Số tiền bơm phải lớn hơn 0!', ephemeral: true });
     }
 
-    // =====================================
-    // 🛑 VÒNG KIM CÔ: KHÓA MÕM KẺ LẠM QUYỀN
-    // =====================================
-    if (interaction.user.id === SUSPECT_ADMIN_ID) {
-        // Lấy ngày hiện tại theo giờ Việt Nam
-        const today = new Date().toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-        let tracker = badAdminTracker.get(SUSPECT_ADMIN_ID) || { date: today, totalAdded: 0 };
-
-        // Sang ngày mới -> Khôi phục lại 10 triệu
-        if (tracker.date !== today) {
-            tracker = { date: today, totalAdded: 0 };
-        }
-
-        // Nếu tổng tiền định bơm vượt quá 10 triệu
-        if (tracker.totalAdded + amount > DAILY_MAX_ADD) {
-            const remaining = Math.max(0, DAILY_MAX_ADD - tracker.totalAdded);
-            return interaction.reply({ 
-                content: `🛑 **TÍT TÍT TÍT! HỆ THỐNG CẢNH BÁO LẠM PHÁT!**\nSếp bị hệ thống giới hạn máy in tiền tối đa **10,000,000 Cash / ngày** do có tiền sử lạm quyền.\n> 💳 Hôm nay sếp chỉ còn quyền bơm thêm tối đa: **${remaining.toLocaleString()} Cash** nữa thôi.`, 
-                ephemeral: true 
-            });
-        }
-
-        // Cập nhật lại số tiền đã bơm trong ngày
-        tracker.totalAdded += amount;
-        badAdminTracker.set(SUSPECT_ADMIN_ID, tracker);
-    }
-
     await interaction.deferReply();
 
     // 2. Tiến hành bơm tiền
