@@ -3338,6 +3338,26 @@ client.once('ready', async () => {
     new SlashCommandBuilder()
       .setName('work')
       .setDescription('Làm nhiệm vụ để kiếm tiền'),
+    new SlashCommandBuilder()
+      .setName('roulette')
+      .setDescription('Cò quay Roulette (Đỏ/Đen x2, Xanh x14)')
+      .addStringOption(opt => opt.setName('choice')
+        .setDescription('Chọn màu muốn cược')
+        .setRequired(true)
+        .addChoices(
+          { name: 'Đỏ 🔴 (Tỉ lệ x2)', value: 'red' },
+          { name: 'Đen ⚫ (Tỉ lệ x2)', value: 'black' },
+          { name: 'Xanh Lá 🟢 (Tỉ lệ x14)', value: 'green' }
+        ))
+      .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền, "all" (Tất tay) hoặc "half" (Nửa vốn)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('oantuti')
+      .setDescription('Chơi Oẳn Tù Tì với nhà cái')
+      .addStringOption(opt => opt.setName('amount').setDescription('Số tiền cược (hoặc all/half)').setRequired(true)),
+
+    new SlashCommandBuilder()
+      .setName('vietlott')
+      .setDescription('Đại lý Lô Tô'),
     ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3851,6 +3871,15 @@ client.on('interactionCreate', async (interaction) => {
           break;
         case 'work':
           await handleWork(interaction);
+          break;
+        case 'roulette':
+          await handleRoulette(interaction);
+          break;
+        case 'oantuti':
+          await handleOanTuTi(interaction);
+          break;
+        case 'vietlott':
+          await handleVietlott(interaction);
           break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
@@ -10060,7 +10089,7 @@ async function handlePoker(interaction) {
   }, 2500);
 }
 
-// ===================== LỆNH ADD CASH (ADMIN/DEV ONLY) =====================
+// ===================== LỆNH ADD CASH (CÓ LOA THÔNG BÁO) =====================
 async function handleAddCash(interaction) {
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
@@ -10070,15 +10099,21 @@ async function handleAddCash(interaction) {
   }
 
   const target = interaction.options.getMentionable('target');
-  const amount = interaction.options.getInteger('amount'); // Admin bơm tiền thì vẫn nhập số nguyên xác định
+  const amount = interaction.options.getInteger('amount');
 
+  // Vẫn để ephemeral ẩn lúc bot xử lý để không bị rối tin nhắn
   await interaction.deferReply({ ephemeral: true });
 
   // TRƯỜNG HỢP 1: BƠM CHO MỘT NGƯỜI CỤ THỂ
   if (target.user) {
     const res = await updatePilotBalance(target.user.id, amount, 0, amount);
     if (!res.success) return interaction.editReply(`❌ Lỗi: <@${target.user.id}> chưa từng tham gia hệ thống (Không có hồ sơ trong Database).`);
-    await interaction.editReply(`🏦 Ngân hàng Trung ương vừa rót **${amount.toLocaleString()} Cash** thẳng vào túi của <@${target.user.id}>.`);
+    
+    await interaction.editReply(`✅ Đã nạp thành công ${amount.toLocaleString()} Cash cho user.`);
+    
+    // Loa thông báo public cho 1 user
+    const title = interaction.user.id === OWNER_ID ? '👑 **CEO**' : '👔 **Tổng Tài**';
+    await interaction.channel.send(`📢 **TIN NÓNG!** ${title} <@${interaction.user.id}> vừa rót vốn đầu tư **${amount.toLocaleString()} Cash** thẳng vào túi của <@${target.user.id}>!`);
   } 
   // TRƯỜNG HỢP 2: BƠM CHO CẢ MỘT ROLE (VÍ DỤ: @Member)
   else if (target.members) { 
@@ -10087,20 +10122,301 @@ async function handleAddCash(interaction) {
     
     for (const [memberId, member] of target.members) {
       if (!member.user.bot) {
-        // updatePilotBalance sẽ tự thất bại nếu không tìm thấy ID trong Sheet
         const res = await updatePilotBalance(memberId, amount, 0, amount);
         if (res.success) {
             count++;
         } else {
-            skipped++; // Đếm số người không có Database
+            skipped++; // Bỏ qua người chưa có Database
         }
-        await new Promise(r => setTimeout(r, 300)); // Delay để chống lỗi Rate Limit của Google
+        await new Promise(r => setTimeout(r, 300)); // Chống cháy API
       }
     }
-    await interaction.editReply(`🏦 Cơn mưa tài lộc! Đã bơm **${amount.toLocaleString()} Cash** cho **${count}** thành viên thuộc role <@&${target.id}>.\n*(Đã từ chối cấp phát cho **${skipped}** người do chưa có hồ sơ trong Database)*`);
+    
+    await interaction.editReply(`✅ Cơn mưa tài lộc! Đã bơm ${amount.toLocaleString()} Cash cho ${count} thành viên (Bỏ qua ${skipped} người không có Database).`);
+    
+    // LOA THÔNG BÁO PUBLIC RA KÊNH
+    if (count > 0) {
+      const title = interaction.user.id === OWNER_ID ? '👑 **CEO**' : '👔 **Tổng Tài**';
+      const publicMsg = `📢 **MƯA TÀI LỘC TỪ TRÊN TRỜI RƠI XUỐNG!** 💸\n${title} <@${interaction.user.id}> vừa vung tay rót **${amount.toLocaleString()} Cash** cho tất cả những người thuộc role <@&${target.id}>!\n*(Có **${count}** anh em may mắn nhận được, mau mau check ví và gửi lời cảm ơn đi nào!)* 🎉`;
+      await interaction.channel.send({ content: publicMsg, allowedMentions: { parse: ['roles', 'users'] } });
+    }
   } else {
     await interaction.editReply('❌ Tag User hoặc Role không hợp lệ.');
   }
+}
+
+// ===================== TRÒ CHƠI MỚI: ROULETTE (CÒ QUAY) =====================
+async function handleRoulette(interaction) {
+  const amountInput = interaction.options.getString('amount');
+  const choice = interaction.options.getString('choice'); 
+  
+  await interaction.deferReply(); 
+  
+  const balance = await checkAndRegisterUser(interaction);
+  if (!balance) return;
+
+  const amount = parseBetAmount(amountInput, balance.currentCash);
+  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
+  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của sếp không đủ! Hiện có: **${balance.currentCash.toLocaleString()} Cash**.`);
+
+  const userId = interaction.user.id;
+  
+  // Tỷ lệ thực tế của Roulette: Đỏ/Đen ~48.6%, Xanh ~2.7%
+  // NHƯNG ĐÂY LÀ NHÀ CÁI TK.CHILL: Cược to bóp tỷ lệ!
+  let isWin = false;
+  let resultColor = '';
+  
+  if (choice === 'green') {
+    // Cược cửa Xanh (x14) -> Cực khó ăn
+    let greenChance = amount >= 5000 ? 0.00 : 0.02; // Cược to cấm cho ra Xanh
+    isWin = Math.random() < greenChance;
+    resultColor = isWin ? 'green' : (Math.random() < 0.5 ? 'red' : 'black');
+  } else {
+    // Cược Đỏ / Đen
+    let colorChance = 0.45; // Mặc định 45% (Nhà cái lợi 55%)
+    if (amount >= 5000) colorChance = 0.25; // Cá mập đánh to giảm xuống 25%
+    
+    isWin = Math.random() < colorChance;
+    
+    if (isWin) {
+      resultColor = choice;
+    } else {
+      // Nếu thua, có 5% ra ô Xanh Lá cho nó cay, 95% ra màu ngược lại
+      if (Math.random() < 0.05) resultColor = 'green';
+      else resultColor = choice === 'red' ? 'black' : 'red';
+    }
+  }
+
+  const colorNames = { 'red': 'Đỏ 🔴', 'black': 'Đen ⚫', 'green': 'Xanh Lá 🟢' };
+  
+  await interaction.editReply(`🎡 **${balance.displayName}** đã cược **${amount.toLocaleString()} Cash** vào ô **${colorNames[choice]}**.\n*Nhà cái đang thả bi, vòng quay đang xoay...* 🌪️`);
+
+  setTimeout(async () => {
+    let finalStr = `🎡 **CÒ QUAY ROULETTE** 🎡\n> 🎯 Vòng quay dừng lại ở ô: **${colorNames[resultColor]}**\n\n`;
+
+    if (isWin) {
+      let profit = choice === 'green' ? amount * 14 : amount; 
+      await updatePilotBalance(userId, profit, 0, profit);
+      let jackpotMsg = choice === 'green' ? '🎰 **ĐỈNH KOUT!! NỔ HŨ X14!**' : '🎉 **HÚP TIỀN!**';
+      finalStr += `${jackpotMsg} Sếp vớ bẫm **${profit.toLocaleString()} Cash**!`;
+    } else {
+      const updateRes = await updatePilotBalance(userId, -amount, amount, 0);
+      finalStr += `💀 **TRƯỢT RỒI!** Nhà cái cười khẩy dùng xẻng hốt **${amount.toLocaleString()} Cash** của sếp.`;
+      
+      // Báo động phá sản nếu tiền về 0
+      if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(resultColor === 'red' ? 0xe74c3c : (resultColor === 'black' ? 0x2b2d31 : 0x2ecc71))
+      .setDescription(finalStr);
+
+    await interaction.editReply({ content: null, embeds: [embed] });
+  }, 3500); // Vòng quay xoay 3.5 giây cho hồi hộp
+}
+
+// ===================== TRÒ CHƠI: OẲN TÙ TÌ (REACTION) =====================
+async function handleOanTuTi(interaction) {
+  const amountInput = interaction.options.getString('amount');
+  await interaction.deferReply(); 
+  
+  const balance = await checkAndRegisterUser(interaction);
+  if (!balance) return;
+
+  const amount = parseBetAmount(amountInput, balance.currentCash);
+  if (amount <= 0) return interaction.editReply('❌ Tiền cược không hợp lệ!');
+  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của sếp không đủ! Hiện có: **${balance.currentCash.toLocaleString()} Cash**.`);
+
+  const msg = await interaction.editReply(`👊 Cơ trưởng **${balance.displayName}** đặt cược **${amount.toLocaleString()} Cash** vào bàn Oẳn Tù Tì.\n👇 **HÃY THẢ CẢM XÚC (REACT) VÀO NẮM ĐẤM SẾP CHỌN BÊN DƯỚI:**`);
+  
+  const emojis = ['✌️', '✊', '✋'];
+  for (const e of emojis) await msg.react(e);
+
+  const filter = (reaction, user) => emojis.includes(reaction.emoji.name) && user.id === interaction.user.id;
+  
+  msg.awaitReactions({ filter, max: 1, time: 30000, errors: ['time'] })
+    .then(async collected => {
+      const userChoice = collected.first().emoji.name;
+      
+      // Xóa reaction cho sạch
+      try { await msg.reactions.removeAll(); } catch (e) {}
+
+      await interaction.editReply({ content: `👊 **${balance.displayName}** đã ra: **${userChoice}**.\n*Nhà cái đang nhắm mắt ra chiêu...* 🫣` });
+
+      setTimeout(async () => {
+        const winningMoves = { '✌️': '✊', '✊': '✋', '✋': '✌️' }; // Bot ra cái này thì Bot THẮNG
+        const tieMoves = { '✌️': '✌️', '✊': '✊', '✋': '✋' };   // HÒA
+        const losingMoves = { '✌️': '✋', '✊': '✌️', '✋': '✊' }; // Bot ra cái này thì Bot THUA
+
+        // THAO TÚNG: Cược càng to, tỉ lệ Bot ra chiêu khắc chế càng cao!
+        let rigChance = 0.30; // Mặc định Bot gian lận nhìn bài 30%
+        if (amount >= 1500) rigChance = 0.50;
+        if (amount >= 5000) rigChance = 0.70; // Cá mập thì 70% Bot ra bài khắc chế
+
+        let botChoice;
+        if (Math.random() < rigChance) {
+          // Khi kích hoạt gian lận: 80% Bot ra bài Thắng sếp, 20% Bot ra Hòa để trêu
+          botChoice = Math.random() < 0.80 ? winningMoves[userChoice] : tieMoves[userChoice];
+        } else {
+          // Đánh xanh chín
+          botChoice = emojis[Math.floor(Math.random() * 3)];
+        }
+
+        let resultStr = `👊 **OẲN TÙ TÌ** 👊\n> 🙋 Sếp: **${userChoice}** 🆚  **${botChoice}** :Nhà cái 🤖\n\n`;
+
+        if (botChoice === losingMoves[userChoice]) {
+          // SẾP THẮNG (Bot ra bài yếu hơn)
+          await updatePilotBalance(interaction.user.id, amount, 0, amount);
+          resultStr += `🎉 **THẮNG RỒI!** Sếp đấm gục nhà cái, húp trọn **${amount.toLocaleString()} Cash**!`;
+        } 
+        else if (botChoice === winningMoves[userChoice]) {
+          // SẾP THUA
+          const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
+          resultStr += `💀 **THUA TRẮNG!** Nhà cái bắt bài! Sếp mất **${amount.toLocaleString()} Cash**!`;
+          if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+        } 
+        else {
+          // HÒA
+          resultStr += `🤝 **HÒA NHAU!** Tư tưởng lớn gặp nhau. Sếp được bảo toàn vốn.`;
+        }
+
+        await interaction.editReply(resultStr);
+      }, 2500);
+    })
+    .catch(() => {
+      interaction.editReply({ content: '⏳ Sếp lưỡng lự quá lâu, đã hủy phiên cược Oẳn Tù Tì!' });
+      try { msg.reactions.removeAll(); } catch (e) {}
+    });
+}
+
+// ===================== TRÒ CHƠI: ĐẠI LÝ LÔ ĐỀ / VIETLOTT =====================
+async function handleVietlott(interaction) {
+  await interaction.deferReply(); 
+  const balance = await checkAndRegisterUser(interaction);
+  if (!balance) return;
+
+  // BƯỚC 1: HIỂN THỊ NÚT CHỌN LOẠI HÌNH
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('vl_lo').setLabel('Ghi Lô (x3.5)').setStyle(ButtonStyle.Secondary).setEmoji('🎫'),
+    new ButtonBuilder().setCustomId('vl_de').setLabel('Đánh Đề (x70)').setStyle(ButtonStyle.Primary).setEmoji('🎯'),
+    new ButtonBuilder().setCustomId('vl_3c').setLabel('Ba Càng (x400)').setStyle(ButtonStyle.Danger).setEmoji('🔥')
+  );
+
+  const msg = await interaction.editReply({
+    content: `🏦 **ĐẠI LÝ SỔ XỐ KIẾN THIẾT TK.CHILL** 🏦\nCơ trưởng **${balance.displayName}** muốn thử vận may hôm nay?\n*(Tài khoản hiện có: **${balance.currentCash.toLocaleString()} Cash**)*\n👇 **BẤM NÚT ĐỂ CHỌN HÌNH THỨC GHI:**`,
+    components: [row]
+  });
+
+  const filter = i => i.user.id === interaction.user.id;
+  const collector = msg.createMessageComponentCollector({ filter, time: 60000 });
+
+  collector.on('collect', async btnInt => {
+    const type = btnInt.customId; // 'vl_lo', 'vl_de', 'vl_3c'
+    
+    let title, labelNum, maxLen;
+    if (type === 'vl_lo') { title = 'Ghi Lô (1 điểm = Tiền cược)'; labelNum = 'Nhập 2 số (VD: 45)'; maxLen = 2; }
+    else if (type === 'vl_de') { title = 'Đánh Đề (Giải Đặc Biệt)'; labelNum = 'Nhập 2 số (VD: 86)'; maxLen = 2; }
+    else { title = 'Ba Càng (3 Số Cuối Đặc Biệt)'; labelNum = 'Nhập 3 số (VD: 123)'; maxLen = 3; }
+
+    // BƯỚC 2: MỞ MODAL CHO USER NHẬP SỐ VÀ TIỀN
+    const modal = new ModalBuilder().setCustomId(`modal_${type}`).setTitle(title);
+    
+    const numInput = new TextInputBuilder()
+      .setCustomId('number')
+      .setLabel(labelNum)
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(maxLen)
+      .setMinLength(maxLen)
+      .setRequired(true);
+      
+    const amtInput = new TextInputBuilder()
+      .setCustomId('amount')
+      .setLabel('Số tiền cược (Nhập số, all hoặc half)')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(numInput), new ActionRowBuilder().addComponents(amtInput));
+    await btnInt.showModal(modal);
+
+    try {
+      // BƯỚC 3: CHỜ USER NỘP MODAL VÀ XỬ LÝ
+      const modalSubmit = await btnInt.awaitModalSubmit({ filter: i => i.user.id === interaction.user.id, time: 60000 });
+      await modalSubmit.deferUpdate(); // Đóng modal trơn tru
+
+      const numberStr = modalSubmit.fields.getTextInputValue('number');
+      const amountStr = modalSubmit.fields.getTextInputValue('amount');
+
+      // Check lại tiền lỡ họ vừa tiêu ở lệnh khác
+      const currentBal = await getPilotBalance(interaction.user.id);
+      const amount = parseBetAmount(amountStr, currentBal.currentCash);
+
+      // Validate
+      if (amount <= 0) return interaction.editReply({ content: '❌ Số tiền cược không hợp lệ!', components: [] });
+      if (currentBal.currentCash < amount) return interaction.editReply({ content: `❌ Tiền đâu mà đòi ghi sổ sếp ơi! Hiện có: **${currentBal.currentCash.toLocaleString()} Cash**.`, components: [] });
+      if (!/^\d+$/.test(numberStr)) return interaction.editReply({ content: '❌ Sếp phải nhập bằng SỐ chứ không được ghi chữ!', components: [] });
+
+      collector.stop('done'); // Dừng collector nút bấm
+
+      const modeName = type === 'vl_lo' ? 'Lô' : (type === 'vl_de' ? 'Đề' : 'Ba Càng');
+      await interaction.editReply({ 
+        content: `🎫 **${balance.displayName}** đã ghi con **${modeName} [${numberStr}]** với số tiền **${amount.toLocaleString()} Cash**.\n*⏳ Đang quay lồng cầu, chờ kết quả...* 🎰`, 
+        components: [] 
+      });
+
+      // BƯỚC 4: THUẬT TOÁN QUAY SỐ (BỊP HOÀN TOÀN)
+      setTimeout(async () => {
+        let isWin = false;
+        let resultNumber = "";
+        let payoutMult = (type === 'vl_lo') ? 3.5 : (type === 'vl_de' ? 70 : 400);
+        
+        // Cơ hội cực hiếm (Vì trả thưởng quá cao)
+        let winChance = (type === 'vl_lo') ? 0.20 : (type === 'vl_de' ? 0.05 : 0.01);
+        
+        // Quét cá mập: Nếu tiền thưởng vượt quá 50.000 Cash, hạ tỷ lệ trúng xuống gần bằng 0!
+        if (amount * payoutMult >= 50000) winChance = 0.001; 
+
+        if (Math.random() < winChance) {
+          isWin = true;
+          resultNumber = numberStr; // Ép cho ra đúng số sếp ghi
+        } else {
+          // Sinh số giả sao cho KHÔNG TRÙNG với số sếp đã ghi
+          do {
+            if (type === 'vl_3c') resultNumber = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+            else resultNumber = String(Math.floor(Math.random() * 100)).padStart(2, '0');
+          } while (resultNumber === numberStr);
+        }
+
+        let finalStr = `🏦 **KẾT QUẢ QUAY SỐ MỞ THƯỞNG** 🏦\n> 🎯 Lồng cầu dừng lại ở con số: **${resultNumber}**\n\n`;
+
+        if (isWin) {
+          let profit = amount * payoutMult;
+          await updatePilotBalance(interaction.user.id, profit - amount, 0, profit - amount);
+          finalStr += `🎉 **TRÚNG RỒI!!!** Sếp đã trúng con **${modeName} [${numberStr}]**!\n💰 Đại lý trả thưởng: **${profit.toLocaleString()} Cash** (Hệ số x${payoutMult})!`;
+        } else {
+          const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
+          finalStr += `💀 **TẠCH!** Sếp đã trượt con **${modeName} [${numberStr}]**.\n💸 Tiền cược **${amount.toLocaleString()} Cash** đã đi về nơi xa lắm.`;
+          
+          if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor(isWin ? 0x2ecc71 : 0xe74c3c)
+          .setDescription(finalStr)
+          .setFooter({ text: 'Vietlott tk.chill - Chơi cho vui, thua ráng chịu' });
+
+        await interaction.editReply({ content: null, embeds: [embed] });
+      }, 3500); // Lồng cầu quay 3.5 giây
+
+    } catch (e) {
+      // Bỏ qua lỗi timeout modal
+    }
+  });
+
+  collector.on('end', (collected, reason) => {
+    if (reason === 'time') {
+      interaction.editReply({ content: '⏳ Sếp đứng trước quầy lâu quá người sau còn mua, đại lý đã đóng cửa!', components: [] });
+    }
+  });
 }
 
 // ===================== LOGIN =====================
