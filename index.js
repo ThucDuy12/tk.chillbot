@@ -9261,7 +9261,7 @@ async function checkAndRegisterUser(interaction) {
   return balance;
 }
 
-// ===================== LỆNH DAILY (CÔNG KHAI - RESET ĐÚNG 00:00) =====================
+// ===================== LỆNH DAILY (RESET ĐÚNG 00:00 GIỜ VIỆT NAM) =====================
 async function handleDaily(interaction) {
   await interaction.deferReply(); 
   
@@ -9272,60 +9272,66 @@ async function handleDaily(interaction) {
   let userDb = await db.getGamblingData(userId);
   const now = Date.now();
 
-  // Hàm tính số "Ngày" theo múi giờ Việt Nam (Để reset đúng 00:00)
-  const getVNDays = (timestamp) => {
-    // Chuyển timestamp thành giờ VN
-    const vnTimeStr = new Date(timestamp).toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' });
-    const vnDate = new Date(vnTimeStr);
-    vnDate.setHours(0, 0, 0, 0); // Ép về 00:00:00 của ngày hôm đó
-    return Math.floor(vnDate.getTime() / 86400000); // Lấy Index ngày
+  // Công cụ xé thời gian Server lấy chuẩn Giờ Việt Nam (UTC+7) cực mạnh:
+  const getVNDateString = (timestamp) => {
+    const d = new Date(timestamp + 7 * 3600 * 1000); 
+    return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
   };
 
-  const lastDay = userDb.dailyLastTime > 0 ? getVNDays(userDb.dailyLastTime) : 0;
-  const currentDay = getVNDays(now);
-  const dayDiff = currentDay - lastDay;
+  const lastDayStr = userDb.dailyLastTime > 0 ? getVNDateString(userDb.dailyLastTime) : "";
+  const currentDayStr = getVNDateString(now);
   
-  // NẾU CÙNG 1 NGÀY -> CHƯA ĐƯỢC NHẬN
-  if (userDb.dailyLastTime > 0 && dayDiff === 0) {
-    // Tính thời gian đếm ngược đến 00:00 ngày mai
-    const vnTimeStr = new Date(now).toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' });
-    const vnDate = new Date(vnTimeStr);
-    const nextMidnight = new Date(vnDate);
-    nextMidnight.setHours(24, 0, 0, 0); // Qua 00:00 ngày hôm sau
+  // NẾU CÙNG 1 NGÀY Ở VN -> CHƯA ĐƯỢC NHẬN
+  if (lastDayStr === currentDayStr) {
+    // Tính toán đếm ngược đến ĐÚNG 00:00 đêm nay (Giờ VN)
+    const vnTimeMs = now + 7 * 3600 * 1000;
+    const vnDate = new Date(vnTimeMs);
     
-    const remainingTime = nextMidnight.getTime() - vnDate.getTime();
+    // Tìm mốc 00:00:00 của ngày hôm sau
+    const nextVNDayMs = Date.UTC(vnDate.getUTCFullYear(), vnDate.getUTCMonth(), vnDate.getUTCDate() + 1, 0, 0, 0);
+    
+    // Đảo ngược về múi giờ thực tế để tính khoảng cách
+    const realNextMidnightMs = nextVNDayMs - 7 * 3600 * 1000;
+    const remainingTime = realNextMidnightMs - now;
+    
     const hours = Math.floor(remainingTime / (1000 * 60 * 60));
     const minutes = Math.floor((remainingTime % (1000 * 60 * 60)) / (1000 * 60));
     
-    return interaction.editReply(`❌ Hôm nay sếp đã điểm danh rồi cơ trưởng **${balance.displayName}**!\n⏳ Hãy quay lại sau: **${hours} giờ ${minutes} phút** nữa (Hệ thống reset lúc 00:00 đêm).`);
+    return interaction.editReply(`❌ Hôm nay sếp đã điểm danh rồi cơ trưởng **${balance.displayName}**!\n⏳ Hãy quay lại sau: **${hours} giờ ${minutes} phút** nữa (Hệ thống tự động reset lúc 00:00 đêm giờ Việt Nam).`);
   }
 
-  // Đứt chuỗi nếu bỏ lỡ nhiều hơn 1 ngày
-  if (dayDiff > 1) {
+  // Check chuỗi ngày (Streak)
+  const yesterday = new Date(now - 24 * 3600 * 1000);
+  const yesterdayStr = getVNDateString(yesterday.getTime());
+  
+  if (lastDayStr !== yesterdayStr && userDb.dailyLastTime > 0) {
+    // Bỏ lỡ ngày hôm qua -> Đứt chuỗi
     userDb.dailyStreak = 0;
   }
   
   userDb.dailyStreak += 1;
   userDb.dailyLastTime = now;
 
-  // Lương random từ 0 đến 1000
-  let reward = Math.floor(Math.random() * 501) + 500;
+  // Lương random từ 100 đến 300
+  let reward = Math.floor(Math.random() * 1001) + 500; 
+  
   // Mốc thưởng nóng
   if (userDb.dailyStreak % 100 === 0) reward = 5000;
   else if (userDb.dailyStreak % 10 === 0) reward = 2000;
 
+  // FIX LUÔN TÍCH LŨY: Ghi nhận đúng Lãi và Tổng nhận
   const updateRes = await updatePilotBalance(userId, reward, 0, reward);
   await userDb.save(); // Lưu lại vào MONGODB
 
   const embed = new EmbedBuilder()
     .setTitle('📅 ĐIỂM DANH HÀNG NGÀY')
     .setColor(0x2ecc71)
-    .setDescription(`Chúc mừng **${balance.displayName}** nhận được **${reward} Cash**!`)
+    .setDescription(`Chúc mừng **${balance.displayName}** nhận được **${reward.toLocaleString()} Cash**!`)
     .addFields(
       { name: '🔥 Chuỗi liên tiếp', value: `${userDb.dailyStreak} ngày`, inline: true },
-      { name: '💰 Tổng số dư', value: `${updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash} Cash`, inline: true }
+      { name: '💰 Tổng số dư', value: `${updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash.toLocaleString()} Cash`, inline: true }
     )
-    .setFooter({ text: 'Lượt điểm danh mới sẽ mở vào 00:00 mỗi ngày' });
+    .setFooter({ text: 'Lượt điểm danh mới sẽ mở vào 00:00 (Giờ VN) mỗi ngày' });
 
   await interaction.editReply({ embeds: [embed] });
 }
@@ -9479,49 +9485,6 @@ async function handleWork(interaction) {
   }
 }
 
-// ===================== LỆNH DAILY =====================
-async function handleDaily(interaction) {
-  await interaction.deferReply(); 
-  
-  const balance = await checkAndRegisterUser(interaction);
-  if (!balance) return; 
-
-  const userId = interaction.user.id;
-  let userDb = await db.getGamblingData(userId);
-  const now = Date.now();
-  const timeDiff = now - userDb.dailyLastTime;
-  const cooldown = 24 * 60 * 60 * 1000; 
-  
-  if (timeDiff < cooldown) {
-    const remainingTime = cooldown - timeDiff;
-    const hours = Math.floor(remainingTime / (1000 * 60 * 60));
-    const minutes = Math.floor((remainingTime % (1000 * 60 * 60)) / (1000 * 60));
-    return interaction.editReply(`❌ Vẫn chưa đến giờ lãnh lương đâu cơ trưởng **${balance.displayName}**! \n⏳ Hãy quay lại sau: **${hours} giờ ${minutes} phút**.`);
-  }
-
-  if (timeDiff > 48 * 60 * 60 * 1000) userDb.dailyStreak = 0;
-  
-  userDb.dailyStreak += 1;
-  userDb.dailyLastTime = now;
-
-  let reward = Math.floor(Math.random() * 201); 
-  if (userDb.dailyStreak % 100 === 0) reward = 500;
-  else if (userDb.dailyStreak % 10 === 0) reward = 200;
-
-  const updateRes = await updatePilotBalance(userId, reward, 0, reward);
-  await userDb.save();
-
-  const embed = new EmbedBuilder()
-    .setTitle('📅 ĐIỂM DANH HÀNG NGÀY')
-    .setColor(0x2ecc71)
-    .setDescription(`Chúc mừng **${balance.displayName}** nhận được **${reward} Cash**!`)
-    .addFields(
-      { name: '🔥 Chuỗi liên tiếp', value: `${userDb.dailyStreak} ngày`, inline: true },
-      { name: '💰 Tổng số dư', value: `${updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash} Cash`, inline: true }
-    );
-
-  await interaction.editReply({ embeds: [embed] });
-}
 
 // ===================== LỆNH BALANCE =====================
 async function handleBalance(interaction) {
