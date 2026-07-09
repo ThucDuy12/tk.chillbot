@@ -9248,38 +9248,61 @@ async function checkAndRegisterUser(interaction) {
   return balance;
 }
 
-// ===================== LỆNH DAILY (CÔNG KHAI) =====================
+// ===================== LỆNH DAILY (CÔNG KHAI - RESET ĐÚNG 00:00) =====================
 async function handleDaily(interaction) {
-  // Đã bỏ ephemeral: true để công khai trên kênh
   await interaction.deferReply(); 
   
   const balance = await checkAndRegisterUser(interaction);
-  if (!balance) return; // Lỗi sai kênh hoặc DB đã báo bên trong hàm
+  if (!balance) return; 
 
   const userId = interaction.user.id;
   let userDb = await db.getGamblingData(userId);
   const now = Date.now();
-  const timeDiff = now - userDb.dailyLastTime;
-  const cooldown = 24 * 60 * 60 * 1000; // 24 tiếng
+
+  // Hàm tính số "Ngày" theo múi giờ Việt Nam (Để reset đúng 00:00)
+  const getVNDays = (timestamp) => {
+    // Chuyển timestamp thành giờ VN
+    const vnTimeStr = new Date(timestamp).toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' });
+    const vnDate = new Date(vnTimeStr);
+    vnDate.setHours(0, 0, 0, 0); // Ép về 00:00:00 của ngày hôm đó
+    return Math.floor(vnDate.getTime() / 86400000); // Lấy Index ngày
+  };
+
+  const lastDay = userDb.dailyLastTime > 0 ? getVNDays(userDb.dailyLastTime) : 0;
+  const currentDay = getVNDays(now);
+  const dayDiff = currentDay - lastDay;
   
-  if (timeDiff < cooldown) {
-    const remainingTime = cooldown - timeDiff;
+  // NẾU CÙNG 1 NGÀY -> CHƯA ĐƯỢC NHẬN
+  if (userDb.dailyLastTime > 0 && dayDiff === 0) {
+    // Tính thời gian đếm ngược đến 00:00 ngày mai
+    const vnTimeStr = new Date(now).toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' });
+    const vnDate = new Date(vnTimeStr);
+    const nextMidnight = new Date(vnDate);
+    nextMidnight.setHours(24, 0, 0, 0); // Qua 00:00 ngày hôm sau
+    
+    const remainingTime = nextMidnight.getTime() - vnDate.getTime();
     const hours = Math.floor(remainingTime / (1000 * 60 * 60));
     const minutes = Math.floor((remainingTime % (1000 * 60 * 60)) / (1000 * 60));
-    return interaction.editReply(`❌ Vẫn chưa đến giờ lãnh lương đâu cơ trưởng **${balance.displayName}**! \n⏳ Hãy quay lại sau: **${hours} giờ ${minutes} phút**.`);
+    
+    return interaction.editReply(`❌ Hôm nay sếp đã điểm danh rồi cơ trưởng **${balance.displayName}**!\n⏳ Hãy quay lại sau: **${hours} giờ ${minutes} phút** nữa (Hệ thống reset lúc 00:00 đêm).`);
   }
 
-  if (timeDiff > 48 * 60 * 60 * 1000) userDb.dailyStreak = 0;
+  // Đứt chuỗi nếu bỏ lỡ nhiều hơn 1 ngày
+  if (dayDiff > 1) {
+    userDb.dailyStreak = 0;
+  }
   
   userDb.dailyStreak += 1;
   userDb.dailyLastTime = now;
 
-  let reward = Math.floor(Math.random() * 201); 
-  if (userDb.dailyStreak % 100 === 0) reward = 500;
-  else if (userDb.dailyStreak % 10 === 0) reward = 200;
+  // Lương random từ 0 đến 1000
+  let reward = Math.floor(Math.random() * 501) + 500;
+  // Mốc thưởng nóng
+  if (userDb.dailyStreak % 100 === 0) reward = 5000;
+  else if (userDb.dailyStreak % 10 === 0) reward = 2000;
 
   const updateRes = await updatePilotBalance(userId, reward, 0, reward);
-  await userDb.save();
+  await userDb.save(); // Lưu lại vào MONGODB
 
   const embed = new EmbedBuilder()
     .setTitle('📅 ĐIỂM DANH HÀNG NGÀY')
@@ -9288,7 +9311,8 @@ async function handleDaily(interaction) {
     .addFields(
       { name: '🔥 Chuỗi liên tiếp', value: `${userDb.dailyStreak} ngày`, inline: true },
       { name: '💰 Tổng số dư', value: `${updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash} Cash`, inline: true }
-    );
+    )
+    .setFooter({ text: 'Lượt điểm danh mới sẽ mở vào 00:00 mỗi ngày' });
 
   await interaction.editReply({ embeds: [embed] });
 }
@@ -9586,11 +9610,11 @@ async function handleWork(interaction) {
     }
   }
 
-  let isSuccess = Math.random() < 0.70; 
+  let isSuccess = Math.random() < 0.80; 
 
   if (balance.currentCash <= 0) {
     workCooldowns.set(userId, now);
-    if (Math.random() < 0.50) {
+    if (Math.random() < 0.60) {
       const pityMoney = Math.floor(Math.random() * 2000) + 500; 
       await updatePilotBalance(userId, pityMoney, 0, pityMoney);
       return interaction.editReply(`🥺 Chà chà, thấy sếp khố rách áo ôm, cờ bạc cháy túi, ngân hàng xót thương bèn cấp phát quỹ từ thiện: **${pityMoney.toLocaleString()} Cash**.\nCầm tiền này mà mua vé máy bay làm lại cuộc đời nhé!`);
