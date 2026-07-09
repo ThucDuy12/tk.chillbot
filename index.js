@@ -10112,7 +10112,7 @@ async function handlePoker(interaction) {
   }, 2500);
 }
 
-// ===================== LỆNH ADD CASH (CÓ LOA THÔNG BÁO) =====================
+// ===================== LỆNH ADD CASH (CHỈ THÔNG BÁO PUBLIC KHI BƠM CHO ROLE) =====================
 async function handleAddCash(interaction) {
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
@@ -10124,21 +10124,18 @@ async function handleAddCash(interaction) {
   const target = interaction.options.getMentionable('target');
   const amount = interaction.options.getInteger('amount');
 
-  // Vẫn để ephemeral ẩn lúc bot xử lý để không bị rối tin nhắn
+  // Ẩn tin nhắn lúc bot xử lý để không bị rối
   await interaction.deferReply({ ephemeral: true });
 
-  // TRƯỜNG HỢP 1: BƠM CHO MỘT NGƯỜI CỤ THỂ
+  // TRƯỜNG HỢP 1: BƠM CHO MỘT NGƯỜI CỤ THỂ (ÂM THẦM)
   if (target.user) {
     const res = await updatePilotBalance(target.user.id, amount, 0, amount);
     if (!res.success) return interaction.editReply(`❌ Lỗi: <@${target.user.id}> chưa từng tham gia hệ thống (Không có hồ sơ trong Database).`);
     
-    await interaction.editReply(`✅ Đã nạp thành công ${amount.toLocaleString()} Cash cho user.`);
-    
-    // Loa thông báo public cho 1 user
-    const title = interaction.user.id === OWNER_ID ? '👑 **CEO**' : '👔 **Tổng Tài**';
-    await interaction.channel.send(`📢 **TIN NÓNG!** ${title} <@${interaction.user.id}> vừa rót vốn đầu tư **${amount.toLocaleString()} Cash** thẳng vào túi của <@${target.user.id}>!`);
+    // Chỉ báo cáo riêng cho Admin biết, không gửi ra public
+    await interaction.editReply(`✅ Đã âm thầm rót thành công **${amount.toLocaleString()} Cash** vào tài khoản của <@${target.user.id}>.`);
   } 
-  // TRƯỜNG HỢP 2: BƠM CHO CẢ MỘT ROLE (VÍ DỤ: @Member)
+  // TRƯỜNG HỢP 2: BƠM CHO CẢ MỘT ROLE (PHÔ TRƯƠNG THANH THẾ)
   else if (target.members) { 
     let count = 0;
     let skipped = 0;
@@ -10151,16 +10148,17 @@ async function handleAddCash(interaction) {
         } else {
             skipped++; // Bỏ qua người chưa có Database
         }
-        await new Promise(r => setTimeout(r, 300)); // Chống cháy API
+        await new Promise(r => setTimeout(r, 300)); // Chống cháy API Google
       }
     }
     
     await interaction.editReply(`✅ Cơn mưa tài lộc! Đã bơm ${amount.toLocaleString()} Cash cho ${count} thành viên (Bỏ qua ${skipped} người không có Database).`);
     
-    // LOA THÔNG BÁO PUBLIC RA KÊNH
+    // LOA THÔNG BÁO PUBLIC RA KÊNH CHAT (CHỈ DÀNH CHO ROLE)
     if (count > 0) {
       const title = interaction.user.id === OWNER_ID ? '👑 **CEO**' : '👔 **Tổng Tài**';
       const publicMsg = `📢 **MƯA TÀI LỘC TỪ TRÊN TRỜI RƠI XUỐNG!** 💸\n${title} <@${interaction.user.id}> vừa vung tay rót **${amount.toLocaleString()} Cash** cho tất cả những người thuộc role <@&${target.id}>!\n*(Có **${count}** anh em may mắn nhận được, mau mau check ví và gửi lời cảm ơn đi nào!)* 🎉`;
+      
       await interaction.channel.send({ content: publicMsg, allowedMentions: { parse: ['roles', 'users'] } });
     }
   } else {
