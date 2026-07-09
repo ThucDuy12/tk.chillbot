@@ -10413,6 +10413,15 @@ async function handleVietlott(interaction) {
               if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
           }
 
+          // Tính toán hệ số nhân tiền (mult) dựa vào số lần bốc (bingoAt)
+          let mult = 0;
+          if (bingoAt !== -1) {
+              if (bingoAt <= 30) mult = 10; // Bốc trúng sớm x10 tiền
+              else if (bingoAt <= 50) mult = 2; // Bốc trúng ở mức vừa phải x2 tiền
+              else mult = 1; // Bốc trúng muộn thì chỉ hòa vốn
+          }
+
+          // Sau đó mới đưa biến mult vào đoạn code của sếp:
           const embedColor = bingoAt !== -1 ? (bingoAt <= 50 && mult > 1 ? 0x2ecc71 : 0xf1c40f) : 0xe74c3c;
           
           const embed = new EmbedBuilder()
