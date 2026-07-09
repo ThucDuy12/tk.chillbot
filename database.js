@@ -121,9 +121,6 @@ async function getBotConfig(key) {
   }
 }
 
-// Thêm đoạn này vào file database.js của sếp
-const mongoose = require('mongoose');
-
 const userGamblingSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
   dailyLastTime: { type: Number, default: 0 }, // Lưu timestamp Unix
