@@ -5180,6 +5180,10 @@ async function handleButton(interaction) {
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder().setCustomId('intro').setLabel('Giới thiệu bản thân').setStyle(TextInputStyle.Paragraph).setRequired(true)
+      ),
+      // THÊM: Trường nhập CID
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('cid').setLabel('VATSIM CID (Tùy chọn)').setPlaceholder('Nhập CID nếu bạn có').setStyle(TextInputStyle.Short).setRequired(false)
       )
     );
     await interaction.showModal(modal);
@@ -5223,7 +5227,6 @@ async function handleButton(interaction) {
 
     // 2. Xử lý logic TỪ CHỐI
     if (action === 'deny') {
-      // Do đã update() ở trên, từ đây về sau phải dùng followUp()
       await interaction.followUp({ content: '❌ Đã từ chối yêu cầu cấp role.', ephemeral: true });
       try {
         const user = await client.users.fetch(request.userId);
@@ -5235,38 +5238,84 @@ async function handleButton(interaction) {
     }
 
     // 3. Xử lý logic ĐỒNG Ý
-    try {
-      const guild = await client.guilds.fetch(request.guildId);
-      const member = await guild.members.fetch(request.userId);
+        try {
+          const guild = await client.guilds.fetch(request.guildId);
+          const member = await guild.members.fetch(request.userId);
 
-      // Thêm role yêu cầu
-      await member.roles.add(request.roleId);
+          // Thêm role yêu cầu (Thường là Member)
+          await member.roles.add(request.roleId);
 
-      // Nếu xin role Member thì lột role Pending (Welcome) ra
-      if (request.roleId === roles.basicMemberRoleId && roles.pendingRoleId) {
-        await member.roles.remove(roles.pendingRoleId);
+          // Lột role Pending ra nếu có
+          if (request.roleId === roles.basicMemberRoleId && roles.pendingRoleId) {
+            await member.roles.remove(roles.pendingRoleId).catch(() => {});
+            if (pendingUsersData[request.userId]) {
+              delete pendingUsersData[request.userId];
+              savePendingUsers();
+            }
+          }
+          
+          let responseMsg = '✅ Đã duyệt và cấp role thành công!';
 
-        if (pendingUsersData[request.userId]) {
-          delete pendingUsersData[request.userId];
-          savePendingUsers();
+          // THÊM: Xử lý cấp role VATSIM dựa trên CID đính kèm
+          if (request.cid) {
+              const cidNum = parseInt(request.cid);
+              if (!isNaN(cidNum)) {
+                  try {
+                      // Kéo Sổ Đỏ ra check lần cuối trước khi ghi
+                      const currentVatsimLinks = await loadVatsimLinksSheet();
+                      const getCid = (val) => typeof val === 'object' ? val.cid : val;
+                      const isCidTaken = Object.values(currentVatsimLinks).some(val => getCid(val) === cidNum);
+
+                      if (!isCidTaken) {
+                          const stats = await fetchVatsimStatsById(cidNum);
+                          if (stats && stats.rating !== 0) {
+                              // GHI VÀO SỔ ĐỎ
+                              currentVatsimLinks[request.userId] = {
+                                  cid: cidNum,
+                                  username: request.name,
+                                  imageUrl: 'Verified via Role Request'
+                              };
+                              await saveVatsimLinksSheet(currentVatsimLinks).catch(() => {});
+                              vatsimLinksCache = currentVatsimLinks; // Cập nhật luôn Cache ở RAM
+
+                              let extraMsg = '';
+                              // Kiểm tra cấp Pilot
+                              if (stats.pilot_hours > 10) {
+                                  await member.roles.add(roles.vatsimPilotRoleId).catch(() => {});
+                                  extraMsg += `\n✈️ Đã tự động cấp thêm role **VATSIM Pilot** (>10 giờ bay).`;
+                              }
+                              // Kiểm tra cấp ATC
+                              if (stats.rating > 1) {
+                                  await member.roles.add(roles.vatsimAtcRoleId).catch(() => {});
+                                  extraMsg += `\n📡 Đã tự động cấp thêm role **VATSIM ATC** (Rating >= S1).`;
+                              }
+                              
+                              if (extraMsg) {
+                                  responseMsg += extraMsg;
+                              }
+                          }
+                      } else {
+                          responseMsg += `\n⚠️ **Lưu ý:** CID ${cidNum} đã bị người khác đăng ký, hệ thống TỪ CHỐI ghi vào Database và từ chối cấp Role VATSIM.`;
+                      }
+                  } catch (e) {
+                      console.error("Lỗi khi tự động check VATSIM CID:", e);
+                  }
+              }
+          }
+
+          await interaction.followUp({ content: responseMsg, ephemeral: true });
+
+          try {
+            await member.send(`🎉 Yêu cầu xin role của bạn đã được duyệt!\n${responseMsg}`);
+          } catch (err) {
+            console.error('Error sending DM to user (approve):', err);
+          }
+
+        } catch (err) {
+          console.error('Error approving role:', err);
+          await interaction.followUp({ content: '⚠️ Đã duyệt, nhưng bot bị chặn không thể cấp role (Vui lòng kéo Role của Bot lên cao hơn Role cần cấp trong Server Settings).', ephemeral: true });
         }
-      }
-
-      await interaction.followUp({ content: '✅ Đã duyệt và cấp role thành công!', ephemeral: true });
-
-      // Nhắn tin DM cho người dùng báo tin vui
-      try {
-        await member.send('🎉 Yêu cầu xin role của bạn đã được duyệt!');
-      } catch (err) {
-        console.error('Error sending DM to user (approve):', err);
-      }
-
-    } catch (err) {
-      console.error('Error approving role:', err);
-      // Nếu nhảy vào đây, 99% là do Bot bị lỗi phân cấp (Role bot thấp hơn Role cần cấp)
-      await interaction.followUp({ content: '⚠️ Đã duyệt, nhưng bot bị chặn không thể cấp role (Vui lòng kéo Role của Bot lên cao hơn Role cần cấp trong Server Settings).', ephemeral: true });
-    }
-    return;
+        return;
   }
   if (customId.startsWith('confirm_event_')) {
     const eventId = customId.split('_')[2];
@@ -5784,51 +5833,90 @@ async function handleModal(interaction) {
     return;
   }
 
-  // Trong handleModal, xử lý role_info_modal_
-  if (interaction.customId.startsWith('role_info_modal_')) {
-    const roleId = interaction.customId.split('_')[3];
-    const name = interaction.fields.getTextInputValue('name');
-    const intro = interaction.fields.getTextInputValue('intro');
-    const timestamp = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  // THÊM: Cập nhật xử lý nộp form xin role
+      if (interaction.customId.startsWith('role_info_modal_')) {
+        const roleId = interaction.customId.split('_')[3];
+        const name = interaction.fields.getTextInputValue('name');
+        const intro = interaction.fields.getTextInputValue('intro');
+        // Lấy CID nếu có, nếu không thì undefined
+        let cidValue = null;
+        try {
+            cidValue = interaction.fields.getTextInputValue('cid');
+        } catch(e) {}
+        
+        const timestamp = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
 
-    const requestId = Date.now().toString();
-    pendingRequests.set(requestId, { userId: interaction.user.id, roleId, guildId: interaction.guild.id, name, intro, timestamp, messageId: null });
+        const requestId = Date.now().toString();
+        // Lưu CID vào request
+        pendingRequests.set(requestId, { userId: interaction.user.id, roleId, guildId: interaction.guild.id, name, intro, cid: cidValue, timestamp, messageId: null });
 
-    try {
-      const channel = await client.channels.fetch(ROLE_APPROVAL_CHANNEL_ID);
-      const roleName = roleId === roles.basicMemberRoleId ? 'Member' : roles.otherRoles.find((r) => r.id === roleId)?.name || 'Unknown';
+        try {
+          const channel = await client.channels.fetch(ROLE_APPROVAL_CHANNEL_ID);
+          const roleName = roleId === roles.basicMemberRoleId ? 'Member' : roles.otherRoles.find((r) => r.id === roleId)?.name || 'Unknown';
 
-      const embed = new EmbedBuilder()
-        .setTitle('Role Request')
-        .setDescription(
-          `User <@${interaction.user.id}> (${interaction.user.tag}) requests role **${roleName}**.\n\n**Tên:** ${name}\n**Giới thiệu:** ${intro}\n**Thời gian:** ${timestamp}`
-        )
-        .setColor(0x3498db); // Thêm màu cho đẹp
+          let embedDesc = `User <@${interaction.user.id}> (${interaction.user.tag}) requests role **${roleName}**.\n\n**Tên:** ${name}\n**Giới thiệu:** ${intro}\n**Thời gian:** ${timestamp}`;
+          
+          let alertMsg = '';
+          // Nếu có nhập CID, bot sẽ kiểm tra trước và thêm ghi chú vào thông báo cho Admin
+          if (cidValue) {
+             embedDesc += `\n**VATSIM CID Khai báo:** ${cidValue}`;
+             const cidNum = parseInt(cidValue);
+             if (!isNaN(cidNum)) {
+                 // CHECK SỔ ĐỎ XEM CÓ BỊ TRÙNG LẶP / MẠO DANH KHÔNG
+                 const currentVatsimLinks = await loadVatsimLinksSheet();
+                 const getCid = (val) => typeof val === 'object' ? val.cid : val;
+                 const isCidTaken = Object.values(currentVatsimLinks).some(val => getCid(val) === cidNum);
 
-      // Thêm ping DEV và Admin
-      const mentionText = `<@&${roles.adminRoleId}> <@&${roles.devRoleId}> <@&${roles.verifiedMemberRoleId}>`;
+                 if (isCidTaken) {
+                     alertMsg = `\n🚨 **BÁO ĐỘNG ĐỎ:** CID ${cidNum} này ĐÃ CÓ người khác đăng ký trong Database! Nghi vấn dùng chung hoặc mạo danh! (KHÔNG ĐƯỢC DUYỆT ROLE VATSIM)`;
+                 } else {
+                     // Nếu Sổ Đỏ sạch thì mới check API VATSIM
+                     const stats = await fetchVatsimStatsById(cidNum);
+                     if (stats) {
+                         if (stats.rating === 0) {
+                             alertMsg = `\n⚠️ **Lưu ý:** CID ${cidNum} này đang bị Suspended trên VATSIM.`;
+                         } else {
+                             if (stats.pilot_hours > 10) alertMsg += `\n✅ User này đủ điều kiện cấp Role Pilot (>10h).`;
+                             if (stats.rating > 1) alertMsg += `\n✅ User này đủ điều kiện cấp Role ATC (Rating >= S1).`;
+                             if (alertMsg) alertMsg += `\n*(Sẽ tự động cấp và lưu vào Database khi bạn bấm Approve)*`;
+                         }
+                     } else {
+                         alertMsg = `\n❌ **Lưu ý:** CID ${cidNum} không tồn tại trên VATSIM API.`;
+                     }
+                 }
+             }
+          }
 
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel('Approve').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId(`deny_${requestId}`).setLabel('Deny').setStyle(ButtonStyle.Danger)
-      );
+          if (alertMsg) embedDesc += `\n${alertMsg}`;
 
-      const sentMessage = await channel.send({
-        content: mentionText,
-        embeds: [embed],
-        components: [row],
-        allowedMentions: { roles: [roles.adminRoleId, roles.devRoleId, roles.verifiedMemberRoleId] } // chỉ ping đúng các role đó
-      });
+          const embed = new EmbedBuilder()
+            .setTitle('Role Request')
+            .setDescription(embedDesc)
+            .setColor(0x3498db);
 
-      pendingRequests.get(requestId).messageId = sentMessage.id;
-      await interaction.reply({ content: '✅ Request sent for approval.', ephemeral: true });
-    } catch (err) {
-      console.error('Error sending request to channel:', err);
-      await interaction.reply({ content: '❌ Error sending request.', ephemeral: true });
-      pendingRequests.delete(requestId);
-    }
+          const mentionText = `<@&${roles.adminRoleId}> <@&${roles.devRoleId}> <@&${roles.verifiedMemberRoleId}>`;
+
+          const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel('Approve').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`deny_${requestId}`).setLabel('Deny').setStyle(ButtonStyle.Danger)
+          );
+
+          const sentMessage = await channel.send({
+            content: mentionText,
+            embeds: [embed],
+            components: [row],
+            allowedMentions: { roles: [roles.adminRoleId, roles.devRoleId, roles.verifiedMemberRoleId] }
+          });
+
+          pendingRequests.get(requestId).messageId = sentMessage.id;
+          await interaction.reply({ content: '✅ Request sent for approval.', ephemeral: true });
+        } catch (err) {
+          console.error('Error sending request to channel:', err);
+          await interaction.reply({ content: '❌ Error sending request.', ephemeral: true });
+          pendingRequests.delete(requestId);
+        }
+      }
   }
-}
 
 async function remindParticipants(eventId) {
   const event = events.get(eventId);
@@ -9207,7 +9295,7 @@ async function handleBalance(interaction) {
   await interaction.editReply({ embeds: [embed] });
 }
 
-// ===================== LỆNH COINFLIP (ĐÃ TÍCH HỢP ALL/HALF) =====================
+// ===================== LỆNH COINFLIP (ĐÃ GẮN LOA PHÁ SẢN) =====================
 async function handleCoinflip(interaction) {
   const amountInput = interaction.options.getString('amount');
   await interaction.deferReply(); 
@@ -9216,17 +9304,25 @@ async function handleCoinflip(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ! (Nhập số tiền, "all" hoặc "half")');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của bạn không đủ! Bạn chỉ có **${balance.currentCash.toLocaleString()} Cash**.`);
+  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
+
+  if (balance.currentCash < amount) {
+    return interaction.editReply(`❌ Số dư của bạn không đủ! Bạn chỉ có **${balance.currentCash.toLocaleString()} Cash**.`);
+  }
 
   const userId = interaction.user.id;
   let userDb = await db.getGamblingData(userId);
   
   let baseChance = 0.50; 
-  if (amount < 500) baseChance = 0.80; 
-  else if (amount <= 1500) baseChance = 0.60; 
-  else if (amount <= 5000) baseChance = 0.50; 
-  else baseChance = 0.40; 
+  if (amount < 500) {
+    baseChance = 0.50; 
+  } else if (amount <= 1500) {
+    baseChance = 0.40; 
+  } else if (amount <= 5000) {
+    baseChance = 0.30; 
+  } else {
+    baseChance = 0.20; 
+  }
 
   const variance = (Math.random() * 0.06) - 0.03; 
   let winChance = baseChance + variance;
@@ -9234,7 +9330,8 @@ async function handleCoinflip(interaction) {
   if (userDb.coinflipLosses >= 2) {
     winChance += (userDb.coinflipLosses - 1) * 0.10; 
     winChance = Math.min(winChance, 0.75); 
-  } else if (userDb.coinflipWins >= 2) {
+  } 
+  else if (userDb.coinflipWins >= 2) {
     winChance -= (userDb.coinflipWins - 1) * 0.15;
     winChance = Math.max(winChance, 0.05); 
   }
@@ -9244,19 +9341,24 @@ async function handleCoinflip(interaction) {
 
   setTimeout(async () => {
     if (isWin) {
-      userDb.coinflipWins += 1; userDb.coinflipLosses = 0;
+      userDb.coinflipWins += 1;
+      userDb.coinflipLosses = 0;
       await updatePilotBalance(userId, amount, 0, amount);
       await interaction.editReply(`🎉 **THẮNG RỒI!** Đồng xu ngửa! **${balance.displayName}** húp trọn **${amount.toLocaleString()} Cash**!`);
     } else {
-      userDb.coinflipLosses += 1; userDb.coinflipWins = 0;
-      await updatePilotBalance(userId, -amount, amount, 0);
+      userDb.coinflipLosses += 1;
+      userDb.coinflipWins = 0;
+      const updateRes = await updatePilotBalance(userId, -amount, amount, 0);
       await interaction.editReply(`💀 **THUA TRẮNG!** Đồng xu sấp! **${balance.displayName}** mất trắng **${amount.toLocaleString()} Cash**.`);
+      
+      // GẮN CÒI BÁO ĐỘNG PHÁ SẢN Ở ĐÂY
+      if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
     }
     await userDb.save();
   }, 2500); 
 }
 
-// ===================== LỆNH SLOT (ĐÃ TÍCH HỢP ALL/HALF) =====================
+// ===================== LỆNH SLOT (ĐÃ GẮN LOA PHÁ SẢN) =====================
 async function handleSlot(interaction) {
   const amountInput = interaction.options.getString('amount');
   await interaction.deferReply(); 
@@ -9265,8 +9367,11 @@ async function handleSlot(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ! (Nhập số tiền, "all" hoặc "half")');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của bạn không đủ để quay! Bạn chỉ có **${balance.currentCash.toLocaleString()} Cash**.`);
+  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
+
+  if (balance.currentCash < amount) {
+    return interaction.editReply(`❌ Số dư của bạn không đủ để quay! Bạn chỉ có **${balance.currentCash.toLocaleString()} Cash**.`);
+  }
 
   const userId = interaction.user.id;
   let userDb = await db.getGamblingData(userId);
@@ -9276,23 +9381,29 @@ async function handleSlot(interaction) {
   if (userDb.slotPlays >= 5) winChance = 0.05; 
   if (userDb.slotPlays >= 15) winChance = 0.30; 
 
-  if (amount > 1500 && amount < 5000) winChance = Math.min(winChance, 0.15); 
-  else if (amount >= 5000) winChance = Math.min(winChance, 0.05); 
+  if (amount > 1500 && amount < 5000) {
+    winChance = Math.min(winChance, 0.15); 
+  } else if (amount >= 5000) {
+    winChance = Math.min(winChance, 0.05); 
+  }
 
   const variance = (Math.random() * 0.04) - 0.02;
   winChance = Math.max(0, winChance + variance);
 
   let isWin = Math.random() < winChance;
+
   const emojis = ['✈️', '🚁', '🚀', '🛸', '🪂', '🎈'];
   let e1, e2, e3;
 
   if (isWin) {
-    e1 = e2 = e3 = emojis[Math.floor(Math.random() * emojis.length)];
+    const winEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+    e1 = e2 = e3 = winEmoji;
     userDb.slotPlays = 0; 
   } else {
     if (Math.random() < 0.45) {
       const baitEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-      e1 = e2 = baitEmoji;
+      e1 = baitEmoji;
+      e2 = baitEmoji;
       do { e3 = emojis[Math.floor(Math.random() * emojis.length)]; } while (e3 === baitEmoji);
       if (Math.random() < 0.5) { [e2, e3] = [e3, e2]; }
     } else {
@@ -9303,11 +9414,15 @@ async function handleSlot(interaction) {
   }
 
   await userDb.save(); 
+
   await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> ➖ | ➖ | ➖ < \nCược: **${amount.toLocaleString()} Cash**...`);
 
   for (let i = 0; i < 3; i++) {
     await new Promise(res => setTimeout(res, 800));
-    await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> ${emojis[Math.floor(Math.random()*6)]} | ${emojis[Math.floor(Math.random()*6)]} | ${emojis[Math.floor(Math.random()*6)]} < \n*Đang cuộn...*`);
+    const r1 = emojis[Math.floor(Math.random() * emojis.length)];
+    const r2 = emojis[Math.floor(Math.random() * emojis.length)];
+    const r3 = emojis[Math.floor(Math.random() * emojis.length)];
+    await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> ${r1} | ${r2} | ${r3} < \n*Đang cuộn...*`);
   }
   await new Promise(res => setTimeout(res, 800));
 
@@ -9316,10 +9431,13 @@ async function handleSlot(interaction) {
     await updatePilotBalance(userId, (winAmount - amount), 0, (winAmount - amount));
     await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> **${e1} | ${e2} | ${e3}** < \n🎉 **JACKPOT!** Cả 3 biểu tượng khớp nhau! **${balance.displayName}** trúng x3: **${winAmount.toLocaleString()} Cash**!`);
   } else {
-    await updatePilotBalance(userId, -amount, amount, 0); 
+    const updateRes = await updatePilotBalance(userId, -amount, amount, 0); 
     const isNearMiss = (e1 === e2 || e2 === e3 || e1 === e3);
     const mockText = isNearMiss ? "Trời ơi suýt nữa thì nổ hũ!!" : "Lệch nhịp rồi!";
     await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> **${e1} | ${e2} | ${e3}** < \n💥 ${mockText} **${balance.displayName}** bị nhà cái luộc **${amount.toLocaleString()} Cash**.`);
+    
+    // GẮN CÒI BÁO ĐỘNG PHÁ SẢN Ở ĐÂY
+    if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
   }
 }
 
