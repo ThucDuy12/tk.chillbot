@@ -10345,6 +10345,43 @@ function checkLotoKinh(board, drawnSet) {
   return false;
 }
 
+// ===================== TRÒ CHƠI: LÔ TÔ 5x5 (HIỆU ỨNG GỌI TỪNG SỐ) =====================
+// Hàm tạo giao diện bảng Lô Tô (Dùng mã màu ANSI để tô Xanh Lá và In đậm)
+function renderLotoBoard(board, drawnSet) {
+  let str = "";
+  for (let r = 0; r < 5; r++) {
+      let rowStr = [];
+      for (let c = 0; c < 5; c++) {
+          let num = board[r * 5 + c];
+          let numStr = String(num).padStart(2, '0');
+          if (drawnSet.has(num)) {
+              // Mã ANSI: \u001b[1;32m là Xanh Lá In Đậm, \u001b[0m là Reset màu
+              rowStr.push(`\u001b[1;32m[${numStr}]\u001b[0m`); 
+          } else {
+              rowStr.push(`[${numStr}]`);
+          }
+      }
+      str += rowStr.join(" ") + "\n";
+  }
+  return `\`\`\`ansi\n${str}\`\`\``; // Phải dùng block code ansi thì Discord mới hiển thị màu
+}
+
+// Hàm kiểm tra xem có đường nào "KINH" (Bingo) chưa
+function checkLotoKinh(board, drawnSet) {
+  const lines = [
+      // Hàng ngang
+      [0,1,2,3,4], [5,6,7,8,9], [10,11,12,13,14], [15,16,17,18,19], [20,21,22,23,24],
+      // Hàng dọc
+      [0,5,10,15,20], [1,6,11,16,21], [2,7,12,17,22], [3,8,13,18,23], [4,9,14,19,24],
+      // Hai đường chéo
+      [0,6,12,18,24], [4,8,12,16,20]
+  ];
+  for (let line of lines) {
+      if (line.every(idx => drawnSet.has(board[idx]))) return true; // Trúng trọn vẹn 1 hàng 5 số
+  }
+  return false;
+}
+
 async function handleVietlott(interaction) {
   await interaction.deferReply(); 
   const balance = await checkAndRegisterUser(interaction);
@@ -10424,76 +10461,86 @@ async function handleVietlott(interaction) {
 
       collector.stop('done');
 
-      // BẮT ĐẦU SHOW VÉ VÀ QUAY LỒNG CẦU
-      await interaction.editReply({
-          content: `🎤 **ĐOÀN LÔ TÔ BẮT ĐẦU KÊU SỐ!**\nSếp **${balance.displayName}** mua vé với **${amount.toLocaleString()} Cash**.\n*Tấm vé của sếp:* \n${renderLotoBoard(boardNumbers, new Set())}\n*🎤 Số zì ra, con số zì ra, cờ ra con mấy, con mấy zì ra...* 🏃‍♂️`,
-          components: []
-      });
-
-      // SINH SỐ ĐÃ GỌI (Tối đa 50 lượt gọi để giữ lợi thế nhà cái 50/50)
+      // TÍNH TOÁN TRƯỚC KẾT QUẢ ĐỂ CHẠY HIỆU ỨNG GỌI TỪNG SỐ
       let allNumbers = Array.from({length: 90}, (_, i) => i + 1);
       for(let i = allNumbers.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [allNumbers[i], allNumbers[j]] = [allNumbers[j], allNumbers[i]];
       }
 
-      let drawnSet = new Set();
-      let drawnList = [];
+      let tempSet = new Set();
+      let actualDraws = 0;
       let bingoAt = -1;
 
-      // Hát Lô Tô 50 lần liên tiếp
+      // Giới hạn Gánh hát chỉ kêu 50 số (Giữ tỉ lệ 50/50 cho nhà cái)
       for (let i = 0; i < 50; i++) {
-          let num = allNumbers[i];
-          drawnList.push(num);
-          drawnSet.add(num);
-          
-          if (checkLotoKinh(boardNumbers, drawnSet)) {
-              bingoAt = i + 1; // Ghi nhận lượt trúng thưởng
+          tempSet.add(allNumbers[i]);
+          actualDraws++;
+          if (checkLotoKinh(boardNumbers, tempSet)) {
+              bingoAt = i + 1; 
               break;
           }
       }
 
-      setTimeout(async () => {
-          let finalStr = `🎤 **KẾT QUẢ ĐÊM NHẠC LÔ TÔ** 🎤\n> 🎯 Đã gọi ra **${drawnList.length}** con số.\n${renderLotoBoard(boardNumbers, drawnSet)}\n`;
+      let drawnSet = new Set();
+      let drawnList = [];
 
-          if (bingoAt !== -1) {
-              let mult = 0;
-              // Hệ số thưởng dựa trên tốc độ KINH (Càng sớm càng ăn đậm)
-              if (bingoAt <= 20) mult = 100;     // Kinh kịch độc
-              else if (bingoAt <= 30) mult = 10; // Kinh VIP
-              else if (bingoAt <= 40) mult = 3;  // Kinh thường
-              else if (bingoAt <= 50) mult = 1;  // Kinh muộn (Chỉ lấy lại tiền vé)
+      // ================= BẮT ĐẦU HIỆU ỨNG GỌI TỪNG SỐ =================
+      for (let i = 0; i < actualDraws; i++) {
+          let num = allNumbers[i];
+          drawnList.push(num);
+          drawnSet.add(num);
 
-              let profit = amount * mult;
-
-              if (mult > 1) {
-                  await updatePilotBalance(interaction.user.id, profit - amount, 0, profit - amount);
-                  finalStr += `🎉 **KINH RỒI!!!** Sếp đã trúng đủ 5 số thẳng hàng ở lượt gọi thứ **${bingoAt}**!\n💰 Gánh hát trả thưởng: **${profit.toLocaleString()} Cash** (Hệ số x${mult})!`;
-              } else {
-                  finalStr += `🤝 **KINH MUỘN!** Sếp trúng ở lượt thứ **${bingoAt}**, được hoàn lại **${amount.toLocaleString()} Cash** tiền vốn (Hệ số x1).`;
-              }
-          } else {
-              // Qua 50 số mà vẫn tạch
-              const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-              finalStr += `💀 **ĐỨT GÁNH!** Gánh hát gọi khô máu 50 số mà vé của sếp vẫn lủng lỗ chỗ.\n💸 Thu dọn bàn ghế, sếp mất trắng **${amount.toLocaleString()} Cash**.`;
-
-              // Loa réo nếu cháy túi
-              if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
-          }
-
-          // Xanh = Thắng, Vàng = Hòa Vốn, Đỏ = Thua Mất Tiền
-          const embedColor = bingoAt !== -1 ? (bingoAt <= 50 && mult > 1 ? 0x2ecc71 : 0xf1c40f) : 0xe74c3c;
+          let currentNumStr = String(num).padStart(2, '0');
           
-          const embed = new EmbedBuilder()
-              .setColor(embedColor)
-              .setDescription(finalStr)
-              .setFooter({ text: 'Lô Tô tk.chill!' });
+          await interaction.editReply({
+              content: `🎤 **ĐOÀN LÔ TÔ ĐANG KÊU SỐ...** (Lượt ${i + 1}/50)\n*Số vừa ra:* 🎱 **Cờ ra con mấy, con số gì đây... là con số: ${currentNumStr}**\n${renderLotoBoard(boardNumbers, drawnSet)}`,
+              components: []
+          }).catch(()=>{}); // Chống lỗi Discord API khi gửi quá nhanh
 
-          await interaction.editReply({ content: null, embeds: [embed] });
-      }, 5000); // Ngâm 5 giây để mô phỏng thời gian đọc số cho nó hồi hộp
+          // Nếu chưa phải số cuối cùng thì nghỉ 1.5s tạo sự hồi hộp
+          if (i < actualDraws - 1) {
+              await new Promise(r => setTimeout(r, 1500)); 
+          }
+      }
+
+      // ================= CHỐT KẾT QUẢ VÀ TRẢ THƯỞNG =================
+      let finalStr = `🎤 **KẾT QUẢ ĐÊM NHẠC LÔ TÔ** 🎤\n> 🎯 Đã gọi ra **${drawnList.length}** con số.\n${renderLotoBoard(boardNumbers, drawnSet)}\n`;
+
+      if (bingoAt !== -1) {
+          let mult = 0;
+          // Kinh càng sớm, hệ số nhân càng khủng
+          if (bingoAt <= 20) mult = 100;     // Kinh kịch độc
+          else if (bingoAt <= 30) mult = 10; // Kinh VIP
+          else if (bingoAt <= 40) mult = 3;  // Kinh thường
+          else if (bingoAt <= 50) mult = 1;  // Kinh muộn (Hoàn tiền vé)
+
+          let profit = amount * mult;
+
+          if (mult > 1) {
+              await updatePilotBalance(interaction.user.id, profit - amount, 0, profit - amount);
+              finalStr += `🎉 **KINH RỒI!!!** Sếp đã trúng đủ 5 số thẳng hàng ở lượt gọi thứ **${bingoAt}**!\n💰 Gánh hát trả thưởng: **${profit.toLocaleString()} Cash** (Hệ số x${mult})!`;
+          } else {
+              finalStr += `🤝 **KINH MUỘN!** Sếp trúng ở lượt thứ **${bingoAt}**, được hoàn lại **${amount.toLocaleString()} Cash** tiền vốn (Hệ số x1).`;
+          }
+      } else {
+          const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
+          finalStr += `💀 **ĐỨT GÁNH!** Gánh hát gọi khô máu 50 số mà vé của sếp vẫn lủng lỗ chỗ.\n💸 Thu dọn bàn ghế, sếp mất trắng **${amount.toLocaleString()} Cash**.`;
+
+          if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+      }
+
+      const embedColor = bingoAt !== -1 ? (bingoAt <= 50 && mult > 1 ? 0x2ecc71 : 0xf1c40f) : 0xe74c3c;
+      
+      const embed = new EmbedBuilder()
+          .setColor(embedColor)
+          .setDescription(finalStr)
+          .setFooter({ text: 'Lô Tô 5x5 tk.chill - Hát mỏi miệng!' });
+
+      await interaction.editReply({ content: null, embeds: [embed] });
 
     } catch (e) {
-      // Hết giờ modal
+      // Bỏ qua lỗi Timeout
     }
   });
 
