@@ -857,6 +857,102 @@ async function getPilotBalance(discordId) {
   }
 }
 
+// =====================================
+// CẬP NHẬT/TRỪ TIỀN TK.CHILL CASH LÊN SHEETS
+// =====================================
+async function updatePilotBalance(discordId, cashChange, usedCashChange = 0, earnedCashChange = 0) {
+  const sheets = await initGoogleSheets();
+  try {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: CASH_SPREADSHEET_ID, 
+      range: `${CASH_DATABASE_SHEET_NAME}!A2:T`,
+    });
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) return { success: false, msg: 'Không tìm thấy database' };
+
+    // Dọn số liệu để tránh lỗi String
+    const parseNum = (val) => {
+      let n = parseFloat(String(val).replace(/,/g, ''));
+      return isNaN(n) ? 0 : n;
+    };
+
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i][18] === String(discordId)) {
+        const currentRowIndex = i + 2; // +2 vì dữ liệu bắt đầu từ dòng A2
+        
+        let currentCash = parseNum(rows[i][3]);
+        let totalEarned = parseNum(rows[i][4]);
+        let usedCash = parseNum(rows[i][5]);
+
+        // Kiểm tra chống âm tiền tuyệt đối
+        if (currentCash + cashChange < 0) {
+          return { success: false, msg: 'Không đủ số dư' };
+        }
+
+        // Cập nhật số liệu
+        currentCash += cashChange;
+        totalEarned += earnedCashChange;
+        usedCash += usedCashChange;
+
+        // Bắn ngược lại lên Google Sheets (Cập nhật cột D, E, F)
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: CASH_SPREADSHEET_ID,
+          range: `${CASH_DATABASE_SHEET_NAME}!D${currentRowIndex}:F${currentRowIndex}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: { values: [[currentCash, totalEarned, usedCash]] },
+        });
+
+        return { success: true, currentCash };
+      }
+    }
+    return { success: false, msg: 'Không tìm thấy hồ sơ người dùng trong Sheets' };
+  } catch (error) {
+    console.error('Lỗi khi update balance:', error);
+    return { success: false, msg: 'Lỗi API Google Sheets' };
+  }
+}
+
+// =====================================
+// TỰ ĐỘNG ĐĂNG KÝ USER MỚI (TẶNG 200 CASH KHỞI NGHIỆP)
+// =====================================
+async function registerPilot(discordId, discordName) {
+  const sheets = await initGoogleSheets();
+  try {
+    // Tạo một mảng gồm 20 cột rỗng (Từ cột A đến cột T)
+    const newRow = new Array(20).fill(''); 
+    
+    newRow[3] = 200; // Cột D: Current Cash (Vốn khởi nghiệp)
+    newRow[4] = 200; // Cột E: Total Earned
+    newRow[5] = 0;   // Cột F: Used Cash
+    newRow[18] = String(discordId);   // Cột S: Discord ID
+    newRow[19] = String(discordName); // Cột T: Discord Name
+
+    // Ghi nối tiếp (append) vào hàng trống cuối cùng của Sheet
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: CASH_SPREADSHEET_ID,
+      range: `${CASH_DATABASE_SHEET_NAME}!A:T`,
+      valueInputOption: 'USER_ENTERED',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values: [newRow] }
+    });
+
+    // Trả về dữ liệu gốc để bot dùng luôn cho lệnh hiện tại mà không cần fetch lại
+    return {
+      uid: 'NEW',
+      username: discordName,
+      currentCash: 200,
+      totalEarned: 200,
+      usedCash: 0,
+      completedFlights: 0,
+      totalDistance: 0,
+      totalHours: 0
+    };
+  } catch (error) {
+    console.error('Lỗi khi đăng ký user mới:', error);
+    return null;
+  }
+}
+
 // ========== EXPORTS ==========
 module.exports = {
   initGoogleSheets,
@@ -875,5 +971,7 @@ module.exports = {
   saveProfilesSheet,
   loadVatsimLinksSheet,
   saveVatsimLinksSheet,
-  getPilotBalance
+  getPilotBalance,
+  updatePilotBalance,
+  registerPilot
 };
