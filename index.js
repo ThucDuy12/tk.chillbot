@@ -9088,6 +9088,7 @@ async function checkAndRegisterUser(interaction) {
         content: `🎉 Chào mừng cơ trưởng **${discordName}** lần đầu tham gia hệ thống kinh tế **tk.chill**!\nNgân hàng đã cấp cho sếp **2000 Cash** khởi nghiệp. Chơi vui vẻ nhé! 💸`,
         ephemeral: true
       });
+      await updatePilotBalance(userId, 2000, 0, 2000);
       balance.displayName = discordName;
     }
   } else {
