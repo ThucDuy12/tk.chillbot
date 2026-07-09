@@ -151,7 +151,7 @@ async function savePendingUsers() {
 // ===================== BIẾN THEO DÕI LẠM QUYỀN =====================
 const badAdminTracker = new Map(); // Bộ nhớ tạm theo dõi lượng tiền đã bơm
 const SUSPECT_ADMIN_ID = '927432538736168961'; // ID của thanh niên lạm quyền
-const DAILY_MAX_ADD = 1000000; // Giới hạn 10 củ / ngày
+const DAILY_MAX_ADD = 10000000; // Giới hạn 10 củ / ngày
 
 // Bộ nhớ tạm để lưu ảnh khi user mở Form (Modal)
 const userSellImages = new Map();
@@ -10455,7 +10455,7 @@ async function handleAddCash(interaction) {
         if (tracker.totalAdded + amount > DAILY_MAX_ADD) {
             const remaining = Math.max(0, DAILY_MAX_ADD - tracker.totalAdded);
             return interaction.reply({ 
-                content: `🛑 **TÍT TÍT TÍT! HỆ THỐNG CẢNH BÁO LẠM PHÁT!**\nSếp bị hệ thống giới hạn máy in tiền tối đa **1,000,000 Cash / ngày** do có tiền sử lạm quyền.\n> 💳 Hôm nay sếp chỉ còn quyền bơm thêm tối đa: **${remaining.toLocaleString()} Cash** nữa thôi.`, 
+                content: `🛑 **TÍT TÍT TÍT! HỆ THỐNG CẢNH BÁO LẠM PHÁT!**\nSếp bị hệ thống giới hạn máy in tiền tối đa **10,000,000 Cash / ngày** do có tiền sử lạm quyền.\n> 💳 Hôm nay sếp chỉ còn quyền bơm thêm tối đa: **${remaining.toLocaleString()} Cash** nữa thôi.`, 
                 ephemeral: true 
             });
         }
