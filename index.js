@@ -3296,8 +3296,8 @@ client.once('ready', async () => {
     .setDescription('Tung đồng xu cá cược (Tỉ lệ đã được thao túng tâm lý)')
     .addIntegerOption(opt => opt.setName('amount').setDescription('Số tiền cược').setRequired(true)),
     new SlashCommandBuilder()
-      .setName('slot')
-      .setDescription('Quay Slot Machine chủ đề hàng không (Jackpot x3)')
+      .setName('jackpot')
+      .setDescription('Quay Jackpot Machine chủ đề hàng không (Jackpot x3)')
       .addIntegerOption(opt => opt.setName('amount').setDescription('Số tiền cược').setRequired(true)),
 
     new SlashCommandBuilder()
@@ -3803,7 +3803,7 @@ client.on('interactionCreate', async (interaction) => {
         case 'coinflip':
           await handleCoinflip(interaction);
           break;
-        case 'slot':
+        case 'jackpot':
           await handleSlot(interaction);
           break;
         case 'daily':
@@ -9235,15 +9235,15 @@ async function handleCoinflip(interaction) {
   let userDb = await db.getGamblingData(userId);
   
   // 1. CHIA TỈ LỆ THEO MỨC CƯỢC
-  let baseChance = 0.50; 
+  let baseChance = 0.60; 
   if (amount < 500) {
-    baseChance = 0.50; // Cò con: 50%
+    baseChance = 0.80; // Cò con: 50%
   } else if (amount <= 1500) {
-    baseChance = 0.40; // Nông dân: 40%
+    baseChance = 0.60; // Nông dân: 40%
   } else if (amount <= 5000) {
-    baseChance = 0.30; // Khá giả: 30%
+    baseChance = 0.50; // Khá giả: 30%
   } else {
-    baseChance = 0.20; // Đại gia / Cá mập: 20%
+    baseChance = 0.40; // Đại gia / Cá mập: 20%
   }
 
   // 2. THÊM ĐỘ LỆCH NGẪU NHIÊN (Linh động ±3%)
@@ -9305,9 +9305,9 @@ async function handleSlot(interaction) {
 
   // Ép cá mập
   if (amount > 1500 && amount < 5000) {
-    winChance = Math.min(winChance, 0.15); // Cược to vừa thì max 15%
+    winChance = Math.min(winChance, 0.30); // Cược to vừa thì max 15%
   } else if (amount >= 5000) {
-    winChance = Math.min(winChance, 0.05); // Cược siêu to thì 5% vĩnh viễn
+    winChance = Math.min(winChance, 0.20); // Cược siêu to thì 5% vĩnh viễn
   }
 
   // Thêm random ±2% cho linh động
@@ -9338,26 +9338,26 @@ async function handleSlot(interaction) {
 
   await userDb.save(); 
 
-  await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> ➖ | ➖ | ➖ < \nCược: **${amount.toLocaleString()} Cash**...`);
+  await interaction.editReply(`🎰 **JACKPOT MACHINE** 🎰\n> ➖ | ➖ | ➖ < \nCược: **${amount.toLocaleString()} Cash**...`);
 
   for (let i = 0; i < 3; i++) {
     await new Promise(res => setTimeout(res, 800));
     const r1 = emojis[Math.floor(Math.random() * emojis.length)];
     const r2 = emojis[Math.floor(Math.random() * emojis.length)];
     const r3 = emojis[Math.floor(Math.random() * emojis.length)];
-    await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> ${r1} | ${r2} | ${r3} < \n*Đang cuộn...*`);
+    await interaction.editReply(`🎰 **JACKPOT MACHINE** 🎰\n> ${r1} | ${r2} | ${r3} < \n*Đang cuộn...*`);
   }
   await new Promise(res => setTimeout(res, 800));
 
   if (isWin) {
     const winAmount = amount * 3;
     await updatePilotBalance(userId, (winAmount - amount), 0, (winAmount - amount));
-    await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> **${e1} | ${e2} | ${e3}** < \n🎉 **JACKPOT!** Cả 3 biểu tượng khớp nhau! **${balance.displayName}** trúng x3: **${winAmount.toLocaleString()} Cash**!`);
+    await interaction.editReply(`🎰 **JACKPOT MACHINE** 🎰\n> **${e1} | ${e2} | ${e3}** < \n🎉 **JACKPOT!** Cả 3 biểu tượng khớp nhau! **${balance.displayName}** trúng x3: **${winAmount.toLocaleString()} Cash**!`);
   } else {
     await updatePilotBalance(userId, -amount, amount, 0); 
     const isNearMiss = (e1 === e2 || e2 === e3 || e1 === e3);
     const mockText = isNearMiss ? "Trời ơi suýt nữa thì nổ hũ!!" : "Lệch nhịp rồi!";
-    await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> **${e1} | ${e2} | ${e3}** < \n💥 ${mockText} **${balance.displayName}** bị nhà cái luộc **${amount.toLocaleString()} Cash**.`);
+    await interaction.editReply(`🎰 **JACKPOT MACHINE** 🎰\n> **${e1} | ${e2} | ${e3}** < \n💥 ${mockText} **${balance.displayName}** bị nhà cái luộc **${amount.toLocaleString()} Cash**.`);
   }
 }
 
