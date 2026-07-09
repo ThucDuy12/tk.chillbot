@@ -10060,6 +10060,49 @@ async function handlePoker(interaction) {
   }, 2500);
 }
 
+// ===================== LỆNH ADD CASH (ADMIN/DEV ONLY) =====================
+async function handleAddCash(interaction) {
+  const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+  const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+  
+  if (!hasAdmin && !hasDev && interaction.user.id !== OWNER_ID) {
+    return interaction.reply({ content: '❌ Cục dự trữ liên bang cảnh cáo: Mạo danh Admin bơm tiền sẽ bị ăn ban!', ephemeral: true });
+  }
+
+  const target = interaction.options.getMentionable('target');
+  const amount = interaction.options.getInteger('amount'); // Admin bơm tiền thì vẫn nhập số nguyên xác định
+
+  await interaction.deferReply({ ephemeral: true });
+
+  // TRƯỜNG HỢP 1: BƠM CHO MỘT NGƯỜI CỤ THỂ
+  if (target.user) {
+    const res = await updatePilotBalance(target.user.id, amount, 0, amount);
+    if (!res.success) return interaction.editReply(`❌ Lỗi: <@${target.user.id}> chưa từng tham gia hệ thống (Không có hồ sơ trong Database).`);
+    await interaction.editReply(`🏦 Ngân hàng Trung ương vừa rót **${amount.toLocaleString()} Cash** thẳng vào túi của <@${target.user.id}>.`);
+  } 
+  // TRƯỜNG HỢP 2: BƠM CHO CẢ MỘT ROLE (VÍ DỤ: @Member)
+  else if (target.members) { 
+    let count = 0;
+    let skipped = 0;
+    
+    for (const [memberId, member] of target.members) {
+      if (!member.user.bot) {
+        // updatePilotBalance sẽ tự thất bại nếu không tìm thấy ID trong Sheet
+        const res = await updatePilotBalance(memberId, amount, 0, amount);
+        if (res.success) {
+            count++;
+        } else {
+            skipped++; // Đếm số người không có Database
+        }
+        await new Promise(r => setTimeout(r, 300)); // Delay để chống lỗi Rate Limit của Google
+      }
+    }
+    await interaction.editReply(`🏦 Cơn mưa tài lộc! Đã bơm **${amount.toLocaleString()} Cash** cho **${count}** thành viên thuộc role <@&${target.id}>.\n*(Đã từ chối cấp phát cho **${skipped}** người do chưa có hồ sơ trong Database)*`);
+  } else {
+    await interaction.editReply('❌ Tag User hoặc Role không hợp lệ.');
+  }
+}
+
 // ===================== LOGIN =====================
 client.on('debug', info => console.log(`[DISCORD DEBUG] ${info}`));
 client.on('warn', warning => console.log(`[DISCORD WARN] ${warning}`));
