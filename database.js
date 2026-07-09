@@ -121,6 +121,30 @@ async function getBotConfig(key) {
   }
 }
 
+// Thêm đoạn này vào file database.js của sếp
+const mongoose = require('mongoose');
+
+const userGamblingSchema = new mongoose.Schema({
+  userId: { type: String, required: true, unique: true },
+  dailyLastTime: { type: Number, default: 0 }, // Lưu timestamp Unix
+  dailyStreak: { type: Number, default: 0 },
+  coinflipLosses: { type: Number, default: 0 },
+  coinflipWins: { type: Number, default: 0 },
+  slotPlays: { type: Number, default: 0 }
+});
+
+const UserGambling = mongoose.model('UserGambling', userGamblingSchema);
+
+// Tạo 2 hàm export ra để lấy và lưu data
+async function getGamblingData(userId) {
+  let data = await UserGambling.findOne({ userId });
+  if (!data) {
+    data = new UserGambling({ userId });
+    await data.save();
+  }
+  return data;
+}
+
 module.exports = {
   connectDB,
   getProfile,
@@ -131,5 +155,6 @@ module.exports = {
   getAnnouncements, // <-- Thêm dòng này
   saveAnnouncements, // <-- Thêm dòng này
   saveBotConfig,
-  getBotConfig
+  getBotConfig,
+  getGamblingData
 };
