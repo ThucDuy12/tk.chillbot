@@ -921,8 +921,8 @@ async function registerPilot(discordId, discordName) {
     // Tạo một mảng gồm 20 cột rỗng (Từ cột A đến cột T)
     const newRow = new Array(20).fill(''); 
     
-    newRow[3] = 200; // Cột D: Current Cash (Vốn khởi nghiệp)
-    newRow[4] = 200; // Cột E: Total Earned
+    newRow[3] = 2000; // Cột D: Current Cash (Vốn khởi nghiệp)
+    newRow[4] = 2000; // Cột E: Total Earned
     newRow[5] = 0;   // Cột F: Used Cash
     newRow[18] = String(discordId);   // Cột S: Discord ID
     newRow[19] = String(discordName); // Cột T: Discord Name
@@ -940,8 +940,8 @@ async function registerPilot(discordId, discordName) {
     return {
       uid: 'NEW',
       username: discordName,
-      currentCash: 200,
-      totalEarned: 200,
+      currentCash: 2000,
+      totalEarned: 2000,
       usedCash: 0,
       completedFlights: 0,
       totalDistance: 0,
