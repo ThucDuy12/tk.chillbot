@@ -3335,6 +3335,9 @@ client.once('ready', async () => {
       .setName('poker')
       .setDescription('Chơi Video Poker 5 lá')
       .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền, "all" (Tất tay) hoặc "half" (Nửa vốn)').setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('work')
+      .setDescription('Làm nhiệm vụ để kiếm tiền'),
     ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3845,6 +3848,9 @@ client.on('interactionCreate', async (interaction) => {
           break;
         case 'poker':
           await handlePoker(interaction);
+          break;
+        case 'work':
+          await handleWork(interaction);
           break;
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
@@ -9321,295 +9327,230 @@ async function handleSlot(interaction) {
   }
 }
 
-// ===================== LỆNH TÀI XỈU (ĐÃ TÍCH HỢP ALL/HALF) =====================
-async function handleTaiSiu(interaction) {
-  const amountInput = interaction.options.getString('amount');
-  await interaction.deferReply(); 
-  
-  const balance = await checkAndRegisterUser(interaction);
-  if (!balance) return;
+// ===================== ECONOMY & GAMBLING SYSTEM =====================
+const coinflipTracker = new Map();
+const slotTracker = new Map();
 
-  const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của bạn không đủ! Bạn chỉ có **${balance.currentCash.toLocaleString()} Cash**.`);
+// CÔNG CỤ BÀI TÂY (BẮT BUỘC PHẢI CÓ CHO BLACKJACK & POKER)
+const SUITS = ['♠️', '♣️', '♥️', '♦️'];
+const VALUES = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('ts_xiu').setLabel('XỈU (4-10)').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('ts_tai').setLabel('TÀI (11-17)').setStyle(ButtonStyle.Danger)
-  );
-
-  const msg = await interaction.editReply({ 
-    content: `🎲 Cơ trưởng **${balance.displayName}** đặt cược **${amount.toLocaleString()} Cash**.\n👇 **VUI LÒNG BẤM NÚT ĐỂ CHỌN CỬA:**`, 
-    components: [row] 
-  });
-
-  const filter = i => i.user.id === interaction.user.id;
-  const collector = msg.createMessageComponentCollector({ filter, time: 30000, max: 1 });
-
-  collector.on('collect', async i => {
-    await i.deferUpdate();
-    const choice = i.customId === 'ts_tai' ? 'tai' : 'xiu';
-    await interaction.editReply({ content: `🎲 **${balance.displayName}** đã chốt cửa **${choice.toUpperCase()}**.\n*Nhà cái đang lắc xí ngầu...* 🥣`, components: [] });
-
-    setTimeout(async () => {
-      let baoChance = amount >= 5000 ? 0.15 : 0.05; 
-      let d1, d2, d3;
-      if (Math.random() < baoChance) {
-        d1 = d2 = d3 = Math.random() < 0.5 ? 1 : 6;
-      } else {
-        d1 = Math.floor(Math.random() * 6) + 1; d2 = Math.floor(Math.random() * 6) + 1; d3 = Math.floor(Math.random() * 6) + 1;
-        if (d1 === d2 && d2 === d3) { if (d3 === 6) d3 = 5; else d3 += 1; }
-      }
-
-      const total = d1 + d2 + d3;
-      let resultType = '', resultText = '';
-      if (d1 === d2 && d2 === d3) { resultType = 'bao'; resultText = '🌪️ BÃO (NHÀ CÁI ĂN TẤT)'; } 
-      else if (total >= 4 && total <= 10) { resultType = 'xiu'; resultText = '⏬ XỈU'; } 
-      else { resultType = 'tai'; resultText = '⏫ TÀI'; }
-
-      if (resultType === choice) {
-        await updatePilotBalance(interaction.user.id, amount, 0, amount);
-        await interaction.editReply(`🎲 **TÀI XỈU** 🎲\n> 🎲 **${d1}** | 🎲 **${d2}** | 🎲 **${d3}** (Tổng: **${total}**)\n👉 Kết quả: **${resultText}**\n🎉 Húp trọn **${amount.toLocaleString()} Cash**!`);
-      } else {
-        await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-        await interaction.editReply(`🎲 **TÀI XỈU** 🎲\n> 🎲 **${d1}** | 🎲 **${d2}** | 🎲 **${d3}** (Tổng: **${total}**)\n👉 Kết quả: **${resultText}**\n💀 Sếp đã bay mất **${amount.toLocaleString()} Cash**!`);
-      }
-    }, 2500);
-  });
+function createDeck() {
+  let deck = [];
+  for (let s of SUITS) {
+    for (let v of VALUES) {
+      deck.push({ suit: s, value: v, display: `[${v}${s}]` });
+    }
+  }
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
 }
 
-// ===================== LỆNH BẦU CUA (ĐÃ TÍCH HỢP ALL/HALF) =====================
-async function handleBauCua(interaction) {
-  const amountInput = interaction.options.getString('amount');
-  await interaction.deferReply(); 
-  
-  const balance = await checkAndRegisterUser(interaction);
-  if (!balance) return;
-
-  const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của bạn không đủ! Bạn chỉ có **${balance.currentCash.toLocaleString()} Cash**.`);
-
-  const msg = await interaction.editReply(`🏺 Cơ trưởng **${balance.displayName}** đặt cược **${amount.toLocaleString()} Cash**.\n👇 **HÃY THẢ CẢM XÚC (REACT) VÀO LINH VẬT SẾP MUỐN CHỌN:**`);
-  const emojis = ['🎃', '🦀', '🦞', '🐟', '🐔', '🦌'];
-  const nameMap = { '🎃': 'Bầu', '🦀': 'Cua', '🦞': 'Tôm', '🐟': 'Cá', '🐔': 'Gà', '🦌': 'Nai' };
-
-  for (const e of emojis) await msg.react(e);
-
-  const filter = (reaction, user) => emojis.includes(reaction.emoji.name) && user.id === interaction.user.id;
-  msg.awaitReactions({ filter, max: 1, time: 30000, errors: ['time'] })
-    .then(async collected => {
-      const choiceEmoji = collected.first().emoji.name;
-      const choiceName = nameMap[choiceEmoji];
-
-      await interaction.editReply({ content: `🏺 **${balance.displayName}** đã chốt cửa **${choiceName} ${choiceEmoji}**.\n*Nhà cái đang xóc đĩa...* 🤫` });
-      try { await msg.reactions.removeAll(); } catch (e) {}
-
-      setTimeout(async () => {
-        let riggedMascots = Object.values(nameMap);
-        if (amount >= 5000) riggedMascots = riggedMascots.filter(m => m !== choiceName); // Cược to vứt mẹ 1 xúc xắc cho khó
-
-        const r1 = riggedMascots[Math.floor(Math.random() * riggedMascots.length)];
-        const r2 = Object.values(nameMap)[Math.floor(Math.random() * 6)];
-        const r3 = Object.values(nameMap)[Math.floor(Math.random() * 6)];
-        const matchCount = [r1, r2, r3].filter(r => r === choiceName).length;
-
-        let resultStr = `🏺 **BẦU CUA TÔM CÁ** 🏺\n> **${r1}** | **${r2}** | **${r3}**\n\n`;
-
-        if (matchCount > 0) {
-          const profit = amount * matchCount;
-          await updatePilotBalance(interaction.user.id, profit, 0, profit);
-          let winMouth = matchCount === 1 ? 'Húp trọn' : matchCount === 2 ? 'Nhân đôi' : 'Nổ hũ x3';
-          resultStr += `🎉 **THẮNG!** Ra ${matchCount} con **${choiceName}**! ${winMouth} **${profit.toLocaleString()} Cash**!`;
-        } else {
-          await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-          resultStr += `💀 **THUA!** Không có con **${choiceName}** nào hết! Nhà cái lụm **${amount.toLocaleString()} Cash**!`;
-        }
-        await interaction.editReply(resultStr);
-      }, 2500);
-    })
-    .catch(() => {
-      interaction.editReply({ content: '⏳ Sếp không chọn linh vật nào, đã hủy phiên cược!' });
-      try { msg.reactions.removeAll(); } catch (e) {}
-    });
+function getCardValue(card) {
+  if (['J', 'Q', 'K'].includes(card.value)) return 10;
+  if (card.value === 'A') return 11;
+  return parseInt(card.value);
 }
 
-// ===================== LỆNH BLACKJACK (ĐÃ TÍCH HỢP ALL/HALF) =====================
-async function handleBlackjack(interaction) {
-  const amountInput = interaction.options.getString('amount');
+function calculateHand(hand) {
+  let score = 0, aces = 0;
+  for (let card of hand) {
+    score += getCardValue(card);
+    if (card.value === 'A') aces += 1;
+  }
+  while (score > 21 && aces > 0) { score -= 10; aces -= 1; }
+  return score;
+}
+
+function formatHand(hand) {
+  return hand.map(c => `**${c.display}**`).join('  ');
+}
+
+// BỘ ĐỌC TIỀN ALL IN / HALF
+function parseBetAmount(input, currentCash) {
+  if (!input) return 0;
+  const str = String(input).trim().toLowerCase();
+  if (str === 'all') return currentCash; 
+  if (str === 'half') return Math.floor(currentCash / 2); 
+  const val = parseInt(str); 
+  return isNaN(val) ? 0 : val;
+}
+
+// BỘ QUÉT TÂN BINH & CHẶN KÊNH CỜ BẠC
+async function checkAndRegisterUser(interaction) {
+  const userId = interaction.user.id;
+  const discordName = interaction.user.username;
+  const member = interaction.member;
+
+  const hasAdmin = member.roles.cache.has(roles.adminRoleId);
+  const hasDev = member.roles.cache.has(roles.devRoleId);
+  const hasStaff = member.roles.cache.has('1493908725231128617'); 
+  const isOwner = userId === OWNER_ID;
+
+  if (!hasAdmin && !hasDev && !hasStaff && !isOwner && interaction.channelId !== CASH_CHANNEL_ID) {
+    await interaction.editReply(`❌ Sếp gõ lệnh sai kênh rồi! Vui lòng qua đúng kênh <#${CASH_CHANNEL_ID}> để sử dụng các lệnh tiền tệ nhé.`);
+    return null; 
+  }
+
+  let balance = await getPilotBalance(userId);
+  if (!balance) {
+    balance = await registerPilot(userId, discordName);
+    if (balance) {
+      await interaction.followUp({
+        content: `🎉 Chào mừng cơ trưởng **${discordName}** lần đầu tham gia hệ thống kinh tế **tk.chill**!\nNgân hàng đã cấp cho sếp **2000 Cash** khởi nghiệp. Chơi vui vẻ nhé! 💸`,
+        ephemeral: true
+      });
+      balance.displayName = discordName;
+    }
+  } else {
+    balance.displayName = (balance.username && balance.username !== 'N/A' && balance.username.trim() !== '') ? balance.username : discordName;
+  }
+  return balance;
+}
+
+// ===================== LOA PHÁT THANH PHÁ SẢN =====================
+async function checkBankruptcy(interaction, displayName, currentCash) {
+  if (currentCash <= 0) {
+    await interaction.channel.send(`🚨 **BÁO ĐỘNG ĐỎ! PHÁ SẢN!** 🚨\nCơ trưởng **${displayName}** vừa bị sòng bài lột sạch sành sanh, chính thức trắng tay (0 Cash)!\n👉 Hãy xách máy bay đi làm vài chuyến hoặc dùng lệnh \`/work\` để cày cuốc kiếm cơm qua ngày đi nhé! 🧹🧽`);
+  }
+}
+
+// ===================== LỆNH WORK =====================
+const workCooldowns = new Map();
+
+async function handleWork(interaction) {
   await interaction.deferReply(); 
   
   const balance = await checkAndRegisterUser(interaction);
   if (!balance) return;
-
-  const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của bạn không đủ!`);
 
   const userId = interaction.user.id;
-  let deck = createDeck();
-  let playerHand = [deck.pop(), deck.pop()];
-  let dealerHand = [deck.pop(), deck.pop()];
-  let playerScore = calculateHand(playerHand);
+  const now = Date.now();
+  
+  if (workCooldowns.has(userId)) {
+    const lastTime = workCooldowns.get(userId);
+    const cooldown = 30 * 60 * 1000; 
+    const timeDiff = now - lastTime;
+    
+    if (timeDiff < cooldown) {
+      const remainingTime = cooldown - timeDiff;
+      const minutes = Math.floor(remainingTime / (1000 * 60));
+      const seconds = Math.floor((remainingTime % (1000 * 60)) / 1000);
+      return interaction.editReply(`❌ Vừa làm xong chưa ráo mồ hôi mà đòi làm tiếp à? Đợi **${minutes} phút ${seconds} giây** nữa nhé!`);
+    }
+  }
+
+  let isSuccess = Math.random() < 0.70; 
+
+  if (balance.currentCash <= 0) {
+    workCooldowns.set(userId, now);
+    if (Math.random() < 0.50) {
+      const pityMoney = Math.floor(Math.random() * 2000) + 500; 
+      await updatePilotBalance(userId, pityMoney, 0, pityMoney);
+      return interaction.editReply(`🥺 Chà chà, thấy sếp khố rách áo ôm, cờ bạc cháy túi, ngân hàng xót thương bèn cấp phát quỹ từ thiện: **${pityMoney.toLocaleString()} Cash**.\nCầm tiền này mà mua vé máy bay làm lại cuộc đời nhé!`);
+    } else {
+      return interaction.editReply(`💀 **CẢNH BÁO BÁO ĐỘNG ĐỎ!**\nCơ trưởng **${balance.displayName}** đã cạn kiệt ngân quỹ (0 Cash)!\nBáo cáo với hãng hàng không đi bay để kiếm thêm tiền, hoặc xin donate từ anh em trong server chứ đỗ nghèo khỉ thế này thì sòng bài không cho vào cửa đâu!`);
+    }
+  }
+
+  workCooldowns.set(userId, now);
+
+  if (isSuccess) {
+    const earned = Math.floor(Math.random() * 10001); 
+    await updatePilotBalance(userId, earned, 0, earned);
+    await interaction.editReply(`💼 **${balance.displayName}** vừa hoàn thành một ca trực vất vả và được trả công **${earned.toLocaleString()} Cash**!`);
+  } else {
+    let penalty = Math.floor(Math.random() * 501); 
+    if (balance.currentCash < penalty) penalty = balance.currentCash; 
+
+    if (penalty === 0) {
+      await interaction.editReply(`📉 Hôm nay ế khách, cơ trưởng **${balance.displayName}** nằm không cả ngày chả kiếm được đồng nào.`);
+    } else {
+      const updateRes = await updatePilotBalance(userId, -penalty, penalty, 0);
+      await interaction.editReply(`💥 Xui xẻo! **${balance.displayName}** làm hỏng đồ nghề của công ty và bị trừ lương **${penalty.toLocaleString()} Cash**!`);
+      if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+    }
+  }
+}
+
+// ===================== LỆNH DAILY =====================
+async function handleDaily(interaction) {
+  await interaction.deferReply(); 
+  
+  const balance = await checkAndRegisterUser(interaction);
+  if (!balance) return; 
+
+  const userId = interaction.user.id;
+  let userDb = await db.getGamblingData(userId);
+  const now = Date.now();
+  const timeDiff = now - userDb.dailyLastTime;
+  const cooldown = 24 * 60 * 60 * 1000; 
+  
+  if (timeDiff < cooldown) {
+    const remainingTime = cooldown - timeDiff;
+    const hours = Math.floor(remainingTime / (1000 * 60 * 60));
+    const minutes = Math.floor((remainingTime % (1000 * 60 * 60)) / (1000 * 60));
+    return interaction.editReply(`❌ Vẫn chưa đến giờ lãnh lương đâu cơ trưởng **${balance.displayName}**! \n⏳ Hãy quay lại sau: **${hours} giờ ${minutes} phút**.`);
+  }
+
+  if (timeDiff > 48 * 60 * 60 * 1000) userDb.dailyStreak = 0;
+  
+  userDb.dailyStreak += 1;
+  userDb.dailyLastTime = now;
+
+  let reward = Math.floor(Math.random() * 201); 
+  if (userDb.dailyStreak % 100 === 0) reward = 500;
+  else if (userDb.dailyStreak % 10 === 0) reward = 200;
+
+  const updateRes = await updatePilotBalance(userId, reward, 0, reward);
+  await userDb.save();
 
   const embed = new EmbedBuilder()
-    .setTitle('🃏 BLACKJACK 21 ĐIỂM')
+    .setTitle('📅 ĐIỂM DANH HÀNG NGÀY')
     .setColor(0x2ecc71)
-    .setDescription(`Cơ trưởng **${balance.displayName}** cược: **${amount.toLocaleString()} Cash**\n\n👇 **REACT ➕ ĐỂ RÚT BÀI (HIT), 🛑 ĐỂ DẰN (STAND)**`)
+    .setDescription(`Chúc mừng **${balance.displayName}** nhận được **${reward} Cash**!`)
     .addFields(
-      { name: `🙋 Sếp (${playerScore} điểm)`, value: formatHand(playerHand), inline: false },
-      { name: `🤖 Nhà cái (?)`, value: `**${dealerHand[0].display}** [**?**❓]`, inline: false }
+      { name: '🔥 Chuỗi liên tiếp', value: `${userDb.dailyStreak} ngày`, inline: true },
+      { name: '💰 Tổng số dư', value: `${updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash} Cash`, inline: true }
     );
 
-  const gameMsg = await interaction.editReply({ embeds: [embed] });
-  await gameMsg.react('➕'); await gameMsg.react('🛑');
-
-  const filter = (reaction, user) => ['➕', '🛑'].includes(reaction.emoji.name) && user.id === userId;
-  const collector = gameMsg.createReactionCollector({ filter, time: 60000 });
-
-  collector.on('collect', async (reaction, user) => {
-    try { await reaction.users.remove(user.id); } catch(e){}
-    if (reaction.emoji.name === '➕') {
-      playerHand.push(deck.pop());
-      playerScore = calculateHand(playerHand);
-      if (playerScore > 21) {
-        collector.stop('bust'); 
-      } else {
-        embed.data.fields[0] = { name: `🙋 Sếp (${playerScore} điểm)`, value: formatHand(playerHand), inline: false };
-        await interaction.editReply({ embeds: [embed] });
-      }
-    } else {
-      collector.stop('stand'); 
-    }
-  });
-
-  collector.on('end', async (collected, reason) => {
-    try { await gameMsg.reactions.removeAll(); } catch(e){}
-
-    if (reason === 'time') {
-      await updatePilotBalance(userId, -amount, amount, 0);
-      embed.setColor(0xe74c3c).setDescription(`⏳ Quá thời gian suy nghĩ! Mất trắng **${amount.toLocaleString()} Cash**.`);
-      return interaction.editReply({ embeds: [embed] });
-    }
-
-    let dealerScore = calculateHand(dealerHand);
-    if (reason === 'stand') {
-      while (dealerScore < 17) {
-        if (amount >= 5000 && dealerScore >= 12) {
-            let peekCard = deck[deck.length - 1];
-            if (dealerScore + getCardValue(peekCard) > 21) deck.pop(); 
-        }
-        dealerHand.push(deck.pop());
-        dealerScore = calculateHand(dealerHand);
-      }
-    }
-
-    embed.data.fields[1] = { name: `🤖 Nhà cái (${dealerScore} điểm)`, value: formatHand(dealerHand), inline: false };
-    let resultText = "", color = 0x2ecc71;
-
-    if (reason === 'bust') {
-      await updatePilotBalance(userId, -amount, amount, 0);
-      resultText = `💀 **QUẮC RỒI!** Sếp vượt quá 21 điểm.\nNhà cái húp trọn **${amount.toLocaleString()} Cash**!`; color = 0xe74c3c;
-    } else {
-      if (dealerScore > 21 || playerScore > dealerScore) {
-        await updatePilotBalance(userId, amount, 0, amount);
-        resultText = `🎉 **THẮNG RỒI!** Sếp đè bẹp nhà cái!\nĂn được **${amount.toLocaleString()} Cash**!`;
-      } else if (playerScore < dealerScore) {
-        await updatePilotBalance(userId, -amount, amount, 0);
-        resultText = `💀 **THUA TỨC TƯỞI!** Nhà cái điểm cao hơn.\nSếp mất **${amount.toLocaleString()} Cash**!`; color = 0xe74c3c;
-      } else {
-        resultText = `🤝 **HÒA NHAU!** Kẻ tám lạng người nửa cân.\nTiền cược được bảo toàn.`; color = 0xf1c40f;
-      }
-    }
-    embed.setColor(color).setDescription(resultText);
-    await interaction.editReply({ embeds: [embed] });
-  });
+  await interaction.editReply({ embeds: [embed] });
 }
 
-// ===================== LỆNH VIDEO POKER (ĐÃ TÍCH HỢP ALL/HALF) =====================
-async function handlePoker(interaction) {
-  const amountInput = interaction.options.getString('amount');
+// ===================== LỆNH BALANCE =====================
+async function handleBalance(interaction) {
   await interaction.deferReply(); 
   
-  const balance = await checkAndRegisterUser(interaction);
-  if (!balance) return;
+  const balanceData = await checkAndRegisterUser(interaction);
+  if (!balanceData) return;
 
-  const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Tiền cược không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư không đủ!`);
+  const safeNum = (val) => {
+      if (!val) return 0;
+      const cleanStr = String(val).replace(/\./g, '').replace(',', '.');
+      return Number(cleanStr) || 0;
+  };
 
-  const userId = interaction.user.id;
-  let isRigged = false;
-  if (amount >= 5000 && Math.random() < 0.80) isRigged = true;
-  else if (Math.random() < 0.50) isRigged = true;
+  const embed = new EmbedBuilder()
+      .setTitle(`💳 HỒ SƠ TÀI CHÍNH`)
+      .setDescription(`Kính chào cơ trưởng **${balanceData.displayName}**! Dưới đây là thông số tích lũy:`)
+      .setColor('#10b981') 
+      .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
+      .addFields(
+          { name: '👤 Tên App', value: `\`${balanceData.username}\``, inline: false },
+          { name: '💰 Số Dư Khả Dụng', value: `**${safeNum(balanceData.currentCash).toLocaleString()}** Cash`, inline: true },
+          { name: '📈 Tổng Tích Lũy', value: `${safeNum(balanceData.totalEarned).toLocaleString()} Cash`, inline: true },
+          { name: '💸 Đã Tiêu Xài', value: `${safeNum(balanceData.usedCash).toLocaleString()} Cash`, inline: true },
+          { name: '✈️ Số Chuyến Bay', value: `**${safeNum(balanceData.completedFlights)}** chuyến`, inline: true },
+          { name: '⏱️ Thời Gian Bay', value: `**${safeNum(balanceData.totalHours).toFixed(1)}** giờ`, inline: true }
+      );
 
-  let hand, result;
-  do {
-    let deck = createDeck();
-    hand = [deck.pop(), deck.pop(), deck.pop(), deck.pop(), deck.pop()];
-    result = evaluatePokerHand(hand);
-  } while (isRigged && result.mult > 0);
-
-  let held = [false, false, false, false, false];
-
-  const createRow = () => new ActionRowBuilder().addComponents(hand.map((c, i) => new ButtonBuilder().setCustomId(`pk_hold_${i}`).setLabel(held[i] ? 'GIỮ' : 'ĐỔI').setStyle(held[i] ? ButtonStyle.Success : ButtonStyle.Secondary)));
-  const createDrawRow = () => new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('pk_draw').setLabel('CHIA BÀI XONG! (DRAW)').setStyle(ButtonStyle.Primary));
-
-  let embed = new EmbedBuilder()
-    .setTitle('🎰 VIDEO POKER')
-    .setColor(0x3498db)
-    .setDescription(`**${balance.displayName}** đang cược: **${amount.toLocaleString()} Cash**\n👇 Bấm vào nút bên dưới để chọn GIỮ lá bài nào, sau đó bấm CHIA BÀI!`)
-    .addFields({ name: '🃏 Tay Bài Của Sếp', value: formatHand(hand), inline: false });
-
-  const msg = await interaction.editReply({ embeds: [embed], components: [createRow(), createDrawRow()] });
-
-  const filter = i => i.user.id === userId;
-  const collector = msg.createMessageComponentCollector({ filter, time: 60000 });
-
-  collector.on('collect', async i => {
-    await i.deferUpdate();
-    if (i.customId.startsWith('pk_hold_')) {
-      const idx = parseInt(i.customId.split('_')[2]);
-      held[idx] = !held[idx]; 
-      await interaction.editReply({ components: [createRow(), createDrawRow()] });
-    } else if (i.customId === 'pk_draw') {
-      collector.stop('draw');
-    }
-  });
-
-  collector.on('end', async (collected, reason) => {
-    if (reason === 'time') {
-      await updatePilotBalance(userId, -amount, amount, 0);
-      return interaction.editReply({ content: '⏳ Hết giờ suy nghĩ! Mất tiền cược.', components: [] });
-    }
-
-    let deck = createDeck(); // xào bộ mới đắp vô
-    for (let i = 0; i < 5; i++) { if (!held[i]) hand[i] = deck.pop(); }
-
-    result = evaluatePokerHand(hand);
-    if (amount >= 5000 && result.mult > 0 && Math.random() < 0.6) {
-      const unheldIndices = held.map((h, i) => h ? -1 : i).filter(i => i !== -1);
-      if (unheldIndices.length > 0) { hand[unheldIndices[0]] = deck.pop(); result = evaluatePokerHand(hand); }
-    }
-
-    let profit = amount * result.mult;
-    let finalStr = ``;
-
-    if (result.mult > 0) {
-      let actualProfit = profit - amount; 
-      if (actualProfit > 0) await updatePilotBalance(userId, actualProfit, 0, actualProfit);
-      finalStr = `🎉 **NỔ HŨ!** Mẫu bài: **${result.name}**\nSếp ăn được **${profit.toLocaleString()} Cash** (Hệ số x${result.mult})!`;
-    } else {
-      await updatePilotBalance(userId, -amount, amount, 0);
-      finalStr = `💀 **MẤT TRẮNG!** Bài **${result.name}**.\nNhà cái tịch thu **${amount.toLocaleString()} Cash** của sếp.`;
-    }
-
-    embed.setColor(result.mult > 0 ? 0x2ecc71 : 0xe74c3c).setDescription(finalStr).data.fields[0] = { name: '🃏 Kết Quả Cuối Cùng', value: formatHand(hand), inline: false };
-    await interaction.editReply({ embeds: [embed], components: [] });
-  });
+  await interaction.editReply({ embeds: [embed] });
 }
 
-// ===================== LỆNH GIVE CASH (ĐÃ TÍCH HỢP ALL/HALF) =====================
+// ===================== LỆNH GIVE CASH =====================
 async function handleGiveCash(interaction) {
   const targetUser = interaction.options.getUser('user');
   const amountInput = interaction.options.getString('amount');
@@ -9639,6 +9580,7 @@ async function handleGiveCash(interaction) {
   }
 
   await interaction.editReply(`💸 **CHUYỂN KHOẢN THÀNH CÔNG!**\nBạn đã chuyển **${amount.toLocaleString()} Cash** cho <@${targetUser.id}>.`);
+  await checkBankruptcy(interaction, balance.displayName, deduc.currentCash);
 
   try {
     const dmEmbed = new EmbedBuilder()
@@ -9652,57 +9594,356 @@ async function handleGiveCash(interaction) {
   } catch (err) {}
 }
 
-// ===================== LỆNH ADD CASH (ADMIN/DEV ONLY) =====================
-async function handleAddCash(interaction) {
-  const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
-  const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
-  if (!hasAdmin && !hasDev && interaction.user.id !== OWNER_ID) {
-    return interaction.reply({ content: '❌ Cục dự trữ liên bang cảnh cáo: Mạo danh Admin bơm tiền sẽ bị ăn ban!', ephemeral: true });
-  }
+// ===================== LỆNH TÀI XỈU =====================
+async function handleTaiSiu(interaction) {
+  const amountInput = interaction.options.getString('amount');
+  await interaction.deferReply(); 
+  
+  const balance = await checkAndRegisterUser(interaction);
+  if (!balance) return;
 
-  const target = interaction.options.getMentionable('target');
-  const amount = interaction.options.getInteger('amount');
+  const amount = parseBetAmount(amountInput, balance.currentCash);
+  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
+  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của bạn không đủ! Bạn chỉ có **${balance.currentCash.toLocaleString()} Cash**.`);
 
-  await interaction.deferReply({ ephemeral: true });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('ts_xiu').setLabel('XỈU (4-10)').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('ts_tai').setLabel('TÀI (11-17)').setStyle(ButtonStyle.Danger)
+  );
 
-  // TRƯỜNG HỢP 1: BƠM CHO MỘT NGƯỜI CỤ THỂ
-  if (target.user) {
-    const res = await updatePilotBalance(target.user.id, amount, 0, amount);
-    if (!res.success) return interaction.editReply(`❌ Lỗi: <@${target.user.id}> chưa từng tham gia hệ thống (Không có hồ sơ trong Database).`);
-    await interaction.editReply(`🏦 Ngân hàng Trung ương vừa rót **${amount.toLocaleString()} Cash** thẳng vào túi của <@${target.user.id}>.`);
-  } 
-  // TRƯỜNG HỢP 2: BƠM CHO CẢ MỘT ROLE (VÍ DỤ: @Member)
-  else if (target.members) { 
-    let count = 0;
-    let skipped = 0;
-    
-    for (const [memberId, member] of target.members) {
-      if (!member.user.bot) {
-        // updatePilotBalance sẽ tự thất bại nếu không tìm thấy ID trong Sheet
-        const res = await updatePilotBalance(memberId, amount, 0, amount);
-        if (res.success) {
-            count++;
-        } else {
-            skipped++; // Đếm số người không có Database
-        }
-        await new Promise(r => setTimeout(r, 300)); // Delay để chống lỗi Rate Limit của Google
+  const msg = await interaction.editReply({ 
+    content: `🎲 Cơ trưởng **${balance.displayName}** đặt cược **${amount.toLocaleString()} Cash**.\n👇 **VUI LÒNG BẤM NÚT ĐỂ CHỌN CỬA:**`, 
+    components: [row] 
+  });
+
+  const filter = i => i.user.id === interaction.user.id;
+  const collector = msg.createMessageComponentCollector({ filter, time: 30000, max: 1 }); 
+
+  collector.on('collect', async i => {
+    await i.deferUpdate();
+    const choice = i.customId === 'ts_tai' ? 'tai' : 'xiu';
+    const choiceText = choice === 'tai' ? 'TÀI' : 'XỈU';
+
+    await interaction.editReply({ content: `🎲 **${balance.displayName}** đã chốt cửa **${choiceText}**.\n*Nhà cái đang lắc xí ngầu...* 🥣`, components: [] });
+
+    setTimeout(async () => {
+      let baoChance = amount >= 5000 ? 0.15 : 0.05; 
+      let d1, d2, d3;
+      let isBao = Math.random() < baoChance;
+
+      if (isBao) {
+        const baoVal = Math.random() < 0.5 ? 1 : 6;
+        d1 = d2 = d3 = baoVal;
+      } else {
+        d1 = Math.floor(Math.random() * 6) + 1;
+        d2 = Math.floor(Math.random() * 6) + 1;
+        d3 = Math.floor(Math.random() * 6) + 1;
+        if (d1 === d2 && d2 === d3) { if (d3 === 6) d3 = 5; else d3 += 1; }
       }
-    }
-    await interaction.editReply(`🏦 Cơn mưa tài lộc! Đã bơm **${amount.toLocaleString()} Cash** cho **${count}** thành viên thuộc role <@&${target.id}>.\n*(Đã từ chối cấp phát cho **${skipped}** người do chưa có hồ sơ trong Database)*`);
-  } else {
-    await interaction.editReply('❌ Tag User hoặc Role không hợp lệ.');
-  }
+
+      const total = d1 + d2 + d3;
+      let resultType = '', resultText = '';
+
+      if (d1 === d2 && d2 === d3) { resultType = 'bao'; resultText = '🌪️ BÃO (NHÀ CÁI ĂN TẤT)'; } 
+      else if (total >= 4 && total <= 10) { resultType = 'xiu'; resultText = '⏬ XỈU'; } 
+      else { resultType = 'tai'; resultText = '⏫ TÀI'; }
+
+      if (resultType === choice) {
+        await updatePilotBalance(interaction.user.id, amount, 0, amount);
+        await interaction.editReply(`🎲 **TÀI XỈU** 🎲\n> 🎲 **${d1}** | 🎲 **${d2}** | 🎲 **${d3}** (Tổng: **${total}**)\n👉 Kết quả: **${resultText}**\n🎉 Hay quá sếp! Thắng đậm **${amount.toLocaleString()} Cash**!`);
+      } else {
+        const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
+        let loseMsg = `🎲 **TÀI XỈU** 🎲\n> 🎲 **${d1}** | 🎲 **${d2}** | 🎲 **${d3}** (Tổng: **${total}**)\n👉 Kết quả: **${resultText}**\n💀 Ối dồi ôi, bay mất **${amount.toLocaleString()} Cash** rồi!`;
+        if (resultType === 'bao') loseMsg = `🎲 **TÀI XỈU** 🎲\n> 🎲 **${d1}** | 🎲 **${d2}** | 🎲 **${d3}**\n🚨 **XỔ BÃO!!! NHÀ CÁI ĂN TẤT!!!** 🚨\n💀 Đen thôi đỏ quên đi, nhà cái húp mất **${amount.toLocaleString()} Cash** của sếp rồi!`;
+        await interaction.editReply(loseMsg);
+        
+        if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+      }
+    }, 2500);
+  });
+
+  collector.on('end', collected => {
+    if (collected.size === 0) interaction.editReply({ content: '⏳ Sếp lưỡng lự quá lâu, đã hủy phiên cược!', components: [] });
+  });
 }
 
+// ===================== LỆNH BẦU CUA =====================
+async function handleBauCua(interaction) {
+  const amountInput = interaction.options.getString('amount');
+  await interaction.deferReply(); 
+  
+  const balance = await checkAndRegisterUser(interaction);
+  if (!balance) return;
 
-// ===================== BỘ ĐỌC TIỀN ALL IN / HALF =====================
-function parseBetAmount(input, currentCash) {
-  if (!input) return 0;
-  const str = String(input).trim().toLowerCase();
-  if (str === 'all') return currentCash; // Tất tay
-  if (str === 'half') return Math.floor(currentCash / 2); // Nửa vốn
-  const val = parseInt(str); // Nếu nhập số thì chuyển thành số
-  return isNaN(val) ? 0 : val;
+  const amount = parseBetAmount(amountInput, balance.currentCash);
+  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
+
+  if (balance.currentCash < amount) {
+    return interaction.editReply(`❌ Số dư của bạn không đủ! Bạn chỉ có **${balance.currentCash.toLocaleString()} Cash**.`);
+  }
+
+  const msg = await interaction.editReply(`🏺 Cơ trưởng **${balance.displayName}** đặt cược **${amount.toLocaleString()} Cash**.\n👇 **HÃY THẢ CẢM XÚC (REACT) VÀO LINH VẬT SẾP MUỐN CHỌN BÊN DƯỚI:**`);
+  
+  const emojis = ['🎃', '🦀', '🦞', '🐟', '🐔', '🦌'];
+  const nameMap = { '🎃': 'Bầu', '🦀': 'Cua', '🦞': 'Tôm', '🐟': 'Cá', '🐔': 'Gà', '🦌': 'Nai' };
+
+  for (const e of emojis) await msg.react(e);
+
+  const filter = (reaction, user) => emojis.includes(reaction.emoji.name) && user.id === interaction.user.id;
+  
+  msg.awaitReactions({ filter, max: 1, time: 30000, errors: ['time'] })
+    .then(async collected => {
+      const reaction = collected.first();
+      const choiceEmoji = reaction.emoji.name;
+      const choiceName = nameMap[choiceEmoji];
+
+      await interaction.editReply({ content: `🏺 **${balance.displayName}** đã chốt cửa **${choiceName} ${choiceEmoji}**.\n*Nhà cái đang xóc đĩa...* 🤫` });
+      
+      try { await msg.reactions.removeAll(); } catch (e) {}
+
+      setTimeout(async () => {
+        let riggedMascots = Object.values(nameMap);
+        if (amount >= 5000) riggedMascots = riggedMascots.filter(m => m !== choiceName);
+
+        const r1 = riggedMascots[Math.floor(Math.random() * riggedMascots.length)];
+        const r2 = Object.values(nameMap)[Math.floor(Math.random() * 6)];
+        const r3 = Object.values(nameMap)[Math.floor(Math.random() * 6)];
+        const results = [r1, r2, r3];
+        
+        let matchCount = results.filter(r => r === choiceName).length;
+        let resultStr = `🏺 **BẦU CUA TÔM CÁ** 🏺\n> **${r1}** | **${r2}** | **${r3}**\n\n`;
+
+        if (matchCount > 0) {
+          const profit = amount * matchCount;
+          await updatePilotBalance(interaction.user.id, profit, 0, profit);
+          let winMouth = matchCount === 1 ? 'Húp trọn' : matchCount === 2 ? 'Nhân đôi' : 'Nổ hũ x3';
+          resultStr += `🎉 **THẮNG!** Ra ${matchCount} con **${choiceName}**! ${winMouth} **${profit.toLocaleString()} Cash**!`;
+        } else {
+          const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
+          resultStr += `💀 **THUA!** Không có con **${choiceName}** nào hết! Nhà cái lụm **${amount.toLocaleString()} Cash**!`;
+          await interaction.editReply(resultStr);
+          if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+          return;
+        }
+
+        await interaction.editReply(resultStr);
+      }, 2500);
+    })
+    .catch(() => {
+      interaction.editReply({ content: '⏳ Sếp không chọn linh vật nào, đã hủy phiên cược!' });
+      try { msg.reactions.removeAll(); } catch (e) {}
+    });
+}
+
+// ===================== LỆNH BLACKJACK =====================
+async function handleBlackjack(interaction) {
+  const amountInput = interaction.options.getString('amount');
+  await interaction.deferReply(); 
+  
+  const balance = await checkAndRegisterUser(interaction);
+  if (!balance) return;
+
+  const amount = parseBetAmount(amountInput, balance.currentCash);
+  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
+
+  if (balance.currentCash < amount) {
+    return interaction.editReply(`❌ Sếp cháy túi rồi! Số dư hiện tại: **${balance.currentCash.toLocaleString()} Cash**.`);
+  }
+
+  const userId = interaction.user.id;
+  let deck = createDeck();
+  let playerHand = [deck.pop(), deck.pop()];
+  let dealerHand = [deck.pop(), deck.pop()];
+
+  let playerScore = calculateHand(playerHand);
+  
+  const msg = await interaction.editReply({ 
+    content: `🃏 Cơ trưởng **${balance.displayName}** chơi Blackjack với **${amount.toLocaleString()} Cash**\n👇 **THẢ EMOJI:** 🃏 để Rút (Hit) | 🛑 để Dằn (Stand)`, 
+    embeds: [
+      new EmbedBuilder().setColor(0x2ecc71)
+        .addFields(
+          { name: `🙋 Sếp (${playerScore} điểm)`, value: formatHand(playerHand), inline: false },
+          { name: `🤖 Nhà cái (?)`, value: `**${dealerHand[0].display}**  [**?**❓]`, inline: false }
+        )
+    ]
+  });
+
+  await msg.react('🃏');
+  await msg.react('🛑');
+
+  const filter = (reaction, user) => ['🃏', '🛑'].includes(reaction.emoji.name) && user.id === userId;
+  const collector = msg.createReactionCollector({ filter, time: 60000 });
+
+  collector.on('collect', async (reaction) => {
+    try { await reaction.users.remove(userId); } catch(e) {}
+
+    if (reaction.emoji.name === '🃏') {
+      playerHand.push(deck.pop());
+      playerScore = calculateHand(playerHand);
+
+      if (playerScore > 21) {
+        collector.stop('bust');
+      } else {
+        const tempEmbed = new EmbedBuilder().setColor(0x2ecc71)
+          .addFields(
+            { name: `🙋 Sếp (${playerScore} điểm)`, value: formatHand(playerHand), inline: false },
+            { name: `🤖 Nhà cái (?)`, value: `**${dealerHand[0].display}**  [**?**❓]`, inline: false }
+          );
+        await interaction.editReply({ embeds: [tempEmbed] });
+      }
+    } else {
+      collector.stop('stand');
+    }
+  });
+
+  collector.on('end', async (collected, reason) => {
+    try { await msg.reactions.removeAll(); } catch (e) {}
+
+    if (reason === 'time') {
+      const updateRes = await updatePilotBalance(userId, -amount, amount, 0);
+      const timeEmbed = new EmbedBuilder().setColor(0xe74c3c).setDescription(`⏳ Sếp chần chừ quá lâu nên bị xử thua!\nMất trắng **${amount.toLocaleString()} Cash**.`);
+      await interaction.editReply({ content: null, embeds: [timeEmbed] });
+      if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+      return;
+    }
+
+    let dealerScore = calculateHand(dealerHand);
+
+    if (reason === 'stand') {
+      while (dealerScore < 17) {
+        if (amount >= 5000 && dealerScore >= 12) {
+            let peekCard = deck[deck.length - 1];
+            if (dealerScore + getCardValue(peekCard) > 21) deck.pop(); 
+        }
+        dealerHand.push(deck.pop());
+        dealerScore = calculateHand(dealerHand);
+      }
+    }
+
+    let resultText = "";
+    let color = 0x2ecc71;
+    let didLose = false;
+
+    if (reason === 'bust') {
+      didLose = true;
+      resultText = `💀 **QUẮC RỒI!** Sếp vượt quá 21 điểm.\nNhà cái húp trọn **${amount.toLocaleString()} Cash**!`;
+      color = 0xe74c3c;
+    } else {
+      if (dealerScore > 21 || playerScore > dealerScore) {
+        await updatePilotBalance(userId, amount, 0, amount);
+        resultText = `🎉 **THẮNG RỒI!** Sếp đè bẹp nhà cái!\nĂn được **${amount.toLocaleString()} Cash**!`;
+      } else if (playerScore < dealerScore) {
+        didLose = true;
+        resultText = `💀 **THUA TỨC TƯỞI!** Nhà cái điểm cao hơn.\nSếp mất **${amount.toLocaleString()} Cash**!`;
+        color = 0xe74c3c;
+      } else {
+        resultText = `🤝 **HÒA NHAU!** Kẻ tám lạng người nửa cân.\nTiền cược được bảo toàn.`;
+        color = 0xf1c40f;
+      }
+    }
+
+    const finalEmbed = new EmbedBuilder()
+      .setTitle('🃏 KẾT QUẢ BLACKJACK')
+      .setColor(color).setDescription(resultText)
+      .addFields(
+        { name: `🙋 Sếp (${playerScore} điểm)`, value: formatHand(playerHand), inline: false },
+        { name: `🤖 Nhà cái (${dealerScore} điểm)`, value: formatHand(dealerHand), inline: false }
+      );
+    
+    await interaction.editReply({ content: null, embeds: [finalEmbed] });
+
+    if (didLose) {
+      const updateRes = await updatePilotBalance(userId, -amount, amount, 0);
+      if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+    }
+  });
+}
+
+// ===================== LỆNH POKER =====================
+function evaluatePokerHand(hand) {
+    const values = hand.map(c => getCardValue(c)).sort((a,b)=>a-b);
+    const suits = hand.map(c => c.suit);
+    const isFlush = suits.every(s => s === suits[0]);
+    let isStraight = true;
+    for(let i=0; i<4; i++) { if(values[i]+1 !== values[i+1]) { isStraight = false; break; } }
+    
+    if (!isStraight && values.join(',') === "2,3,4,5,11") isStraight = true;
+
+    const counts = {};
+    values.forEach(v => counts[v] = (counts[v] || 0) + 1);
+    const countArr = Object.values(counts).sort((a,b)=>b-a);
+
+    if (isFlush && isStraight) return { name: "Thùng Phá Sảnh (x50)", mult: 50 };
+    if (countArr[0] === 4) return { name: "Tứ Quý (x25)", mult: 25 };
+    if (countArr[0] === 3 && countArr[1] === 2) return { name: "Cù Lũ (x9)", mult: 9 };
+    if (isFlush) return { name: "Thùng (x6)", mult: 6 };
+    if (isStraight) return { name: "Sảnh (x4)", mult: 4 };
+    if (countArr[0] === 3) return { name: "Xám Cô (x3)", mult: 3 };
+    if (countArr[0] === 2 && countArr[1] === 2) return { name: "Hai Đôi (x2)", mult: 2 };
+    if (countArr[0] === 2) return { name: "Một Đôi (Lấy lại tiền)", mult: 1 };
+    
+    return { name: "Rác (Mất tiền)", mult: 0 };
+}
+
+async function handlePoker(interaction) {
+  const amountInput = interaction.options.getString('amount');
+  await interaction.deferReply(); 
+  
+  const balance = await checkAndRegisterUser(interaction);
+  if (!balance) return;
+
+  const amount = parseBetAmount(amountInput, balance.currentCash);
+  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
+
+  if (balance.currentCash < amount) {
+    return interaction.editReply(`❌ Sếp cháy túi rồi! Số dư hiện tại: **${balance.currentCash.toLocaleString()} Cash**.`);
+  }
+
+  const userId = interaction.user.id;
+  let deck = createDeck();
+  
+  let hand = [deck.pop(), deck.pop(), deck.pop(), deck.pop(), deck.pop()];
+
+  if (amount >= 5000 && Math.random() < 0.8) {
+      let result = evaluatePokerHand(hand);
+      while(result.mult >= 9) {
+          deck = createDeck();
+          hand = [deck.pop(), deck.pop(), deck.pop(), deck.pop(), deck.pop()];
+          result = evaluatePokerHand(hand);
+      }
+  }
+
+  await interaction.editReply({ content: `🃏 **${balance.displayName}** đặt **${amount.toLocaleString()} Cash** vào bàn Poker...\n*Đang chia bài...* 🤫` });
+
+  setTimeout(async () => {
+    let result = evaluatePokerHand(hand);
+    let finalStr = "";
+    let didLose = false;
+    
+    if (result.mult > 0) {
+      let profit = amount * result.mult;
+      let actualProfit = profit - amount; 
+      if (actualProfit > 0) await updatePilotBalance(userId, actualProfit, 0, actualProfit);
+      
+      finalStr = `🎉 **XỔ BÀI!** Sếp bốc được **${result.name}**!\nĂn được **${profit.toLocaleString()} Cash**!`;
+    } else {
+      didLose = true;
+      finalStr = `💀 **THUA TRẮNG!** Sếp cầm toàn bài **${result.name}**.\nNhà cái lụm sạch **${amount.toLocaleString()} Cash**!`;
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle('🃏 KẾT QUẢ VIDEO POKER')
+      .setColor(result.mult > 0 ? 0x2ecc71 : 0xe74c3c)
+      .setDescription(finalStr)
+      .addFields({ name: '🃏 5 Lá Bài', value: formatHand(hand), inline: false });
+
+    await interaction.editReply({ content: null, embeds: [embed] });
+
+    if (didLose) {
+      const updateRes = await updatePilotBalance(userId, -amount, amount, 0);
+      if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
+    }
+  }, 2500);
 }
 
 // ===================== LOGIN =====================
