@@ -1,4 +1,5 @@
 require('node:dns').setDefaultResultOrder('ipv4first');
+const { t } = require('./i18n');
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -147,9 +148,6 @@ async function savePendingUsers() {
     console.error('❌ Lỗi đẩy dữ liệu Pending Users lên Google Sheets:', error);
   }
 }
-
-// Khai báo rỗng, lát bot chạy nó sẽ kéo từ MongoDB về
-let userLangs = {};
 
 // ===================== BIẾN THEO DÕI LẠM QUYỀN =====================
 const badAdminTracker = new Map(); // Bộ nhớ tạm theo dõi lượng tiền đã bơm
@@ -475,7 +473,7 @@ vatsimWorker.on('message', async (data) => {
 
             const embed = new EmbedBuilder()
               .setTitle('📡 ATC Online')
-              .setDescription(t(interaction, 'STR_7ECFF569', { v0: cs, v1: c.name || 'N/A', v2: c.frequency || 'N/A', v3: getRatingStr(c.rating), v4: logonUnix, v5: logonUnix }))
+              .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7ECFF569', { v0: cs, v1: c.name || 'N/A', v2: c.frequency || 'N/A', v3: getRatingStr(c.rating), v4: logonUnix, v5: logonUnix }))
               .setColor(0x00FF00)
               .setTimestamp();
 
@@ -492,7 +490,7 @@ vatsimWorker.on('message', async (data) => {
 
             const embed = new EmbedBuilder()
               .setTitle('🔌 ATC Offline')
-              .setDescription(t(interaction, 'STR_7507DCBD', { v0: cs, v1: c.name || 'N/A', v2: duration }))
+              .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7507DCBD', { v0: cs, v1: c.name || 'N/A', v2: duration }))
               .setColor(0xFF0000)
               .setTimestamp();
 
@@ -539,7 +537,7 @@ vatsimWorker.on('message', async (data) => {
 
     // Xây dựng mảng nội dung cho Pilot (Kết hợp ACDM dpark + Định vị tọa độ)
     const pilotLines = pilots.map(p => {
-      const name = p.name ? p.name : t(interaction, 'STR_117FC047', { v0: p.cid });
+      const name = p.name ? p.name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_117FC047', { v0: p.cid });
       const dep = p.flight_plan?.departure || 'N/A';
       const arr = p.flight_plan?.arrival || 'N/A';
       const acft = getShortAircraft(p.flight_plan?.aircraft);
@@ -579,7 +577,7 @@ vatsimWorker.on('message', async (data) => {
 
     // Xử lý chèn ATC vào Embed
     if (ctrlChunks.length === 0) {
-      currentEmbed.addFields({ name : t(interaction, 'STR_ED1D7132'), value: 'Không có ATC nào online', inline: false });
+      currentEmbed.addFields({ name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ED1D7132'), value: 'Không có ATC nào online', inline: false });
     } else {
       ctrlChunks.forEach((chunk, index) => {
         // Tràn dung lượng 1 Embed -> Tạo Embed mới
@@ -598,7 +596,7 @@ vatsimWorker.on('message', async (data) => {
         currentEmbed = new EmbedBuilder().setColor(0x2ecc71);
         embeds.push(currentEmbed);
       }
-      currentEmbed.addFields({ name : t(interaction, 'STR_58AE7B66'), value: 'Không có Pilot nào online', inline: false });
+      currentEmbed.addFields({ name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_58AE7B66'), value: 'Không có Pilot nào online', inline: false });
     } else {
       pilotChunks.forEach((chunk, index) => {
         // Tràn dung lượng 1 Embed -> Tạo Embed mới
@@ -945,7 +943,7 @@ async function updateControllerLeaderboardEmbed() {
     // Create embed
     const embed = new EmbedBuilder()
       .setTitle('Member Iron Mic Awards Leaderboard')
-      .setDescription(t(interaction, 'STR_D346E24D', { v0: utcHourMinute }))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D346E24D', { v0: utcHourMinute }))
       .setColor(0xFFD700)
       .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
       .setFooter({ text: 'Tự động cập nhật mỗi giờ | Giờ hiển thị: UTC' })
@@ -1011,7 +1009,7 @@ async function updateControllerLeaderboardEmbed() {
       }
 
       embed.addFields({
-        name : t(interaction, 'STR_427C805B', { v0: categoryName, v1: Object.keys(members).length }),
+        name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_427C805B', { v0: categoryName, v1: Object.keys(members).length }),
         value: categoryDescription + '\n' + (fieldValue || 'Không có dữ liệu'),
         inline: false
       });
@@ -1030,7 +1028,7 @@ async function updateControllerLeaderboardEmbed() {
 
     embed.addFields({
       name: '📊 Thống kê',
-      value : t(interaction, 'STR_04080BD8', { v0: totalMembers, v1: totalHours, v2: leaderboardData.month, v3: leaderboardData.year }),
+      value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_04080BD8', { v0: totalMembers, v1: totalHours, v2: leaderboardData.month, v3: leaderboardData.year }),
       inline: false
     });
 
@@ -1255,7 +1253,7 @@ async function updatePilotLeaderboardEmbed() {
     // Create embed
     const embed = new EmbedBuilder()
       .setTitle('✈️ VCLvACC Pilot Leaderboard')
-      .setDescription(t(interaction, 'STR_1B722899', { v0: utcHourMinute }))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1B722899', { v0: utcHourMinute }))
       .setColor(0x1E90FF)
       .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
       .setFooter({ text: 'Tự động cập nhật mỗi giờ | Giờ hiển thị: UTC' })
@@ -1312,7 +1310,7 @@ async function updatePilotLeaderboardEmbed() {
 
     embed.addFields({
       name: '📊 Thống kê',
-      value : t(interaction, 'STR_3EBD4B27', { v0: totalPilots, v1: totalHours, v2: totalFlights, v3: pilotLeaderboardData.month, v4: pilotLeaderboardData.year }),
+      value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3EBD4B27', { v0: totalPilots, v1: totalHours, v2: totalFlights, v3: pilotLeaderboardData.month, v4: pilotLeaderboardData.year }),
       inline: false
     });
 
@@ -1617,7 +1615,7 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
     // Build Embed với giao diện xịn xò + Ảnh Banner sếp đưa
     const embed = new EmbedBuilder()
       .setTitle('🌐 BẢNG XẾP HẠNG ATC VATSEA')
-      .setDescription(t(interaction, 'STR_C851CEF2', { v0: startStr, v1: endStr, v2: utcHourMinute }))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C851CEF2', { v0: startStr, v1: endStr, v2: utcHourMinute }))
       .setColor(0x004c8f) // Màu xanh đậm chuẩn VATSIM
       // Sếp dán link ảnh trực tiếp vào đây (Tui lấy tạm link ảnh sếp vừa gửi)
       .setImage('https://i.ibb.co/5yMXWyR/VATSEA-LOGO-1000x310-Photoroom.png')
@@ -1656,7 +1654,7 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
       if (category === 'Ground') catIcon = '🛬';
 
       embed.addFields({
-        name : t(interaction, 'STR_FA337741', { v0: catIcon, v1: category }),
+        name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FA337741', { v0: catIcon, v1: category }),
         value: hasData ? textBlock : 'Không có dữ liệu.\n',
         inline: false
       });
@@ -1699,14 +1697,14 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
 // ===================== MARKETPLACE HELPERS =====================
 function createMarketplaceEmbed(data, sellerId, images) {
   const embed = new EmbedBuilder()
-    .setTitle(t(interaction, 'STR_EC1B533B', { v0: data.name }))
+    .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EC1B533B', { v0: data.name }))
     .setColor(0x3498db)
     .addFields(
-      { name: '💰 Giá', value : t(interaction, 'STR_137BAD49', { v0: data.price }), inline: true },
+      { name: '💰 Giá', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: data.price }), inline: true },
       { name: '🔢 Thông tin', value: data.info, inline: true },
       { name: '📝 Mô tả', value: data.description, inline: false },
       { name: '📞 Liên hệ', value: data.contact, inline: false },
-      { name: '👤 Người bán', value : t(interaction, 'STR_8CDE7BE9', { v0: sellerId }), inline: true }
+      { name: '👤 Người bán', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: sellerId }), inline: true }
     );
 
   if (images && images.length > 0) {
@@ -2510,7 +2508,7 @@ function buildTranscript(messages, maxChars = SUMMARY_MAX_TRANSCRIPT_CHARS) {
         .map((a) => `${a.name || 'file'}: ${a.url}`)
         .join(' | ');
       content = content ? `${content}\n(Attachments: ${attText})` : `(Attachments: ${attText})`;
-      if (msg.attachments.size > 3) content += t(interaction, 'STR_4E17B2E2', { v0: msg.attachments.size - 3 });
+      if (msg.attachments.size > 3) content += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4E17B2E2', { v0: msg.attachments.size - 3 });
     }
 
     if (content.length > 800) content = content.slice(0, 800) + '…';
@@ -2533,7 +2531,7 @@ async function createDiscordEvent(guild, eventData) {
     const endTime = new Date(eventData.startTime + 3 * 60 * 60 * 1000);
 
     const scheduledEvent = await guild.scheduledEvents.create({
-      name : t(interaction, 'STR_BBD09545', { v0: eventData.dep, v1: eventData.arr }),
+      name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BBD09545', { v0: eventData.dep, v1: eventData.arr }),
       description: `**Route:** ${eventData.route}\n\nJoin our group flight event! All pilots are welcome.\n\nCreated by: <@${eventData.creator}>`,
       scheduledStartTime: startTime,
       scheduledEndTime: endTime,
@@ -2572,12 +2570,12 @@ function createEventEmbed(event, startTime) {
     .setColor(0x0099ff)
     .setThumbnail('https://cdn-icons-png.flaticon.com/512/1836/1836986.png')
     .addFields(
-      { name: '🛫 Departure', value : t(interaction, 'STR_137BAD49', { v0: event.dep }), inline: true },
-      { name: '🛬 Arrival', value : t(interaction, 'STR_137BAD49', { v0: event.arr }), inline: true },
-      { name: '🧭 Route', value : t(interaction, 'STR_ECDDADBE', { v0: event.route }), inline: false },
-      { name: '⏰ Start Time', value : t(interaction, 'STR_BFE5F9C1', { v0: formatDateTime(startTime), v1: formatRelativeTime(startTime) }), inline: false },
-      { name: '👤 Created By', value : t(interaction, 'STR_8CDE7BE9', { v0: event.creator }), inline: true },
-      { name: '👥 Participants', value : t(interaction, 'STR_9D382665', { v0: event.participants.length }), inline: true }
+      { name: '🛫 Departure', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: event.dep }), inline: true },
+      { name: '🛬 Arrival', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: event.arr }), inline: true },
+      { name: '🧭 Route', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ECDDADBE', { v0: event.route }), inline: false },
+      { name: '⏰ Start Time', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BFE5F9C1', { v0: formatDateTime(startTime), v1: formatRelativeTime(startTime) }), inline: false },
+      { name: '👤 Created By', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: event.creator }), inline: true },
+      { name: '👥 Participants', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9D382665', { v0: event.participants.length }), inline: true }
     )
     .setFooter({ text: 'Chúc mọi người có chuyến bay vui vẻ!', iconURL: 'https://cdn-icons-png.flaticon.com/512/929/929430.png' })
     .setTimestamp();
@@ -2586,7 +2584,7 @@ function createEventEmbed(event, startTime) {
   if (roles.eventParticipantRoleId) {
     embed.addFields({
       name: '🎫 Event Role',
-      value : t(interaction, 'STR_BC050C1C', { v0: roles.eventParticipantRoleId }),
+      value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BC050C1C', { v0: roles.eventParticipantRoleId }),
       inline: false
     });
   }
@@ -2603,7 +2601,7 @@ function createEventEmbed(event, startTime) {
   if (event.discordEventId) {
     embed.addFields({
       name: '📅 Discord Event',
-      value : t(interaction, 'STR_BDE685C7', { v0: GUILD_ID, v1: event.discordEventId }),
+      value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BDE685C7', { v0: GUILD_ID, v1: event.discordEventId }),
       inline: true,
     });
   }
@@ -3382,17 +3380,6 @@ client.once('ready', async () => {
       .setDescription('Tịch thu sạch tiền của một người dùng về 0')
       .addUserOption(opt => opt.setName('target').setDescription('Người muốn reset tiền').setRequired(true))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
-    new SlashCommandBuilder()
-      .setName('set_lang')
-      .setDescription('Change bot language / Đổi ngôn ngữ bot')
-      .addStringOption(opt => opt.setName('lang')
-        .setDescription('Select language / Chọn ngôn ngữ')
-        .setRequired(true)
-        .addChoices(
-          { name: 'English', value: 'en' },
-          { name: 'Tiếng Việt', value: 'vi' }
-        )
-      ),
     ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3561,7 +3548,7 @@ client.once('ready', async () => {
         // 1. Kick (Sau đúng 8 ngày - Hết 1 ngày gia hạn)
         if (daysElapsed >= 8) {
           try {
-            await member.send(t(interaction, 'STR_F195E1CE', { v0: SERVER_INVITE_LINK }));
+            await member.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F195E1CE', { v0: SERVER_INVITE_LINK }));
           } catch (e) { }
 
           await member.kick("Không xin role Member sau 8 ngày");
@@ -3574,7 +3561,7 @@ client.once('ready', async () => {
         // 2. Nhắc nhở tối hậu thư (Sau 7 ngày)
         if (daysElapsed >= 7 && !data.notified7Days) {
           try {
-            await member.send(t(interaction, 'STR_48FFD483'));
+            await member.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_48FFD483'));
           } catch (e) { }
           data.notified7Days = true;
           isModified = true;
@@ -3583,7 +3570,7 @@ client.once('ready', async () => {
         // 3. Nhắc nhở 5 ngày
         if (daysElapsed >= 5 && daysElapsed < 7 && !data.notified5Days) {
           try {
-            await member.send(t(interaction, 'STR_D5172757'));
+            await member.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D5172757'));
           } catch (e) { }
           data.notified5Days = true;
           isModified = true;
@@ -3668,7 +3655,7 @@ client.on('guildMemberAdd', async (member) => {
         savePendingUsers();
 
         try {
-          await member.send(t(interaction, 'STR_DFD57495'));
+          await member.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DFD57495'));
         } catch (dmErr) {
           console.log(`[Auto-Role] Không thể gửi DM cho ${member.user.tag}`);
         }
@@ -3730,7 +3717,7 @@ client.on('interactionCreate', async (interaction) => {
     // Bơm bài hát đã chọn vào hàng chờ
     queue.songs.push(selectedSong);
 
-    interaction.update({ content : t(interaction, 'STR_1A61A0B7', { v0: selectedSong.title }), components: [] });
+    interaction.update({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1A61A0B7', { v0: selectedSong.title }), components: [] });
 
     // Kích hoạt hát ngay nếu bot đang nghỉ
     if (queue.songs.length === 1 || !queue.playing) {
@@ -3754,7 +3741,7 @@ client.on('interactionCreate', async (interaction) => {
     // Bơm CÙNG LÚC TOÀN BỘ 100 BÀI HÁT vào hàng chờ
     queue.songs.push(...songs);
 
-    interaction.update({ content : t(interaction, 'STR_BB4AF479', { v0: songs.length }), components: [] });
+    interaction.update({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BB4AF479', { v0: songs.length }), components: [] });
 
     // Kích hoạt hát ngay nếu bot đang nghỉ
     if (queue.songs.length === songs.length || !queue.playing) {
@@ -3958,25 +3945,6 @@ client.on('interactionCreate', async (interaction) => {
         case 'clear_balance':
           await handleClearBalance(interaction);
           break;
-        case 'set_lang': {
-          const chosenLang = interaction.options.getString('lang');
-          
-          // Cập nhật bộ nhớ RAM
-          userLangs[interaction.user.id] = chosenLang;
-          
-          // Lưu thẳng lên MongoDB cho bất tử
-          await db.saveBotConfig('user_langs', userLangs);
-
-          // Gắn ngay ngôn ngữ mới
-          interaction.userLang = chosenLang;
-
-          if (chosenLang === 'vi') {
-            await interaction.reply({ content: '✅ Đã đổi ngôn ngữ giao diện bot sang **Tiếng Việt**!', ephemeral: true });
-          } else {
-            await interaction.reply({ content: '✅ Bot interface language has been changed to **English**!', ephemeral: true });
-          }
-          break;
-        }
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
           const anh2 = interaction.options.getAttachment('anh2');
@@ -3994,11 +3962,11 @@ client.on('interactionCreate', async (interaction) => {
 
           const sellModal = new ModalBuilder().setCustomId(`sell_modal_${saleId}`).setTitle('Thông tin sản phẩm đăng bán');
           sellModal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel(t(interaction, 'STR_DB91BB37')).setPlaceholder(t(interaction, 'STR_697C39D0')).setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel(t(interaction, 'STR_ADFCBD3F')).setPlaceholder(t(interaction, 'STR_DE88C35A')).setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel(t(interaction, 'STR_6430156F')).setPlaceholder(t(interaction, 'STR_48D3C539')).setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel(t(interaction, 'STR_168E3133')).setStyle(TextInputStyle.Paragraph).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel(t(interaction, 'STR_758C766E')).setPlaceholder(t(interaction, 'STR_4DBA7A3E')).setStyle(TextInputStyle.Paragraph).setRequired(true))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DB91BB37')).setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_697C39D0')).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ADFCBD3F')).setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DE88C35A')).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6430156F')).setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_48D3C539')).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_168E3133')).setStyle(TextInputStyle.Paragraph).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_758C766E')).setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4DBA7A3E')).setStyle(TextInputStyle.Paragraph).setRequired(true))
           );
           await interaction.showModal(sellModal);
           break;
@@ -4072,7 +4040,7 @@ client.on('interactionCreate', async (interaction) => {
 
         const textInput = new TextInputBuilder()
           .setCustomId('ai_text')
-          .setLabel(t(interaction, 'STR_8D57EC36'))
+          .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8D57EC36'))
           .setStyle(TextInputStyle.Paragraph)
           .setValue(data.aiMessage.substring(0, 4000))
           .setRequired(true);
@@ -4103,11 +4071,11 @@ client.on('interactionCreate', async (interaction) => {
           const saleId = parts[2];
           const editModal = new ModalBuilder().setCustomId(`market_edit_modal_${saleId}`).setTitle('Chỉnh sửa thông tin sản phẩm');
           editModal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel(t(interaction, 'STR_DB91BB37')).setDefaultValue(parsedData.name).setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel(t(interaction, 'STR_ADFCBD3F')).setDefaultValue(parsedData.info).setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel(t(interaction, 'STR_6430156F')).setDefaultValue(parsedData.price).setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel(t(interaction, 'STR_168E3133')).setDefaultValue(parsedData.description).setStyle(TextInputStyle.Paragraph).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel(t(interaction, 'STR_9276B119')).setDefaultValue(parsedData.contact).setStyle(TextInputStyle.Paragraph).setRequired(true))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DB91BB37')).setDefaultValue(parsedData.name).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ADFCBD3F')).setDefaultValue(parsedData.info).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6430156F')).setDefaultValue(parsedData.price).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_168E3133')).setDefaultValue(parsedData.description).setStyle(TextInputStyle.Paragraph).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9276B119')).setDefaultValue(parsedData.contact).setStyle(TextInputStyle.Paragraph).setRequired(true))
           );
           await interaction.showModal(editModal);
           return;
@@ -4117,7 +4085,7 @@ client.on('interactionCreate', async (interaction) => {
           const saleId = parts[2];
           const rejectModal = new ModalBuilder().setCustomId(`market_reject_modal_${saleId}`).setTitle('Lý do từ chối sản phẩm');
           rejectModal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel(t(interaction, 'STR_7AB1EC02')).setPlaceholder(t(interaction, 'STR_FF829A05')).setStyle(TextInputStyle.Paragraph).setRequired(true))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7AB1EC02')).setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FF829A05')).setStyle(TextInputStyle.Paragraph).setRequired(true))
           );
           await interaction.showModal(rejectModal);
           return;
@@ -4131,12 +4099,12 @@ client.on('interactionCreate', async (interaction) => {
             .setFooter({ text: `Ngày đăng: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}` });
 
           const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setLabel(t(interaction, 'STR_8473213A')).setStyle(ButtonStyle.Link).setURL(`https://discord.com/users/${parsedData.sellerId}`).setEmoji('💬'),
-            new ButtonBuilder().setCustomId(`market_soldout_${parsedData.sellerId}`).setLabel(t(interaction, 'STR_6B7B0658')).setStyle(ButtonStyle.Danger).setEmoji('✖️')
+            new ButtonBuilder().setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8473213A')).setStyle(ButtonStyle.Link).setURL(`https://discord.com/users/${parsedData.sellerId}`).setEmoji('💬'),
+            new ButtonBuilder().setCustomId(`market_soldout_${parsedData.sellerId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6B7B0658')).setStyle(ButtonStyle.Danger).setEmoji('✖️')
           );
 
           await marketChannel.send({ content: '📢 **CÓ SẢN PHẨM MỚI!**', embeds: [publicEmbed], components: [row] });
-          await interaction.message.edit({ content : t(interaction, 'STR_0477D27A', { v0: interaction.user.mention }), components: [], embeds: [] });
+          await interaction.message.edit({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0477D27A', { v0: interaction.user.mention }), components: [], embeds: [] });
           await interaction.reply({ content: '✅ Đã đăng bài thành công ra kênh Marketplace!', ephemeral: true });
           return;
         }
@@ -4151,11 +4119,11 @@ client.on('interactionCreate', async (interaction) => {
           }
 
           const soldEmbed = EmbedBuilder.from(oldEmbed)
-            .setTitle(t(interaction, 'STR_431DDDA9', { v0: oldEmbed.title }))
+            .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_431DDDA9', { v0: oldEmbed.title }))
             .setColor(0x95a5a6);
 
           const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('disabled_sold').setLabel(t(interaction, 'STR_074F9349')).setStyle(ButtonStyle.Secondary).setDisabled(true)
+            new ButtonBuilder().setCustomId('disabled_sold').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_074F9349')).setStyle(ButtonStyle.Secondary).setDisabled(true)
           );
 
           await interaction.message.edit({ embeds: [soldEmbed], components: [row] });
@@ -4184,14 +4152,14 @@ client.on('interactionCreate', async (interaction) => {
 
         const embed = createMarketplaceEmbed(data, interaction.user.id, images);
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`market_edit_${saleId}`).setLabel(t(interaction, 'STR_79486130')).setStyle(ButtonStyle.Secondary).setEmoji('📝'),
-          new ButtonBuilder().setCustomId(`market_approve_${saleId}`).setLabel(t(interaction, 'STR_2C0CC944')).setStyle(ButtonStyle.Success).setEmoji('✅'),
-          new ButtonBuilder().setCustomId(`market_reject_${saleId}`).setLabel(t(interaction, 'STR_86CF180D')).setStyle(ButtonStyle.Danger).setEmoji('❌')
+          new ButtonBuilder().setCustomId(`market_edit_${saleId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_79486130')).setStyle(ButtonStyle.Secondary).setEmoji('📝'),
+          new ButtonBuilder().setCustomId(`market_approve_${saleId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2C0CC944')).setStyle(ButtonStyle.Success).setEmoji('✅'),
+          new ButtonBuilder().setCustomId(`market_reject_${saleId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_86CF180D')).setStyle(ButtonStyle.Danger).setEmoji('❌')
         );
 
         const adminChannel = interaction.guild.channels.cache.get(ADMIN_CHANNEL_ID);
         if (adminChannel) {
-          await adminChannel.send({ content : t(interaction, 'STR_C8E22486', { v0: interaction.user.id }), embeds: [embed], components: [row] });
+          await adminChannel.send({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C8E22486', { v0: interaction.user.id }), embeds: [embed], components: [row] });
         }
         await interaction.reply({ content: '✅ Đã gửi đơn đăng bán cho Admin duyệt!', ephemeral: true });
         return;
@@ -4251,8 +4219,8 @@ client.on('interactionCreate', async (interaction) => {
         const embed = EmbedBuilder.from(interaction.message.embeds[0])
           .setDescription('✨ **Bạn đã tự chỉnh sửa lại bản AI.** Bạn chốt gửi đi chưa?')
           .setFields(
-            { name: '📝 Bản gốc của bạn', value : t(interaction, 'STR_68A1141F', { v0: previewRaw }) },
-            { name: '🤖 Bản do AI nâng cấp (ĐÃ SỬA)', value : t(interaction, 'STR_68A1141F', { v0: previewAi }) },
+            { name: '📝 Bản gốc của bạn', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: previewRaw }) },
+            { name: '🤖 Bản do AI nâng cấp (ĐÃ SỬA)', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: previewAi }) },
             { name: '⏰ Lịch trình', value: data.targetTime ? `<t:${Math.floor(data.targetTime / 1000)}:F>` : 'Gửi ngay lập tức' }
           )
           .setColor(0xf1c40f); // Đổi sang màu vàng cho biết là đã edit
@@ -4297,7 +4265,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         await interaction.update({
-          content : t(interaction, 'STR_8BBF9B01', { v0: parsedData.name, v1: parsedData.sellerId, v2: reason, v3: dmStatus }),
+          content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8BBF9B01', { v0: parsedData.name, v1: parsedData.sellerId, v2: reason, v3: dmStatus }),
           embeds: [],
           components: []
         });
@@ -4333,14 +4301,14 @@ client.on('messageCreate', async (message) => {
 
     if (Date.now() > verifySession.expires) {
       pendingVerifyDMs.delete(message.author.id);
-      return message.reply(t(interaction, 'STR_ED1B3410'));
+      return message.reply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ED1B3410'));
     }
 
     if (message.attachments.size === 0) {
-      return message.reply(t(interaction, 'STR_9EA82672'));
+      return message.reply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9EA82672'));
     }
 
-    const processingMsg = await message.reply(t(interaction, 'STR_DCE4DBAE'));
+    const processingMsg = await message.reply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DCE4DBAE'));
 
     try {
       const attachment = message.attachments.first();
@@ -4586,7 +4554,7 @@ client.on('messageCreate', async (message) => {
 
       const adminChannel = message.guild.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
       if (adminChannel) {
-        adminChannel.send(t(interaction, 'STR_7CE2E5E0', { v0: message.author, v1: message.author.id, v2: message.channel, v3: message.content }));
+        adminChannel.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7CE2E5E0', { v0: message.author, v1: message.author.id, v2: message.channel, v3: message.content }));
       }
       return;
     }
@@ -4609,7 +4577,7 @@ client.on('messageCreate', async (message) => {
   if (message.content === '!debug_pilot_leaderboard' && message.author.id === OWNER_ID) {
     const embed = new EmbedBuilder()
       .setTitle('Debug Pilot Leaderboard Data')
-      .setDescription(t(interaction, 'STR_BD04F904'))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD04F904'))
       .setColor(0xFF0000);
 
     const pilotEntries = Object.entries(pilotLeaderboardData.pilots || {});
@@ -4622,7 +4590,7 @@ client.on('messageCreate', async (message) => {
         const hours = (data.seconds / 3600).toFixed(2);
         fieldValue += `${data.name} (${id}) - ${data.seconds}s (${hours}h) - ${data.flights || 1} chuyến\n`;
       });
-      embed.addFields({ name : t(interaction, 'STR_F04399DE', { v0: pilotEntries.length }), value: fieldValue || 'Không có', inline: false });
+      embed.addFields({ name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F04399DE', { v0: pilotEntries.length }), value: fieldValue || 'Không có', inline: false });
     }
     await message.channel.send({ embeds: [embed] });
   }
@@ -4643,7 +4611,7 @@ async function handleTimeCommand(interaction) {
       { name: '💬 Discord Format', value: timeInfo.discord, inline: false },
       {
         name: '📋 Chi tiết',
-        value : t(interaction, 'STR_992D2BC1', { v0: timeInfo.detailed.dayOfWeek, v1: timeInfo.detailed.day, v2: timeInfo.detailed.monthName, v3: timeInfo.detailed.year, v4: timeInfo.detailed.hours
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_992D2BC1', { v0: timeInfo.detailed.dayOfWeek, v1: timeInfo.detailed.day, v2: timeInfo.detailed.monthName, v3: timeInfo.detailed.year, v4: timeInfo.detailed.hours
           .toString()
           .padStart(2, '0'), v5: timeInfo.detailed.minutes.toString().padStart(2, '0'), v6: timeInfo.detailed.seconds.toString().padStart(2, '0') }),
         inline: false,
@@ -4757,7 +4725,7 @@ async function sendATCAward(interaction = null) {
 
     const embed = new EmbedBuilder()
       .setTitle('🏆 **THÔNG BÁO CHÚC MỪNG TOP 5 ATC** 🏆')
-      .setDescription(t(interaction, 'STR_FF12B5C2', { v0: monthName, v1: currentYear }))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FF12B5C2', { v0: monthName, v1: currentYear }))
       .setColor(0xFFD700)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/2107/2107845.png')
       .setFooter({ text: 'VCLvACC - Member Iron Mic Awards', iconURL: 'https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960' })
@@ -4779,8 +4747,8 @@ async function sendATCAward(interaction = null) {
         const categories = atc.categories.join(', ');
 
         embed.addFields({
-          name : t(interaction, 'STR_DCEE5CC3', { v0: rank, v1: atc.name, v2: atc.cid }),
-          value : t(interaction, 'STR_4C7C8A73', { v0: timeFormatted, v1: categories, v2: atc.callsign || 'N/A' }),
+          name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DCEE5CC3', { v0: rank, v1: atc.name, v2: atc.cid }),
+          value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4C7C8A73', { v0: timeFormatted, v1: categories, v2: atc.callsign || 'N/A' }),
           inline: false
         });
       });
@@ -4789,7 +4757,7 @@ async function sendATCAward(interaction = null) {
       const winnerNames = top5.map(a => a.name).join(', ');
       embed.addFields({
         name: '🎊 Chúc mừng!',
-        value : t(interaction, 'STR_DACD4359', { v0: winnerNames }),
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DACD4359', { v0: winnerNames }),
         inline: false
       });
     }
@@ -4820,7 +4788,7 @@ async function sendATCAward(interaction = null) {
     // Nếu gọi từ interaction, reply
     if (interaction) {
       await interaction.reply({
-        content : t(interaction, 'STR_67AD761E', { v0: channelId }),
+        content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_67AD761E', { v0: channelId }),
         ephemeral: true
       });
     }
@@ -4857,7 +4825,7 @@ async function sendPilotAward(interaction = null) {
 
     const embed = new EmbedBuilder()
       .setTitle('✈️ **THÔNG BÁO CHÚC MỪNG TOP 5 PILOT** ✈️')
-      .setDescription(t(interaction, 'STR_CF980B83', { v0: monthName, v1: currentYear }))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CF980B83', { v0: monthName, v1: currentYear }))
       .setColor(0x1E90FF)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/824/824100.png')
       .setFooter({ text: 'VCLvACC - Member Iron Mic Awards', iconURL: 'https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960' })
@@ -4878,8 +4846,8 @@ async function sendPilotAward(interaction = null) {
         const timeFormatted = formatAwardTime(pilot.totalSeconds);
 
         embed.addFields({
-          name : t(interaction, 'STR_DCEE5CC3', { v0: rank, v1: pilot.name, v2: pilot.cid }),
-          value : t(interaction, 'STR_CF820668', { v0: timeFormatted, v1: pilot.flights, v2: pilot.callsign || 'N/A' }),
+          name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DCEE5CC3', { v0: rank, v1: pilot.name, v2: pilot.cid }),
+          value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CF820668', { v0: timeFormatted, v1: pilot.flights, v2: pilot.callsign || 'N/A' }),
           inline: false
         });
       });
@@ -4888,7 +4856,7 @@ async function sendPilotAward(interaction = null) {
       const winnerNames = top5.map(p => p.name).join(', ');
       embed.addFields({
         name: '🎊 Chúc mừng!',
-        value : t(interaction, 'STR_C275C90D', { v0: winnerNames }),
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C275C90D', { v0: winnerNames }),
         inline: false
       });
     }
@@ -4919,7 +4887,7 @@ async function sendPilotAward(interaction = null) {
     // Nếu gọi từ interaction, reply
     if (interaction) {
       await interaction.reply({
-        content : t(interaction, 'STR_DD07FC4B', { v0: channelId }),
+        content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DD07FC4B', { v0: channelId }),
         ephemeral: true
       });
     }
@@ -5045,7 +5013,7 @@ async function handleSummarize(interaction) {
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
     if (msgs.length === 0) {
-      return interaction.editReply(t(interaction, 'STR_76B64DD4', { v0: durationStr, v1: channel.id })
+      return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_76B64DD4', { v0: durationStr, v1: channel.id })
       );
     }
 
@@ -5117,7 +5085,7 @@ ${transcript}
     console.error('handleSummarize error:', err);
     try {
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply(t(interaction, 'STR_6D1095A6'));
+        await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6D1095A6'));
       } else {
         await interaction.reply({ content: '❌ Tóm tắt thất bại do lỗi nội bộ. Admin kiểm tra log giúp nhé.', ephemeral: true });
       }
@@ -5217,17 +5185,17 @@ async function handlePilotLeaderboardCommand(interaction) {
 
       // Create a txt file attachment
       const buffer = Buffer.from(txtContent, 'utf8');
-      const attachment = new AttachmentBuilder(buffer, { name : t(interaction, 'STR_3D889985', { v0: pilotLeaderboardData.month, v1: pilotLeaderboardData.year }) });
+      const attachment = new AttachmentBuilder(buffer, { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3D889985', { v0: pilotLeaderboardData.month, v1: pilotLeaderboardData.year }) });
 
       const embed = new EmbedBuilder()
         .setTitle('📊 Full Pilot Leaderboard')
-        .setDescription(t(interaction, 'STR_3F207FF2', { v0: pilotLeaderboardData.month, v1: pilotLeaderboardData.year }))
+        .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3F207FF2', { v0: pilotLeaderboardData.month, v1: pilotLeaderboardData.year }))
         .setColor(0x1E90FF)
         .setFooter({ text: 'Tải file .txt để xem chi tiết' })
         .setTimestamp();
 
       await interaction.editReply({
-        content : t(interaction, 'STR_186BC419'),
+        content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_186BC419'),
         embeds: [embed],
         files: [attachment]
       });
@@ -5261,13 +5229,13 @@ async function handleRequestRole(interaction) {
     const row = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('select_role')
-        .setPlaceholder(t(interaction, 'STR_F4935F43'))
+        .setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F4935F43'))
         .addOptions(filteredRoles.map((r) => ({ label: r.name, value: r.id })))
     );
     await interaction.reply({ content: 'Chọn role bạn muốn xin:', components: [row], ephemeral: true });
   } else {
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('request_member').setLabel(t(interaction, 'STR_628B65DA')).setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId('request_member').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_628B65DA')).setStyle(ButtonStyle.Primary)
     );
     await interaction.reply({ content: 'Bạn cần có role Member trước. Bấm để xin:', components: [row], ephemeral: true });
   }
@@ -5283,10 +5251,10 @@ async function handleSelect(interaction) {
     const modal = new ModalBuilder().setCustomId(`role_info_modal_${roleId}`).setTitle('Thông tin xin role');
     modal.addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('name').setLabel(t(interaction, 'STR_2AA8EFE4')).setStyle(TextInputStyle.Short).setRequired(true)
+        new TextInputBuilder().setCustomId('name').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2AA8EFE4')).setStyle(TextInputStyle.Short).setRequired(true)
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('intro').setLabel(t(interaction, 'STR_9AF91E7F')).setStyle(TextInputStyle.Paragraph).setRequired(true)
+        new TextInputBuilder().setCustomId('intro').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9AF91E7F')).setStyle(TextInputStyle.Paragraph).setRequired(true)
       )
     );
     await interaction.showModal(modal);
@@ -5300,14 +5268,14 @@ async function handleButton(interaction) {
     const modal = new ModalBuilder().setCustomId(`role_info_modal_${roles.basicMemberRoleId}`).setTitle('Thông tin xin role Member');
     modal.addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('name').setLabel(t(interaction, 'STR_2AA8EFE4')).setStyle(TextInputStyle.Short).setRequired(true)
+        new TextInputBuilder().setCustomId('name').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2AA8EFE4')).setStyle(TextInputStyle.Short).setRequired(true)
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('intro').setLabel(t(interaction, 'STR_9AF91E7F')).setStyle(TextInputStyle.Paragraph).setRequired(true)
+        new TextInputBuilder().setCustomId('intro').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9AF91E7F')).setStyle(TextInputStyle.Paragraph).setRequired(true)
       ),
       // THÊM: Trường nhập CID
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('cid').setLabel(t(interaction, 'STR_86798297')).setPlaceholder(t(interaction, 'STR_0892EABE')).setStyle(TextInputStyle.Short).setRequired(false)
+        new TextInputBuilder().setCustomId('cid').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_86798297')).setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0892EABE')).setStyle(TextInputStyle.Short).setRequired(false)
       )
     );
     await interaction.showModal(modal);
@@ -5339,7 +5307,7 @@ async function handleButton(interaction) {
       const newEmbed = EmbedBuilder.from(oldEmbed)
         .addFields({
           name: action === 'approve' ? '✅ Đã duyệt bởi' : '❌ Đã từ chối bởi',
-          value : t(interaction, 'STR_8CDE7BE9', { v0: interaction.user.id }),
+          value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: interaction.user.id }),
           inline: true
         })
         .setTimestamp();
@@ -5354,7 +5322,7 @@ async function handleButton(interaction) {
       await interaction.followUp({ content: '❌ Đã từ chối yêu cầu cấp role.', ephemeral: true });
       try {
         const user = await client.users.fetch(request.userId);
-        await user.send(t(interaction, 'STR_44221952'));
+        await user.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_44221952'));
       } catch (err) {
         console.error('Error notifying user (deny):', err);
       }
@@ -5419,7 +5387,7 @@ async function handleButton(interaction) {
                               }
                           }
                       } else {
-                          responseMsg += t(interaction, 'STR_EDEB3E30', { v0: cidNum });
+                          responseMsg += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EDEB3E30', { v0: cidNum });
                       }
                   } catch (e) {
                       console.error("Lỗi khi tự động check VATSIM CID:", e);
@@ -5430,7 +5398,7 @@ async function handleButton(interaction) {
           await interaction.followUp({ content: responseMsg, ephemeral: true });
 
           try {
-            await member.send(t(interaction, 'STR_F9814BD7', { v0: responseMsg }));
+            await member.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F9814BD7', { v0: responseMsg }));
           } catch (err) {
             console.error('Error sending DM to user (approve):', err);
           }
@@ -5456,19 +5424,19 @@ async function handleButton(interaction) {
     const embed = createEventEmbed(event, startTime);
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`group_join_${eventId}`).setLabel(t(interaction, 'STR_F52119B2')).setStyle(ButtonStyle.Primary).setEmoji('✈️'),
-      new ButtonBuilder().setCustomId(`group_canceljoin_${eventId}`).setLabel(t(interaction, 'STR_B1BF3D4D')).setStyle(ButtonStyle.Secondary).setEmoji('❌')
+      new ButtonBuilder().setCustomId(`group_join_${eventId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F52119B2')).setStyle(ButtonStyle.Primary).setEmoji('✈️'),
+      new ButtonBuilder().setCustomId(`group_canceljoin_${eventId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B1BF3D4D')).setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
     if (hasDev || hasAdmin || interaction.user.id === event.creator) {
-      row.addComponents(new ButtonBuilder().setCustomId(`group_cancelevent_${eventId}`).setLabel(t(interaction, 'STR_BB814A95')).setStyle(ButtonStyle.Danger).setEmoji('🚫'));
+      row.addComponents(new ButtonBuilder().setCustomId(`group_cancelevent_${eventId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BB814A95')).setStyle(ButtonStyle.Danger).setEmoji('🚫'));
     }
 
     const channel = client.channels.cache.get(GROUP_FLIGHT_CHANNEL_ID) || interaction.channel;
     const message = await channel.send({
-      content : t(interaction, 'STR_ECE107C4', { v0: roles.basicMemberRoleId }),
+      content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ECE107C4', { v0: roles.basicMemberRoleId }),
       embeds: [embed],
       components: [row],
       allowedMentions: { parse: [] },
@@ -5544,7 +5512,7 @@ async function handleButton(interaction) {
       pendingAnnouncements.delete(reqId);
 
       await interaction.editReply({ 
-        content : t(interaction, 'STR_165080B7', { v0: Math.floor(pendingData.targetTime/1000), v1: reqId }), 
+        content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_165080B7', { v0: Math.floor(pendingData.targetTime/1000), v1: reqId }), 
         embeds: [], 
         components: [] 
       });
@@ -5555,10 +5523,10 @@ async function handleButton(interaction) {
         
         pendingAnnouncements.delete(reqId);
 
-        await interaction.editReply({ content : t(interaction, 'STR_F267247D', { v0: sentMsg.id }), embeds: [], components: [] });
+        await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F267247D', { v0: sentMsg.id }), embeds: [], components: [] });
       } catch (err) {
         pendingData.isProcessing = false;
-        await interaction.followUp({ content : t(interaction, 'STR_DCBC35F9', { v0: err.message }), ephemeral: true });
+        await interaction.followUp({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DCBC35F9', { v0: err.message }), ephemeral: true });
       }
     }
     return;
@@ -5572,7 +5540,7 @@ async function handleButton(interaction) {
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('request_member')
-          .setLabel(t(interaction, 'STR_628B65DA'))
+          .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_628B65DA'))
           .setStyle(ButtonStyle.Primary)
       );
       return interaction.reply({ 
@@ -5623,30 +5591,30 @@ async function handleButton(interaction) {
 
         if (!stats) {
           notifyAdmin('🚨 Cảnh báo: Lỗi API Bypass', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Không tìm thấy dữ liệu trên VATSIM API.`, 0xff0000);
-          return interaction.editReply({ content : t(interaction, 'STR_C9D264D9', { v0: existingCid }) });
+          return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C9D264D9', { v0: existingCid }) });
         }
         if (stats.rating === 0) {
           notifyAdmin('🚨 Cảnh báo: Tài khoản bị khóa (Bypass)', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Tài khoản đang bị Suspended.`, 0xff0000);
-          return interaction.editReply({ content : t(interaction, 'STR_C9B3AD8B') });
+          return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C9B3AD8B') });
         }
 
         if (roleType === 'pilot') {
           if (stats.pilot_hours > 10) {
             await member.roles.add(PILOT_ROLE_ID).catch(() => { });
             notifyAdmin('✅ Xác thực VATSIM thành công (Bypass)', `**User:** <@${interaction.user.id}>\n**Role xin thêm:** VATSIM PILOT\n**CID:** ${existingCid}`, 0x2ecc71);
-            return interaction.editReply({ content : t(interaction, 'STR_918449F0', { v0: stats.pilot_hours.toFixed(1) }) });
+            return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_918449F0', { v0: stats.pilot_hours.toFixed(1) }) });
           } else {
             notifyAdmin('⚠️ Cảnh báo: Chưa đủ giờ bay (Bypass)', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Xin thêm role Pilot nhưng mới có ${stats.pilot_hours.toFixed(1)} giờ bay (Yêu cầu > 10).`, 0xffa500);
-            return interaction.editReply({ content : t(interaction, 'STR_0F419B00', { v0: stats.pilot_hours.toFixed(1) }) });
+            return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0F419B00', { v0: stats.pilot_hours.toFixed(1) }) });
           }
         } else if (roleType === 'atc') {
           if (stats.rating > 1) {
             await member.roles.add(ATC_ROLE_ID).catch(() => { });
             notifyAdmin('✅ Xác thực VATSIM thành công (Bypass)', `**User:** <@${interaction.user.id}>\n**Role xin thêm:** VATSIM ATC\n**CID:** ${existingCid}`, 0x2ecc71);
-            return interaction.editReply({ content : t(interaction, 'STR_82B28266') });
+            return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_82B28266') });
           } else {
             notifyAdmin('⚠️ Cảnh báo: Chưa đủ Rating ATC (Bypass)', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Xin thêm role ATC nhưng Rating đang là OBS (Yêu cầu >= S1).`, 0xffa500);
-            return interaction.editReply({ content : t(interaction, 'STR_A36CE332') });
+            return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A36CE332') });
           }
         }
         return; // Chặn ngang ở đây, không cho code chạy xuống dưới đòi gửi ảnh nữa
@@ -5666,7 +5634,7 @@ async function handleButton(interaction) {
       const expireTimer = setTimeout(async () => {
         if (pendingVerifyDMs.has(interaction.user.id)) {
           pendingVerifyDMs.delete(interaction.user.id); // Hết giờ thì đá ra khỏi bộ nhớ
-          await interaction.user.send(t(interaction, 'STR_5341F2A1')).catch(() => { });
+          await interaction.user.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5341F2A1')).catch(() => { });
         }
       }, 5 * 60 * 1000);
 
@@ -5679,7 +5647,7 @@ async function handleButton(interaction) {
       });
 
       // Nhắn tin riêng: CHỈ ĐÒI ẢNH!
-      await interaction.user.send(t(interaction, 'STR_D6CD1DB2', { v0: roleType.toUpperCase() }) +
+      await interaction.user.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D6CD1DB2', { v0: roleType.toUpperCase() }) +
         `Để hoàn tất, hãy gửi cho mình **1 tấm ảnh chụp màn hình** trang Profile VATSIM chính thức (my.vatsim.net).\n` +
         `⚠️ **LƯU Ý QUAN TRỌNG:**\n` +
         `- Ảnh phải thể hiện rõ giao diện trang web, có chữ VATSIM ID, Tên, Rating...\n` +
@@ -5776,16 +5744,16 @@ async function handleGroupFlight(interaction) {
   const modal = new ModalBuilder().setCustomId('group_modal').setTitle('Tạo Group Flight');
   modal.addComponents(
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('dep').setLabel(t(interaction, 'STR_FB1E74CA')).setStyle(TextInputStyle.Short).setRequired(true)
+      new TextInputBuilder().setCustomId('dep').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FB1E74CA')).setStyle(TextInputStyle.Short).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('arr').setLabel(t(interaction, 'STR_1DC53808')).setStyle(TextInputStyle.Short).setRequired(true)
+      new TextInputBuilder().setCustomId('arr').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1DC53808')).setStyle(TextInputStyle.Short).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('route').setLabel(t(interaction, 'STR_9405C3AF')).setStyle(TextInputStyle.Paragraph).setRequired(true)
+      new TextInputBuilder().setCustomId('route').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9405C3AF')).setStyle(TextInputStyle.Paragraph).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('time').setLabel(t(interaction, 'STR_07447312')).setStyle(TextInputStyle.Short).setRequired(true)
+      new TextInputBuilder().setCustomId('time').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_07447312')).setStyle(TextInputStyle.Short).setRequired(true)
     )
   );
   await interaction.showModal(modal);
@@ -5856,12 +5824,12 @@ async function handleModal(interaction) {
     const stats = await fetchVatsimStatsById(cid);
 
     if (!stats) {
-      return interaction.editReply({ content : t(interaction, 'STR_95E780C5', { v0: cid }) });
+      return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_95E780C5', { v0: cid }) });
     }
 
     // Tài khoản bị Suspended (VATSIM API trả về rating 0)
     if (stats.rating === 0) {
-      return interaction.editReply({ content : t(interaction, 'STR_5EC6D4A5', { v0: cid }) });
+      return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5EC6D4A5', { v0: cid }) });
     }
 
     // XÉT DUYỆT PILOT
@@ -5870,12 +5838,12 @@ async function handleModal(interaction) {
         try {
           const member = await interaction.guild.members.fetch(interaction.user.id);
           await member.roles.add(roles.vatsimPilotRoleId);
-          return interaction.editReply({ content : t(interaction, 'STR_DF2FA653', { v0: stats.pilot_hours.toFixed(1) }) });
+          return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DF2FA653', { v0: stats.pilot_hours.toFixed(1) }) });
         } catch (err) {
-          return interaction.editReply({ content : t(interaction, 'STR_4A9D80F0') });
+          return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4A9D80F0') });
         }
       } else {
-        return interaction.editReply({ content : t(interaction, 'STR_D775BBC5', { v0: stats.pilot_hours.toFixed(1) }) });
+        return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D775BBC5', { v0: stats.pilot_hours.toFixed(1) }) });
       }
     }
     // XÉT DUYỆT ATC
@@ -5888,12 +5856,12 @@ async function handleModal(interaction) {
           const vatsimRatingsSpoken = { 2: 'S1', 3: 'S2', 4: 'S3', 5: 'C1', 6: 'C2', 7: 'C3', 8: 'I1', 9: 'I2', 10: 'I3', 11: 'SUP', 12: 'ADM' };
           const ratingStr = vatsimRatingsSpoken[stats.rating] || `R${stats.rating}`;
 
-          return interaction.editReply({ content : t(interaction, 'STR_7E94150E', { v0: ratingStr }) });
+          return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7E94150E', { v0: ratingStr }) });
         } catch (err) {
-          return interaction.editReply({ content : t(interaction, 'STR_BB546E2F') });
+          return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BB546E2F') });
         }
       } else {
-        return interaction.editReply({ content : t(interaction, 'STR_BF28707A') });
+        return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BF28707A') });
       }
     }
     return;
@@ -5926,11 +5894,11 @@ async function handleModal(interaction) {
 
     const startTimeObj = new Date(startTime);
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`confirm_event_${eventId}`).setLabel(t(interaction, 'STR_9E100D9C')).setStyle(ButtonStyle.Success).setEmoji('🚀')
+      new ButtonBuilder().setCustomId(`confirm_event_${eventId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9E100D9C')).setStyle(ButtonStyle.Success).setEmoji('🚀')
     );
 
     await interaction.reply({
-      content : t(interaction, 'STR_A939345F', { v0: dep, v1: arr, v2: route, v3: formatDateTime(startTimeObj) }),
+      content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A939345F', { v0: dep, v1: arr, v2: route, v3: formatDateTime(startTimeObj) }),
       components: [row],
       ephemeral: true,
     });
@@ -5977,12 +5945,12 @@ async function handleModal(interaction) {
           const channel = await client.channels.fetch(ROLE_APPROVAL_CHANNEL_ID);
           const roleName = roleId === roles.basicMemberRoleId ? 'Member' : roles.otherRoles.find((r) => r.id === roleId)?.name || 'Unknown';
 
-          let embedDesc = t(interaction, 'STR_49580542', { v0: interaction.user.id, v1: interaction.user.tag, v2: roleName, v3: name, v4: intro, v5: timestamp });
+          let embedDesc = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_49580542', { v0: interaction.user.id, v1: interaction.user.tag, v2: roleName, v3: name, v4: intro, v5: timestamp });
           
           let alertMsg = '';
           // Nếu có nhập CID, bot sẽ kiểm tra trước và thêm ghi chú vào thông báo cho Admin
           if (cidValue) {
-             embedDesc += t(interaction, 'STR_97DDFD7E', { v0: cidValue });
+             embedDesc += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_97DDFD7E', { v0: cidValue });
              const cidNum = parseInt(cidValue);
              if (!isNaN(cidNum)) {
                  // CHECK SỔ ĐỎ XEM CÓ BỊ TRÙNG LẶP / MẠO DANH KHÔNG
@@ -5991,26 +5959,26 @@ async function handleModal(interaction) {
                  const isCidTaken = Object.values(currentVatsimLinks).some(val => getCid(val) === cidNum);
 
                  if (isCidTaken) {
-                     alertMsg = t(interaction, 'STR_85DC2A46', { v0: cidNum });
+                     alertMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_85DC2A46', { v0: cidNum });
                  } else {
                      // Nếu Sổ Đỏ sạch thì mới check API VATSIM
                      const stats = await fetchVatsimStatsById(cidNum);
                      if (stats) {
                          if (stats.rating === 0) {
-                             alertMsg = t(interaction, 'STR_4921B447', { v0: cidNum });
+                             alertMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4921B447', { v0: cidNum });
                          } else {
-                             if (stats.pilot_hours > 10) alertMsg += t(interaction, 'STR_4B2C245A');
-                             if (stats.rating > 1) alertMsg += t(interaction, 'STR_659D1C18');
-                             if (alertMsg) alertMsg += t(interaction, 'STR_A1D219BC');
+                             if (stats.pilot_hours > 10) alertMsg += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4B2C245A');
+                             if (stats.rating > 1) alertMsg += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_659D1C18');
+                             if (alertMsg) alertMsg += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A1D219BC');
                          }
                      } else {
-                         alertMsg = t(interaction, 'STR_12388AF5', { v0: cidNum });
+                         alertMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_12388AF5', { v0: cidNum });
                      }
                  }
              }
           }
 
-          if (alertMsg) embedDesc += t(interaction, 'STR_1E1AD719', { v0: alertMsg });
+          if (alertMsg) embedDesc += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1E1AD719', { v0: alertMsg });
 
           const embed = new EmbedBuilder()
             .setTitle('Role Request')
@@ -6020,8 +5988,8 @@ async function handleModal(interaction) {
           const mentionText = `<@&${roles.adminRoleId}> <@&${roles.devRoleId}> <@&${roles.verifiedMemberRoleId}>`;
 
           const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel(t(interaction, 'STR_6F735165')).setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId(`deny_${requestId}`).setLabel(t(interaction, 'STR_3682D166')).setStyle(ButtonStyle.Danger)
+            new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6F735165')).setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`deny_${requestId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3682D166')).setStyle(ButtonStyle.Danger)
           );
 
           const sentMessage = await channel.send({
@@ -6054,7 +6022,7 @@ async function remindParticipants(eventId) {
       .setFooter({ text: 'Sự kiện sắp bắt đầu!', iconURL: 'https://cdn-icons-png.flaticon.com/512/1828/1828884.png' });
 
     await message.edit({
-      content : t(interaction, 'STR_3BDDC1F1', { v0: roles.basicMemberRoleId }),
+      content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3BDDC1F1', { v0: roles.basicMemberRoleId }),
       embeds: [embed],
       allowedMentions: { parse: [] },
     });
@@ -6065,7 +6033,7 @@ async function remindParticipants(eventId) {
   for (const userId of event.participants) {
     try {
       const user = await client.users.fetch(userId);
-      await user.send(t(interaction, 'STR_BDCFB4D9', { v0: event.dep, v1: event.arr, v2: event.route })
+      await user.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BDCFB4D9', { v0: event.dep, v1: event.arr, v2: event.route })
       );
     } catch (err) {
       console.error(`Không gửi DM cho ${userId}: ${err}`);
@@ -6088,7 +6056,7 @@ async function startEvent(eventId) {
       .setFooter({ text: 'Sự kiện đang diễn ra', iconURL: 'https://cdn-icons-png.flaticon.com/512/929/929430.png' });
 
     await message.edit({
-      content : t(interaction, 'STR_3BE66820', { v0: roles.basicMemberRoleId }),
+      content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3BE66820', { v0: roles.basicMemberRoleId }),
       embeds: [embed],
       components: [],
       allowedMentions: { parse: [] },
@@ -6097,7 +6065,7 @@ async function startEvent(eventId) {
     for (const userId of event.participants) {
       try {
         const user = await client.users.fetch(userId);
-        await user.send(t(interaction, 'STR_97AADDBC', { v0: event.dep, v1: event.arr, v2: event.route })
+        await user.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_97AADDBC', { v0: event.dep, v1: event.arr, v2: event.route })
         );
       } catch (err) {
         console.error(`Không gửi DM cho ${userId}: ${err}`);
@@ -6128,7 +6096,7 @@ async function handleSubmitProfile(interaction) {
   // 1. Tạo ô nhập Tên
   const nameInput = new TextInputBuilder()
     .setCustomId('name')
-    .setLabel(t(interaction, 'STR_2AA8EFE4'))
+    .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2AA8EFE4'))
     .setStyle(TextInputStyle.Short)
     .setRequired(true);
   // Chỉ điền sẵn nếu có tên cũ
@@ -6137,7 +6105,7 @@ async function handleSubmitProfile(interaction) {
   // 2. Tạo ô nhập Tuổi
   const ageInput = new TextInputBuilder()
     .setCustomId('age')
-    .setLabel(t(interaction, 'STR_A39DEFDF'))
+    .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A39DEFDF'))
     .setStyle(TextInputStyle.Short)
     .setRequired(false);
   // Chỉ điền sẵn nếu có tuổi cũ
@@ -6146,7 +6114,7 @@ async function handleSubmitProfile(interaction) {
   // 3. Tạo ô nhập Bio
   const bioInput = new TextInputBuilder()
     .setCustomId('bio')
-    .setLabel(t(interaction, 'STR_713A01AB'))
+    .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_713A01AB'))
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(false);
   // Chỉ điền sẵn nếu có bio cũ
@@ -6269,21 +6237,21 @@ async function handleAnnouncement(interaction) {
     .setTitle('✨ Gợi ý từ Gemini')
     .setDescription('Mình đã viết lại nội dung của bạn cho chuyên nghiệp hơn. Bạn muốn dùng bản nào để gửi đi?\n\n⚠️ *Lưu ý: Bảng preview bên dưới có thể bị ẩn bớt nếu quá dài, nhưng khi bạn bấm nút gửi thì nội dung sẽ đăng lên ĐẦY ĐỦ 100%.*')
     .addFields(
-      { name: '📝 Bản gốc của bạn', value : t(interaction, 'STR_68A1141F', { v0: previewRaw }) },
-      { name: '🤖 Bản do AI nâng cấp', value : t(interaction, 'STR_68A1141F', { v0: previewAi }) },
+      { name: '📝 Bản gốc của bạn', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: previewRaw }) },
+      { name: '🤖 Bản do AI nâng cấp', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: previewAi }) },
       { name: '⏰ Lịch trình', value: targetTime ? `<t:${Math.floor(targetTime / 1000)}:F>` : 'Gửi ngay lập tức' }
     )
     .setColor(0x3498db);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`ann_okay_${reqId}`).setLabel(t(interaction, 'STR_40D94481')).setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`ann_okay_${reqId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_40D94481')).setStyle(ButtonStyle.Success),
     // THÊM NÚT SỬA VÀO ĐÂY:
-    new ButtonBuilder().setCustomId(`ann_editai_${reqId}`).setLabel(t(interaction, 'STR_B4FA29A9')).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`ann_orig_${reqId}`).setLabel(t(interaction, 'STR_392975FE')).setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`ann_reject_${reqId}`).setLabel(t(interaction, 'STR_8F0AED44')).setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId(`ann_editai_${reqId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B4FA29A9')).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`ann_orig_${reqId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_392975FE')).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`ann_reject_${reqId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8F0AED44')).setStyle(ButtonStyle.Danger)
   );
 
-  await interaction.editReply({ content : t(interaction, 'STR_43B93608', { v0: reqId }), embeds: [embed], components: [row] });
+  await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_43B93608', { v0: reqId }), embeds: [embed], components: [row] });
 }
 
 async function handleSetupAtcNoti(interaction) {
@@ -6568,9 +6536,9 @@ client.on('threadCreate', async (thread) => {
     const fetchedLogs = await thread.guild.fetchAuditLogs({ type: 110, limit: 5 });
     const log = fetchedLogs.entries.find(e => e.target.id === thread.id && Math.abs(e.createdTimestamp - Date.now()) < 5000);
     if (log?.executor) embed.addFields({ name: '🛠️ Created by', value: getUserIdentifier(log.executor), inline: false });
-    else if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value : t(interaction, 'STR_8CDE7BE9', { v0: thread.ownerId }), inline: false });
+    else if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: thread.ownerId }), inline: false });
   } catch (err) {
-    if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value : t(interaction, 'STR_8CDE7BE9', { v0: thread.ownerId }), inline: false });
+    if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: thread.ownerId }), inline: false });
   }
 
   await sendLog(embed);
@@ -6886,9 +6854,9 @@ async function handleMetar(interaction) {
 
     // 3. Xử lý hiển thị METAR
     if (metarText) {
-      replyContent += t(interaction, 'STR_8A0CB816', { v0: icao, v1: metarText });
+      replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8A0CB816', { v0: icao, v1: metarText });
     } else {
-      replyContent += t(interaction, 'STR_185E275D', { v0: icao });
+      replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_185E275D', { v0: icao });
     }
 
     // 4. Xử lý hiển thị D-ATIS
@@ -6962,22 +6930,22 @@ async function handleMetar(interaction) {
       // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr
       if (atisData.arrival && atisData.departure && atisData.arrival === atisData.departure) {
         const formatted = formatATISText(atisData.arrival);
-        replyContent += t(interaction, 'STR_DD31CDE2', { v0: icao, v1: formatted });
+        replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DD31CDE2', { v0: icao, v1: formatted });
       }
       // Trường hợp 2: Tách biệt rõ ràng
       else {
         if (atisData.arrival) {
           const formattedArr = formatATISText(atisData.arrival);
-          replyContent += t(interaction, 'STR_CF8E06B3', { v0: icao, v1: formattedArr });
+          replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CF8E06B3', { v0: icao, v1: formattedArr });
         }
 
         if (atisData.departure) {
           const formattedDep = formatATISText(atisData.departure);
-          replyContent += t(interaction, 'STR_0561B3B6', { v0: icao, v1: formattedDep });
+          replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0561B3B6', { v0: icao, v1: formattedDep });
         }
       }
     } else {
-      replyContent += t(interaction, 'STR_B763D956', { v0: icao });
+      replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B763D956', { v0: icao });
     }
 
     await interaction.editReply({ content: replyContent });
@@ -7005,21 +6973,21 @@ async function handleRunway(interaction) {
     }
 
     if (!metar) {
-      return await interaction.editReply({ content : t(interaction, 'STR_D9C0CB4D', { v0: icao }) });
+      return await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D9C0CB4D', { v0: icao }) });
     }
 
     // Tìm hướng gió và tốc độ gió trong METAR (VD: 25015G25KT, VRB02KT)
     const windMatch = metar.match(/(VRB|\d{3})(\d{2,3})(?:G\d{2,3})?KT/);
     if (!windMatch) {
-      return await interaction.editReply({ content : t(interaction, 'STR_D9D31F31', { v0: icao, v1: metar }) });
+      return await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D9D31F31', { v0: icao, v1: metar }) });
     }
 
     const windDirStr = windMatch[1];
     const windSpeed = parseInt(windMatch[2], 10);
 
     let embed = new EmbedBuilder()
-      .setTitle(t(interaction, 'STR_798F2F7B', { v0: icao }))
-      .setDescription(t(interaction, 'STR_75BAEF5B', { v0: metar }))
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_798F2F7B', { v0: icao }))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_75BAEF5B', { v0: metar }))
       .setColor(0x3498db)
       .setTimestamp();
 
@@ -7031,7 +6999,7 @@ async function handleRunway(interaction) {
     }
 
     const windDir = parseInt(windDirStr, 10);
-    embed.addFields({ name: '🌬️ Gió hiện tại', value : t(interaction, 'STR_9618842C', { v0: windDir, v1: windSpeed }), inline: false });
+    embed.addFields({ name: '🌬️ Gió hiện tại', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9618842C', { v0: windDir, v1: windSpeed }), inline: false });
 
     // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỪ OPENAIP (ĐÃ FIX CƠ CHẾ TÌM KIẾM)
     let runways = [];
@@ -7191,7 +7159,7 @@ async function handleRunway(interaction) {
     if (runways.length === 0) {
       embed.addFields({
         name: '⚠️ Lưu ý',
-        value : t(interaction, 'STR_C0D1B8C0', { v0: icao, v1: windDir })
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C0D1B8C0', { v0: icao, v1: windDir })
       });
     } else {
       let bestRunway = null;
@@ -7215,12 +7183,12 @@ async function handleRunway(interaction) {
 
       embed.addFields({
         name: '🎯 Đường băng thuận lợi nhất',
-        value : t(interaction, 'STR_63D760BB', { v0: bestRunway.id, v1: minDiff }),
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_63D760BB', { v0: bestRunway.id, v1: minDiff }),
         inline: false
       });
       embed.addFields({
         name: '✈️ Phân tích thành phần gió',
-        value : t(interaction, 'STR_0B521CDE', { v0: headwind, v1: crosswind }),
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0B521CDE', { v0: headwind, v1: crosswind }),
         inline: false
       });
       embed.setFooter({ text: `Dữ liệu đường băng: ${dataSource} • Lưu ý: Luôn tuân theo huấn lệnh của ATC.` });
@@ -7250,13 +7218,13 @@ async function handleTaf(interaction) {
     });
 
     if (!response.ok) {
-      return await interaction.editReply({ content : t(interaction, 'STR_68510BC4', { v0: response.status }) });
+      return await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68510BC4', { v0: response.status }) });
     }
 
     const data = await response.json();
 
     if (!data || data.results === 0 || !data.data || data.data.length === 0) {
-      return await interaction.editReply({ content : t(interaction, 'STR_1B22A187', { v0: icao }) });
+      return await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1B22A187', { v0: icao }) });
     }
 
     const tafData = data.data[0];
@@ -7266,8 +7234,8 @@ async function handleTaf(interaction) {
     const validTo = tafData.timestamp?.to ? `Đến ${tafData.timestamp.to}` : '';
 
     const embed = new EmbedBuilder()
-      .setTitle(t(interaction, 'STR_AF48574B', { v0: icao }))
-      .setDescription(t(interaction, 'STR_FC64E637', { v0: validFrom, v1: validTo, v2: tafData.raw_text }))
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AF48574B', { v0: icao }))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FC64E637', { v0: validFrom, v1: validTo, v2: tafData.raw_text }))
       .setColor(0x00A8FF) // Màu xanh dương chuyên nghiệp
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/1163/1163624.png')
       .setTimestamp()
@@ -7335,7 +7303,7 @@ async function handleTaf(interaction) {
         let niceIndicator = indicatorMap[indicatorCode] || `🔹 ${indicatorCode}`;
 
         embed.addFields({
-          name : t(interaction, 'STR_2F343072', { v0: niceIndicator, v1: timeStr }),
+          name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2F343072', { v0: niceIndicator, v1: timeStr }),
           value: details.length > 0 ? details.join('\n') : '> Thời tiết không có hiện tượng cản trở.',
           inline: false
         });
@@ -7344,7 +7312,7 @@ async function handleTaf(interaction) {
       if (tafData.forecast.length > MAX_FORECASTS) {
         embed.addFields({
           name: '...',
-          value : t(interaction, 'STR_F995A173', { v0: tafData.forecast.length - MAX_FORECASTS }),
+          value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F995A173', { v0: tafData.forecast.length - MAX_FORECASTS }),
           inline: false
         });
       }
@@ -7470,7 +7438,7 @@ async function handleStats(interaction) {
   const stats = await fetchVatsimStatsById(cid);
 
   if (!stats) {
-    return interaction.editReply(t(interaction, 'STR_B2203FFA', { v0: cid }));
+    return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B2203FFA', { v0: cid }));
   }
 
   // Chuyển đổi Rating ATC
@@ -7486,11 +7454,11 @@ async function handleStats(interaction) {
 
   // Xây dựng Giao Diện (Embed)
   const embed = new EmbedBuilder()
-    .setTitle(t(interaction, 'STR_5280B75C', { v0: stats.id }))
+    .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5280B75C', { v0: stats.id }))
     .setColor(0x2b2d31) // Màu nền tối giống trong ảnh
     .addFields(
       // Hàng 1
-      { name: '📡 PID', value : t(interaction, 'STR_10533D7D', { v0: stats.id }), inline: true },
+      { name: '📡 PID', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_10533D7D', { v0: stats.id }), inline: true },
       { name: '🗓️ REGISTER DATE', value: formatVatsimDate(stats.reg_date), inline: true },
       { name: '\u200b', value: '\u200b', inline: true }, // Cột tàng hình để ép xuống dòng
 
@@ -7523,7 +7491,7 @@ async function handleStats(interaction) {
     for (const [pos, hours] of Object.entries(stats.atc_breakdown)) {
       if (hours > 0) {
         breakdownFields.push({
-          name : t(interaction, 'STR_69AEDD5C', { v0: pos.toUpperCase() }),
+          name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_69AEDD5C', { v0: pos.toUpperCase() }),
           value: hours.toFixed(2),
           inline: true
         });
@@ -7601,7 +7569,7 @@ async function handleEvent(interaction) {
     });
 
     if (airportEvents.length === 0) {
-      return await interaction.editReply({ content : t(interaction, 'STR_467CCCE8', { v0: icao }) });
+      return await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_467CCCE8', { v0: icao }) });
     }
 
     const embeds = [];
@@ -7614,11 +7582,11 @@ async function handleEvent(interaction) {
       const endTime = new Date(ev.end_time);
 
       const embed = new EmbedBuilder()
-        .setTitle(t(interaction, 'STR_E5CEB46C', { v0: ev.name }))
+        .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E5CEB46C', { v0: ev.name }))
         .setColor(0x9b59b6)
         .addFields({
           name: '⏰ Thời gian',
-          value : t(interaction, 'STR_F9D5BAA1', { v0: Math.floor(startTime.getTime() / 1000), v1: Math.floor(endTime.getTime() / 1000) }),
+          value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F9D5BAA1', { v0: Math.floor(startTime.getTime() / 1000), v1: Math.floor(endTime.getTime() / 1000) }),
           inline: false
         });
 
@@ -7638,7 +7606,7 @@ async function handleEvent(interaction) {
       // Embed đầu tiên sẽ có dòng chữ mô tả tổng quát trên cùng
       if (index === 0) {
         embed.setAuthor({
-          name : t(interaction, 'STR_F3CEBAB5', { v0: icao }),
+          name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F3CEBAB5', { v0: icao }),
           iconURL: 'https://cdn-icons-png.flaticon.com/512/3652/3652191.png'
         });
       }
@@ -7732,14 +7700,14 @@ async function handleRoute(interaction) {
     // 3. NẾU CẢ WEB VÀ JSON ĐỀU KHÔNG CÓ
     if (!routesList || routesList.length === 0) {
       return await interaction.editReply({
-        content : t(interaction, 'STR_8C2A6052', { v0: dep, v1: arr })
+        content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8C2A6052', { v0: dep, v1: arr })
       });
     }
 
     // ================= BẮT ĐẦU CHỈNH SỬA GIAO DIỆN =================
     const embed = new EmbedBuilder()
       .setColor(0x3B3F45) // Đổi màu sắc cho giống viền nền của hình ảnh (tùy chọn)
-      .setAuthor({ name : t(interaction, 'STR_60DD2187', { v0: dep, v1: arr }) }) // Thay cho title để format đẹp như hình
+      .setAuthor({ name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_60DD2187', { v0: dep, v1: arr }) }) // Thay cho title để format đẹp như hình
       .addFields(
         { name: '🛫 Departure', value: dep, inline: true },
         { name: '🛬 Arrival', value: arr, inline: true }
@@ -7749,15 +7717,15 @@ async function handleRoute(interaction) {
     if (Array.isArray(routesList)) {
       routesList.forEach((rt, index) => {
         embed.addFields({
-          name : t(interaction, 'STR_231C991F', { v0: index + 1 }),
-          value : t(interaction, 'STR_68A1141F', { v0: rt }),
+          name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_231C991F', { v0: index + 1 }),
+          value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: rt }),
           inline: false
         });
       });
     } else {
       embed.addFields({
         name: '🗺️ Flight Route',
-        value : t(interaction, 'STR_68A1141F', { v0: routesList }),
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: routesList }),
         inline: false
       });
     }
@@ -7784,12 +7752,12 @@ async function handleRoute(interaction) {
     // Tạo hàng chứa các nút bấm
     const actionRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setLabel(t(interaction, 'STR_6D3F8F7C'))
+        .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6D3F8F7C'))
         .setStyle(ButtonStyle.Link)
         .setURL(simbriefUrl)
         .setEmoji('📝'),
       new ButtonBuilder()
-        .setLabel(t(interaction, 'STR_E0F1D436'))
+        .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E0F1D436'))
         .setStyle(ButtonStyle.Link)
         .setURL(vatsimUrl)
         .setEmoji('🌐')
@@ -7824,7 +7792,7 @@ async function handleEditAnnoun(interaction) {
 
     const textInput = new TextInputBuilder()
       .setCustomId('new_content')
-      .setLabel(t(interaction, 'STR_5C7C0DEB'))
+      .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5C7C0DEB'))
       .setStyle(TextInputStyle.Paragraph)
       .setValue(scheduledAnnouncements[scheduledIndex].content.substring(0, 4000))
       .setRequired(true);
@@ -7849,7 +7817,7 @@ async function handleEditAnnoun(interaction) {
 
     const textInput = new TextInputBuilder()
       .setCustomId('new_content')
-      .setLabel(t(interaction, 'STR_5C7C0DEB'))
+      .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5C7C0DEB'))
       .setStyle(TextInputStyle.Paragraph)
       .setValue(targetMsg.content.substring(0, 4000))
       .setRequired(true);
@@ -7878,9 +7846,9 @@ async function handleCancelAnnoun(interaction) {
 
   if (scheduledAnnouncements.length < initialLength) {
     await db.saveAnnouncements(scheduledAnnouncements);
-    return interaction.reply({ content : t(interaction, 'STR_922EDAFC', { v0: id }), ephemeral: true });
+    return interaction.reply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_922EDAFC', { v0: id }), ephemeral: true });
   } else {
-    return interaction.reply({ content : t(interaction, 'STR_6FC19979', { v0: id }), ephemeral: true });
+    return interaction.reply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6FC19979', { v0: id }), ephemeral: true });
   }
 }
 
@@ -7917,7 +7885,7 @@ async function handleVatseaRankCommand(interaction) {
     const embed = await updateVatseaLeaderboardEmbed(startTime, endTime);
     await interaction.editReply({ content: '✅ Đã cập nhật thành công bảng xếp hạng VATSEA!', embeds: [embed] });
   } catch (error) {
-    await interaction.editReply({ content : t(interaction, 'STR_54F7E5F7', { v0: error.message }) });
+    await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_54F7E5F7', { v0: error.message }) });
   }
 }
 
@@ -7938,17 +7906,17 @@ async function handleNotam(interaction) {
     });
 
     if (!response.ok) {
-      return await interaction.editReply({ content : t(interaction, 'STR_2F455706', { v0: response.status }) });
+      return await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2F455706', { v0: response.status }) });
     }
 
     const data = await response.json();
 
     if (!data || data.results === 0 || !data.data || data.data.length === 0) {
-      return await interaction.editReply({ content : t(interaction, 'STR_AB0F8F8D', { v0: icao }) });
+      return await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AB0F8F8D', { v0: icao }) });
     }
 
     const embed = new EmbedBuilder()
-      .setTitle(t(interaction, 'STR_3F38F411', { v0: icao }))
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3F38F411', { v0: icao }))
       .setColor(0xe74c3c)
       .setTimestamp()
       .setFooter({ text: 'Powered by CheckWX API' });
@@ -7963,8 +7931,8 @@ async function handleNotam(interaction) {
       const safeText = notamText.length > 1000 ? notamText.slice(0, 1000) + '...' : notamText;
 
       embed.addFields({
-        name : t(interaction, 'STR_3C87EFAC', { v0: i + 1 }),
-        value : t(interaction, 'STR_68A1141F', { v0: safeText }),
+        name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3C87EFAC', { v0: i + 1 }),
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: safeText }),
         inline: false
       });
     }
@@ -7972,7 +7940,7 @@ async function handleNotam(interaction) {
     if (data.data.length > MAX_NOTAMS) {
       embed.addFields({
         name: '...',
-        value : t(interaction, 'STR_0550F2E2', { v0: data.data.length - MAX_NOTAMS }),
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0550F2E2', { v0: data.data.length - MAX_NOTAMS }),
         inline: false
       });
     }
@@ -8027,7 +7995,7 @@ async function handleSimbrief(interaction) {
     // Giữ nguyên phần code còn lại của bạn...
     if (data.fetch?.status !== 'Success') {
       return await interaction.editReply({
-        content : t(interaction, 'STR_422F072A', { v0: username })
+        content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_422F072A', { v0: username })
       });
     }
 
@@ -8051,16 +8019,16 @@ async function handleSimbrief(interaction) {
     const ci = data.general?.costindex || 'AUTO';
 
     const embed = new EmbedBuilder()
-      .setTitle(t(interaction, 'STR_90A16B58', { v0: username }))
-      .setDescription(t(interaction, 'STR_CE5B5755', { v0: dep, v1: arr, v2: callsign || 'N/A' }))
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_90A16B58', { v0: username }))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CE5B5755', { v0: dep, v1: arr, v2: callsign || 'N/A' }))
       .setColor(0x3498db)
       .addFields(
-        { name: '🛩️ Aircraft', value : t(interaction, 'STR_137BAD49', { v0: acft }), inline: true },
-        { name: '🛫 Cruise Alt', value : t(interaction, 'STR_137BAD49', { v0: crzAlt }), inline: true },
-        { name: '📈 Cost Index', value : t(interaction, 'STR_137BAD49', { v0: ci }), inline: true },
-        { name: '⚖️ ZFW', value : t(interaction, 'STR_C71AD253', { v0: zfw }), inline: true },
-        { name: '⛽ Block Fuel', value : t(interaction, 'STR_C71AD253', { v0: blockFuel }), inline: true },
-        { name: '🧭 Route', value : t(interaction, 'STR_68A1141F', { v0: route }), inline: false }
+        { name: '🛩️ Aircraft', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: acft }), inline: true },
+        { name: '🛫 Cruise Alt', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: crzAlt }), inline: true },
+        { name: '📈 Cost Index', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: ci }), inline: true },
+        { name: '⚖️ ZFW', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C71AD253', { v0: zfw }), inline: true },
+        { name: '⛽ Block Fuel', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C71AD253', { v0: blockFuel }), inline: true },
+        { name: '🧭 Route', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: route }), inline: false }
       )
       .setFooter({ text: 'Dữ liệu trực tiếp từ SimBrief', iconURL: 'https://www.simbrief.com/logo/simbrief_logo_icon.png' })
       .setTimestamp();
@@ -8106,12 +8074,12 @@ async function handleOnlineAtc(interaction) {
 
     // Nếu không có ai online
     if (airportATCs.length === 0) {
-      return await interaction.editReply({ content : t(interaction, 'STR_45D190DD', { v0: icao }) });
+      return await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_45D190DD', { v0: icao }) });
     }
 
     // Xây dựng Embed hiển thị danh sách
     const embed = new EmbedBuilder()
-      .setTitle(t(interaction, 'STR_8A6328F7', { v0: icao }))
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8A6328F7', { v0: icao }))
       .setColor(0x2ecc71)
       .setThumbnail('https://cdn-icons-png.freepik.com/512/6938/6938996.png')
       .setTimestamp()
@@ -8133,8 +8101,8 @@ async function handleOnlineAtc(interaction) {
         : 'Đang thiết lập...';
 
       embed.addFields({
-        name : t(interaction, 'STR_805EE57A', { v0: c.callsign }),
-        value : t(interaction, 'STR_7FED98BC', { v0: c.name || 'Ẩn danh', v1: rating, v2: freq, v3: logonUnix }),
+        name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_805EE57A', { v0: c.callsign }),
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7FED98BC', { v0: c.name || 'Ẩn danh', v1: rating, v2: freq, v3: logonUnix }),
         inline: false
       });
     });
@@ -8214,7 +8182,7 @@ function createMusicDashboard(queue) {
     .setAuthor({ name: 'NOW PLAYING', iconURL: 'https://cdn-icons-png.flaticon.com/512/659/659056.png' })
     .setTitle(currentSong.title)
     .setURL(currentSong.url)
-    .setDescription(t(interaction, 'STR_B6FF535C', { v0: progressBar, v1: elapsedStr, v2: currentSong.durationRaw, v3: currentSong.requester, v4: volPercent, v5: loopText }))
+    .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B6FF535C', { v0: progressBar, v1: elapsedStr, v2: currentSong.durationRaw, v3: currentSong.requester, v4: volPercent, v5: loopText }))
     .setImage(currentSong.thumbnail)
     .setColor(0x2b2d31)
     .setFooter({ text: `Hàng chờ: ${queue.songs.length - 1} bài • Độc quyền Tk.Chill` });
@@ -8254,14 +8222,14 @@ async function playNextSong(guildId) {
     // ================= KHU VỰC LAZY LOAD (GIẢI MÃ ÂM THANH) =================
     if (!song.url && song.resolveQuery) {
       if (queue.dashboardMsg) await queue.dashboardMsg.edit({
-        embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription(t(interaction, 'STR_FB65CCF2', { v0: song.title.replace('🔎 Đang tìm: ', '') }))],
+        embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FB65CCF2', { v0: song.title.replace('🔎 Đang tìm: ', '') }))],
         components: []
       }).catch(() => { });
 
       // Ném tên bài hát qua kho SoundCloud để lấy link ẩn
       const searchResults = await play.search(song.resolveQuery, { limit: 1, source: { soundcloud: 'tracks' } });
       if (!searchResults || searchResults.length === 0) {
-        if (queue.textChannel) queue.textChannel.send(t(interaction, 'STR_E9F4A8C4', { v0: song.title.replace('🔎 Đang tìm: ', '') })).then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
+        if (queue.textChannel) queue.textChannel.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E9F4A8C4', { v0: song.title.replace('🔎 Đang tìm: ', '') })).then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
         queue.songs.shift();
         return playNextSong(guildId);
       }
@@ -8352,7 +8320,7 @@ async function handlePlayMusic(interaction) {
         } else { // Nếu là Bài đơn
           const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(query)}&format=json`;
           const oembedRes = await fetch(oembedUrl);
-          if (!oembedRes.ok) return interaction.editReply(t(interaction, 'STR_D60790C5'));
+          if (!oembedRes.ok) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D60790C5'));
           const oembedData = await oembedRes.json();
           songsToAdd.push({
             title: oembedData.title,
@@ -8390,7 +8358,7 @@ async function handlePlayMusic(interaction) {
           }
         } catch (spErr) {
           console.error('Lỗi lõi Spotify mới:', spErr);
-          return interaction.editReply(t(interaction, 'STR_91B16117'));
+          return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_91B16117'));
         }
       }
       // -------------------------------------------------------------
@@ -8463,7 +8431,7 @@ async function handlePlayMusic(interaction) {
           } else {
             // NẾU KHÔNG TÌM THẤY BÀI NÀO TRONG PLAYLIST
             if (query.includes('/playlist/') || query.includes('/album/')) {
-              return interaction.editReply(t(interaction, 'STR_5A300390'));
+              return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5A300390'));
             } else {
               // CỨU CÁNH CHO BÀI HÁT ĐƠN
               let title = $('meta[property="og:title"]').attr('content') || $('title').text();
@@ -8481,7 +8449,7 @@ async function handlePlayMusic(interaction) {
           }
         } catch (apErr) {
           console.error('Lỗi xử lý Apple Music:', apErr);
-          return interaction.editReply(t(interaction, 'STR_1BA3B686'));
+          return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1BA3B686'));
         }
       }
       // -------------------------------------------------------------
@@ -8516,7 +8484,7 @@ async function handlePlayMusic(interaction) {
           });
         }
       } else {
-        return interaction.editReply(t(interaction, 'STR_EF801B10'));
+        return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EF801B10'));
       }
     } else {
       // TÌM KIẾM BẰNG TEXT -> Đẩy qua Lazy Load cho nhanh
@@ -8530,7 +8498,7 @@ async function handlePlayMusic(interaction) {
       });
     }
 
-    if (songsToAdd.length === 0) return interaction.editReply(t(interaction, 'STR_6A289138'));
+    if (songsToAdd.length === 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6A289138'));
 
     let queue = musicQueues.get(interaction.guild.id);
 
@@ -8579,13 +8547,13 @@ async function handlePlayMusic(interaction) {
       // Chỉ hiển thị 25 bài đầu tiên lên Menu Dropdown (Giới hạn của Discord)
       const options = songsToAdd.slice(0, 25).map((song, index) => ({
         label: song.title.length > 50 ? song.title.substring(0, 47) + '...' : song.title,
-        value : t(interaction, 'STR_0E085810', { v0: searchId, v1: index })
+        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0E085810', { v0: searchId, v1: index })
       }));
 
       const menu = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId('select_song')
-          .setPlaceholder(t(interaction, 'STR_57767B96'))
+          .setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_57767B96'))
           .addOptions(options)
       );
 
@@ -8597,14 +8565,14 @@ async function handlePlayMusic(interaction) {
       );
 
       await interaction.editReply({
-        content : t(interaction, 'STR_F7582EEE', { v0: songsToAdd.length }),
+        content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F7582EEE', { v0: songsToAdd.length }),
         components: [menu, btnAll]
       });
     }
     // TRƯỜNG HỢP TÌM THẤY CHỈ ĐÚNG 1 BÀI
     else {
       queue.songs.push(songsToAdd[0]);
-      await interaction.editReply(t(interaction, 'STR_6A527FB4', { v0: songsToAdd[0].title.replace('🔎 Đang tìm: ', '') }));
+      await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6A527FB4', { v0: songsToAdd[0].title.replace('🔎 Đang tìm: ', '') }));
       setTimeout(() => interaction.deleteReply().catch(() => { }), 5000);
 
       // Nếu bot đang ngủ (chưa hát bài nào), thì gọi dậy hát luôn
@@ -8617,7 +8585,7 @@ async function handlePlayMusic(interaction) {
 
   } catch (error) {
     console.error('Lỗi khi tải nhạc:', error);
-    await interaction.editReply(t(interaction, 'STR_D118EE7F'));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D118EE7F'));
   }
 } // <--- Đóng hàm handlePlayMusic tại đây
 
@@ -8645,13 +8613,13 @@ async function handleQueue(interaction) {
     .setAuthor({ name: '📜 DANH SÁCH HÀNG CHỜ', iconURL: 'https://cdn-icons-png.flaticon.com/512/3281/3281289.png' })
     .setColor(0x2b2d31)
     .setThumbnail(currentSong.thumbnail)
-    .setDescription(t(interaction, 'STR_42C4070B', { v0: currentSong.title, v1: currentSong.url, v2: currentSong.requester }));
+    .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_42C4070B', { v0: currentSong.title, v1: currentSong.url, v2: currentSong.requester }));
 
   // Duyệt qua 10 bài tiếp theo và in ra
   upcomingSongs.forEach((song, index) => {
     embed.addFields({
-      name : t(interaction, 'STR_47454EDF', { v0: index + 1, v1: song.title }),
-      value : t(interaction, 'STR_99DAEC98', { v0: song.durationRaw, v1: song.requester }),
+      name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_47454EDF', { v0: index + 1, v1: song.title }),
+      value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_99DAEC98', { v0: song.durationRaw, v1: song.requester }),
       inline: false
     });
   });
@@ -8683,7 +8651,7 @@ async function handleClearQueue(interaction) {
   // Giữ lại bài ở vị trí số 0 (đang phát), chém bay màu toàn bộ bài từ vị trí số 1 trở đi
   queue.songs.splice(1);
 
-  await interaction.reply({ content : t(interaction, 'STR_82DF590F', { v0: removeCount }) });
+  await interaction.reply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_82DF590F', { v0: removeCount }) });
 
   // Cập nhật lại cái bảng điều khiển Dashboard ngay lập tức cho con số nó nhảy về 0
   if (queue.dashboardMsg) {
@@ -8706,8 +8674,8 @@ async function handleSetupVatsimVerify(interaction) {
     .setColor(0x3498db);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('btn_verify_pilot').setLabel(t(interaction, 'STR_EA013000')).setStyle(ButtonStyle.Primary).setEmoji('✈️'),
-    new ButtonBuilder().setCustomId('btn_verify_atc').setLabel(t(interaction, 'STR_DEFA5A50')).setStyle(ButtonStyle.Success).setEmoji('📡')
+    new ButtonBuilder().setCustomId('btn_verify_pilot').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EA013000')).setStyle(ButtonStyle.Primary).setEmoji('✈️'),
+    new ButtonBuilder().setCustomId('btn_verify_atc').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DEFA5A50')).setStyle(ButtonStyle.Success).setEmoji('📡')
   );
 
   await interaction.channel.send({ embeds: [embed], components: [row] });
@@ -8953,7 +8921,7 @@ async function handleAtcProfile(interaction) {
     const fetch = (await import('node-fetch')).default;
     // Gọi API v3 của VATSIM
     const response = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
-    if (!response.ok) return interaction.editReply(t(interaction, 'STR_5F7FD9E5'));
+    if (!response.ok) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5F7FD9E5'));
 
     const data = await response.json();
 
@@ -8961,7 +8929,7 @@ async function handleAtcProfile(interaction) {
     const atc = data.controllers.find(c => c.callsign === station);
 
     if (!atc) {
-      return interaction.editReply(t(interaction, 'STR_01ABE817', { v0: station }));
+      return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_01ABE817', { v0: station }));
     }
 
     // Format Rating
@@ -8998,14 +8966,14 @@ async function handleAtcProfile(interaction) {
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: 'VATSIM Controller Profile', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
-      .setTitle(t(interaction, 'STR_6F57484F', { v0: atc.callsign }))
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6F57484F', { v0: atc.callsign }))
       .setColor(0x00A8FF)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/10623/10623991.png')
       .addFields(
-        { name: '👤 Controller', value : t(interaction, 'STR_137BAD49', { v0: atc.name || atc.cid }), inline: true },
-        { name: '🎖️ Rating', value : t(interaction, 'STR_271F3F4C', { v0: ratingStr }), inline: true },
-        { name: '📶 Frequency', value : t(interaction, 'STR_271F3F4C', { v0: freq }), inline: true },
-        { name: '⏱️ Time on duty', value : t(interaction, 'STR_E8816EEB', { v0: timeOnline, v1: logonUnix }), inline: false },
+        { name: '👤 Controller', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: atc.name || atc.cid }), inline: true },
+        { name: '🎖️ Rating', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_271F3F4C', { v0: ratingStr }), inline: true },
+        { name: '📶 Frequency', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_271F3F4C', { v0: freq }), inline: true },
+        { name: '⏱️ Time on duty', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E8816EEB', { v0: timeOnline, v1: logonUnix }), inline: false },
         { name: '📝 Remarks', value: textRemarks, inline: false }
       )
       .setFooter({ text: `VATSIM CID: ${atc.cid}` })
@@ -9015,7 +8983,7 @@ async function handleAtcProfile(interaction) {
 
   } catch (err) {
     console.error('Lỗi lệnh atc_profile:', err);
-    await interaction.editReply(t(interaction, 'STR_42EC7EF2'));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_42EC7EF2'));
   }
 }
 
@@ -9027,7 +8995,7 @@ async function handleAtisVatsim(interaction) {
   try {
     const fetch = (await import('node-fetch')).default;
     const response = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
-    if (!response.ok) return interaction.editReply(t(interaction, 'STR_5F7FD9E5'));
+    if (!response.ok) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5F7FD9E5'));
 
     const data = await response.json();
 
@@ -9035,7 +9003,7 @@ async function handleAtisVatsim(interaction) {
     const atisList = data.atis.filter(a => a.callsign.startsWith(icao) && a.callsign.includes('ATIS'));
 
     if (!atisList || atisList.length === 0) {
-      return interaction.editReply(t(interaction, 'STR_5EC55598', { v0: icao }));
+      return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5EC55598', { v0: icao }));
     }
 
     const embeds = [];
@@ -9055,13 +9023,13 @@ async function handleAtisVatsim(interaction) {
 
       const embed = new EmbedBuilder()
         .setAuthor({ name: 'VATSIM ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
-        .setTitle(t(interaction, 'STR_A5C7D5EA', { v0: atis.callsign, v1: atis.frequency }))
+        .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A5C7D5EA', { v0: atis.callsign, v1: atis.frequency }))
         .setColor(0x2ecc71)
         .setThumbnail('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSZTpaHOLCaND817gJ28iYTv1WRWnf4wUQoocDs6VYj_guu8gDc2VFKqCxp&s=10')
         .addFields(
           { name: '🏷️ Identifier', value: atisCode, inline: true },
-          { name: '⏱️ Upadate at', value : t(interaction, 'STR_4B10E5E6', { v0: logonUnix }), inline: true },
-          { name: '📝 Atis', value : t(interaction, 'STR_8BED3981', { v0: textInfo }), inline: false }
+          { name: '⏱️ Upadate at', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4B10E5E6', { v0: logonUnix }), inline: true },
+          { name: '📝 Atis', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8BED3981', { v0: textInfo }), inline: false }
         )
         .setFooter({ text: 'Dữ liệu lấy trực tiếp từ mạng bay VATSIM' })
         .setTimestamp();
@@ -9073,7 +9041,7 @@ async function handleAtisVatsim(interaction) {
 
   } catch (err) {
     console.error('Lỗi lệnh atis_vatsim:', err);
-    await interaction.editReply(t(interaction, 'STR_6ACAD996'));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6ACAD996'));
   }
 }
 
@@ -9086,7 +9054,7 @@ async function handleIvaoAtc(interaction) {
     const fetch = (await import('node-fetch')).default;
     // Gọi API dữ liệu trực tiếp của IVAO
     const response = await fetch('https://api.ivao.aero/v2/tracker/whazzup');
-    if (!response.ok) return interaction.editReply(t(interaction, 'STR_1E1C4CC4'));
+    if (!response.ok) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1E1C4CC4'));
 
     const data = await response.json();
 
@@ -9095,7 +9063,7 @@ async function handleIvaoAtc(interaction) {
     const atc = atcs.find(c => c.callsign === station);
 
     if (!atc) {
-      return interaction.editReply(t(interaction, 'STR_1B7436F4', { v0: station }));
+      return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1B7436F4', { v0: station }));
     }
 
     // Format Rating của IVAO
@@ -9134,14 +9102,14 @@ async function handleIvaoAtc(interaction) {
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: 'IVAO Controller Profile', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
-      .setTitle(t(interaction, 'STR_53DDFC0F', { v0: atc.callsign }))
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_53DDFC0F', { v0: atc.callsign }))
       .setColor(0x0A2B5E)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/10623/10623991.png')
       .addFields(
-        { name: '👤 Controller', value : t(interaction, 'STR_9DA523DA', { v0: atc.userId || 'Ẩn danh' }), inline: true },
-        { name: '🎖️ Rating', value : t(interaction, 'STR_271F3F4C', { v0: ratingStr }), inline: true },
-        { name: '📶 Frequency', value : t(interaction, 'STR_271F3F4C', { v0: freq }), inline: true },
-        { name: '⏱️ Time on duty', value : t(interaction, 'STR_82881C12', { v0: timeOnline, v1: logonUnix }), inline: false },
+        { name: '👤 Controller', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9DA523DA', { v0: atc.userId || 'Ẩn danh' }), inline: true },
+        { name: '🎖️ Rating', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_271F3F4C', { v0: ratingStr }), inline: true },
+        { name: '📶 Frequency', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_271F3F4C', { v0: freq }), inline: true },
+        { name: '⏱️ Time on duty', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_82881C12', { v0: timeOnline, v1: logonUnix }), inline: false },
         { name: '📝 Remarks', value: textRemarks, inline: false }
       )
       .setFooter({ text: `IVAO VID: ${atc.userId || 'N/A'}` })
@@ -9151,7 +9119,7 @@ async function handleIvaoAtc(interaction) {
 
   } catch (err) {
     console.error('Lỗi lệnh ivao_atc:', err);
-    await interaction.editReply(t(interaction, 'STR_18CC14F1'));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_18CC14F1'));
   }
 }
 
@@ -9163,7 +9131,7 @@ async function handleIvaoAtis(interaction) {
   try {
     const fetch = (await import('node-fetch')).default;
     const response = await fetch('https://api.ivao.aero/v2/tracker/whazzup');
-    if (!response.ok) return interaction.editReply(t(interaction, 'STR_1E1C4CC4'));
+    if (!response.ok) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1E1C4CC4'));
 
     const data = await response.json();
 
@@ -9172,7 +9140,7 @@ async function handleIvaoAtis(interaction) {
     const atisList = atcs.filter(a => a.callsign.startsWith(icao) && a.atis && a.atis.lines && a.atis.lines.length > 0);
 
     if (!atisList || atisList.length === 0) {
-      return interaction.editReply(t(interaction, 'STR_7A088031', { v0: icao }));
+      return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7A088031', { v0: icao }));
     }
 
     const embeds = [];
@@ -9187,13 +9155,13 @@ async function handleIvaoAtis(interaction) {
 
       const embed = new EmbedBuilder()
         .setAuthor({ name: 'IVAO ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
-        .setTitle(t(interaction, 'STR_A5C7D5EA', { v0: atc.callsign, v1: atc.atcSession?.frequency?.toFixed(3) || 'N/A' }))
+        .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A5C7D5EA', { v0: atc.callsign, v1: atc.atcSession?.frequency?.toFixed(3) || 'N/A' }))
         .setColor(0x0A2B5E) // Xanh Navy
         .setThumbnail('https://xe.ivao.aero/wordpress/wp-content/uploads/website/the-division/about/brand_logo_no_text.png')
         .addFields(
           { name: '🏷️ Identifier', value: atisCode, inline: true },
-          { name: '⏱️ Update at', value : t(interaction, 'STR_4B10E5E6', { v0: logonUnix }), inline: true },
-          { name: '📝 Atis', value : t(interaction, 'STR_8BED3981', { v0: textInfo }), inline: false }
+          { name: '⏱️ Update at', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4B10E5E6', { v0: logonUnix }), inline: true },
+          { name: '📝 Atis', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8BED3981', { v0: textInfo }), inline: false }
         )
         .setFooter({ text: 'Dữ liệu phát sóng trực tiếp từ mạng IVAO' })
         .setTimestamp();
@@ -9206,7 +9174,7 @@ async function handleIvaoAtis(interaction) {
 
   } catch (err) {
     console.error('Lỗi lệnh ivao_atis:', err);
-    await interaction.editReply(t(interaction, 'STR_54D5E278'));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_54D5E278'));
   }
 }
 
@@ -9239,22 +9207,22 @@ async function handleRealFlight(interaction) {
     });
 
     if (!response.ok) {
-      return await interaction.editReply({ content : t(interaction, 'STR_F97F073B', { v0: response.status }) });
+      return await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F97F073B', { v0: response.status }) });
     }
 
     const data = await response.json();
     const airportData = data?.result?.response?.airport;
 
     if (!airportData || !airportData.pluginData?.schedule) {
-      return await interaction.editReply({ content : t(interaction, 'STR_CCAA1559', { v0: icao }) });
+      return await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CCAA1559', { v0: icao }) });
     }
 
     const arrivals = airportData.pluginData.schedule.arrivals?.data || [];
     const departures = airportData.pluginData.schedule.departures?.data || [];
 
     const embed = new EmbedBuilder()
-      .setTitle(t(interaction, 'STR_E8D984EB', { v0: icao }))
-      .setDescription(t(interaction, 'STR_DF02291A', { v0: airportData.pluginData?.details?.name || icao }))
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E8D984EB', { v0: icao }))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DF02291A', { v0: airportData.pluginData?.details?.name || icao }))
       .setColor(0xF1C40F)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/3180/3180118.png')
       .setFooter({ text: 'Dữ liệu được cập nhật trực tiếp từ FlightRadar24' })
@@ -9316,7 +9284,7 @@ async function checkAndRegisterUser(interaction) {
   const isOwner = userId === OWNER_ID;
 
   if (!hasAdmin && !hasDev && !hasStaff && !isOwner && interaction.channelId !== CASH_CHANNEL_ID) {
-    await interaction.editReply(t(interaction, 'STR_D5BF1B18', { v0: CASH_CHANNEL_ID }));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D5BF1B18', { v0: CASH_CHANNEL_ID }));
     return null; 
   }
 
@@ -9327,7 +9295,7 @@ async function checkAndRegisterUser(interaction) {
     if (balance) {
       // Đã nâng vốn khởi nghiệp lên 2000 Cash
       await interaction.followUp({
-        content : t(interaction, 'STR_512695F1', { v0: discordName }),
+        content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_512695F1', { v0: discordName }),
         ephemeral: true
       });
       balance.displayName = discordName;
@@ -9375,7 +9343,7 @@ async function handleDaily(interaction) {
     const hours = Math.floor(remainingTime / (1000 * 60 * 60));
     const minutes = Math.floor((remainingTime % (1000 * 60 * 60)) / (1000 * 60));
     
-    return interaction.editReply(t(interaction, 'STR_9C2739EE', { v0: balance.displayName, v1: hours, v2: minutes }));
+    return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9C2739EE', { v0: balance.displayName, v1: hours, v2: minutes }));
   }
 
   // Check chuỗi ngày (Streak)
@@ -9404,10 +9372,10 @@ async function handleDaily(interaction) {
   const embed = new EmbedBuilder()
     .setTitle('📅 ĐIỂM DANH HÀNG NGÀY')
     .setColor(0x2ecc71)
-    .setDescription(t(interaction, 'STR_B8C4F460', { v0: balance.displayName, v1: reward.toLocaleString() }))
+    .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B8C4F460', { v0: balance.displayName, v1: reward.toLocaleString() }))
     .addFields(
-      { name: '🔥 Chuỗi liên tiếp', value : t(interaction, 'STR_DCE461FA', { v0: userDb.dailyStreak }), inline: true },
-      { name: '💰 Tổng số dư', value : t(interaction, 'STR_BD84778D', { v0: updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash.toLocaleString() }), inline: true }
+      { name: '🔥 Chuỗi liên tiếp', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DCE461FA', { v0: userDb.dailyStreak }), inline: true },
+      { name: '💰 Tổng số dư', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD84778D', { v0: updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash.toLocaleString() }), inline: true }
     )
     .setFooter({ text: 'Lượt điểm danh mới sẽ mở vào 00:00 (Giờ VN) mỗi ngày' });
 
@@ -9478,7 +9446,7 @@ async function checkAndRegisterUser(interaction) {
   const isOwner = userId === OWNER_ID;
 
   if (!hasAdmin && !hasDev && !hasStaff && !isOwner && interaction.channelId !== CASH_CHANNEL_ID) {
-    await interaction.editReply(t(interaction, 'STR_D5BF1B18', { v0: CASH_CHANNEL_ID }));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D5BF1B18', { v0: CASH_CHANNEL_ID }));
     return null; 
   }
 
@@ -9487,7 +9455,7 @@ async function checkAndRegisterUser(interaction) {
     balance = await registerPilot(userId, discordName);
     if (balance) {
       await interaction.followUp({
-        content : t(interaction, 'STR_512695F1', { v0: discordName }),
+        content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_512695F1', { v0: discordName }),
         ephemeral: true
       });
       balance.displayName = discordName;
@@ -9501,7 +9469,7 @@ async function checkAndRegisterUser(interaction) {
 // ===================== LOA PHÁT THANH PHÁ SẢN =====================
 async function checkBankruptcy(interaction, displayName, currentCash) {
   if (currentCash <= 0) {
-    await interaction.channel.send(t(interaction, 'STR_6775D79C', { v0: displayName }));
+    await interaction.channel.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6775D79C', { v0: displayName }));
   }
 }
 
@@ -9526,7 +9494,7 @@ async function handleWork(interaction) {
       const remainingTime = cooldown - timeDiff;
       const minutes = Math.floor(remainingTime / (1000 * 60));
       const seconds = Math.floor((remainingTime % (1000 * 60)) / 1000);
-      return interaction.editReply(t(interaction, 'STR_8AD0C0FF', { v0: minutes, v1: seconds }));
+      return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8AD0C0FF', { v0: minutes, v1: seconds }));
     }
   }
 
@@ -9537,9 +9505,9 @@ async function handleWork(interaction) {
     if (Math.random() < 0.60) {
       const pityMoney = Math.floor(Math.random() * 2000) + 500; 
       await updatePilotBalance(userId, pityMoney, 0, pityMoney);
-      return interaction.editReply(t(interaction, 'STR_CA2FF063', { v0: pityMoney.toLocaleString() }));
+      return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CA2FF063', { v0: pityMoney.toLocaleString() }));
     } else {
-      return interaction.editReply(t(interaction, 'STR_762E78EA', { v0: balance.displayName }));
+      return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_762E78EA', { v0: balance.displayName }));
     }
   }
 
@@ -9548,16 +9516,16 @@ async function handleWork(interaction) {
   if (isSuccess) {
     const earned = Math.floor(Math.random() * 10001); 
     await updatePilotBalance(userId, earned, 0, earned);
-    await interaction.editReply(t(interaction, 'STR_D0B916C6', { v0: balance.displayName, v1: earned.toLocaleString() }));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D0B916C6', { v0: balance.displayName, v1: earned.toLocaleString() }));
   } else {
     let penalty = Math.floor(Math.random() * 501); 
     if (balance.currentCash < penalty) penalty = balance.currentCash; 
 
     if (penalty === 0) {
-      await interaction.editReply(t(interaction, 'STR_347CCF76', { v0: balance.displayName }));
+      await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_347CCF76', { v0: balance.displayName }));
     } else {
       const updateRes = await updatePilotBalance(userId, -penalty, penalty, 0);
-      await interaction.editReply(t(interaction, 'STR_35C68AD7', { v0: balance.displayName, v1: penalty.toLocaleString() }));
+      await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_35C68AD7', { v0: balance.displayName, v1: penalty.toLocaleString() }));
       if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
     }
   }
@@ -9578,17 +9546,17 @@ async function handleBalance(interaction) {
   };
 
   const embed = new EmbedBuilder()
-      .setTitle(t(interaction, 'STR_7600B9EB'))
-      .setDescription(t(interaction, 'STR_4D1488DD', { v0: balanceData.displayName }))
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7600B9EB'))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4D1488DD', { v0: balanceData.displayName }))
       .setColor('#10b981') 
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
       .addFields(
-          { name: '👤 Tên App', value : t(interaction, 'STR_271F3F4C', { v0: balanceData.username }), inline: false },
-          { name: '💰 Số Dư Khả Dụng', value : t(interaction, 'STR_4B5CDCD6', { v0: safeNum(balanceData.currentCash).toLocaleString() }), inline: true },
-          { name: '📈 Tổng Tích Lũy', value : t(interaction, 'STR_BD84778D', { v0: safeNum(balanceData.totalEarned).toLocaleString() }), inline: true },
-          { name: '💸 Đã Tiêu Xài', value : t(interaction, 'STR_BD84778D', { v0: safeNum(balanceData.usedCash).toLocaleString() }), inline: true },
-          { name: '✈️ Số Chuyến Bay', value : t(interaction, 'STR_AABEB377', { v0: safeNum(balanceData.completedFlights) }), inline: true },
-          { name: '⏱️ Thời Gian Bay', value : t(interaction, 'STR_C4DC5BD8', { v0: safeNum(balanceData.totalHours).toFixed(1) }), inline: true }
+          { name: '👤 Tên App', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_271F3F4C', { v0: balanceData.username }), inline: false },
+          { name: '💰 Số Dư Khả Dụng', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4B5CDCD6', { v0: safeNum(balanceData.currentCash).toLocaleString() }), inline: true },
+          { name: '📈 Tổng Tích Lũy', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD84778D', { v0: safeNum(balanceData.totalEarned).toLocaleString() }), inline: true },
+          { name: '💸 Đã Tiêu Xài', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD84778D', { v0: safeNum(balanceData.usedCash).toLocaleString() }), inline: true },
+          { name: '✈️ Số Chuyến Bay', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AABEB377', { v0: safeNum(balanceData.completedFlights) }), inline: true },
+          { name: '⏱️ Thời Gian Bay', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C4DC5BD8', { v0: safeNum(balanceData.totalHours).toFixed(1) }), inline: true }
       );
 
   await interaction.editReply({ embeds: [embed] });
@@ -9603,8 +9571,8 @@ async function handleCoinflip(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
-  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_F8E542BF', { v0: balance.currentCash.toLocaleString() }));
+  if (amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4CC856D7'));
+  if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F8E542BF', { v0: balance.currentCash.toLocaleString() }));
 
   const userId = interaction.user.id;
   let userDb = await db.getGamblingData(userId);
@@ -9622,18 +9590,18 @@ async function handleCoinflip(interaction) {
   }
 
   let isWin = Math.random() < winChance;
-  await interaction.editReply({ content : t(interaction, 'STR_9BC3E8E2', { v0: balance.displayName, v1: amount.toLocaleString() }) });
+  await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9BC3E8E2', { v0: balance.displayName, v1: amount.toLocaleString() }) });
 
   setTimeout(async () => {
     if (isWin) {
       userDb.coinflipWins += 1; userDb.coinflipLosses = 0;
       // FIX TÍCH LŨY: Lãi ròng = amount | Đã tiêu = amount | Tổng nhận = amount * 2
       await updatePilotBalance(userId, amount, amount, amount * 2);
-      await interaction.editReply(t(interaction, 'STR_99850A82', { v0: balance.displayName, v1: amount.toLocaleString() }));
+      await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_99850A82', { v0: balance.displayName, v1: amount.toLocaleString() }));
     } else {
       userDb.coinflipLosses += 1; userDb.coinflipWins = 0;
       const updateRes = await updatePilotBalance(userId, -amount, amount, 0);
-      await interaction.editReply(t(interaction, 'STR_099FD991', { v0: balance.displayName, v1: amount.toLocaleString() }));
+      await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_099FD991', { v0: balance.displayName, v1: amount.toLocaleString() }));
       if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
     }
     await userDb.save();
@@ -9649,8 +9617,8 @@ async function handleSlot(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
-  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_BB4C92D6'));
+  if (amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4CC856D7'));
+  if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BB4C92D6'));
 
   const userId = interaction.user.id;
   let userDb = await db.getGamblingData(userId);
@@ -9684,11 +9652,11 @@ async function handleSlot(interaction) {
   }
 
   await userDb.save(); 
-  await interaction.editReply(t(interaction, 'STR_34E2F45F', { v0: amount.toLocaleString() }));
+  await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_34E2F45F', { v0: amount.toLocaleString() }));
 
   for (let i = 0; i < 3; i++) {
     await new Promise(res => setTimeout(res, 800));
-    await interaction.editReply(t(interaction, 'STR_48262F04', { v0: emojis[Math.floor(Math.random()*6)], v1: emojis[Math.floor(Math.random()*6)], v2: emojis[Math.floor(Math.random()*6)] }));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_48262F04', { v0: emojis[Math.floor(Math.random()*6)], v1: emojis[Math.floor(Math.random()*6)], v2: emojis[Math.floor(Math.random()*6)] }));
   }
   await new Promise(res => setTimeout(res, 800));
 
@@ -9696,11 +9664,11 @@ async function handleSlot(interaction) {
     const grossPayout = amount * 3;
     // FIX TÍCH LŨY
     await updatePilotBalance(userId, grossPayout - amount, amount, grossPayout);
-    await interaction.editReply(t(interaction, 'STR_625CCDD1', { v0: e1, v1: e2, v2: e3, v3: grossPayout.toLocaleString() }));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_625CCDD1', { v0: e1, v1: e2, v2: e3, v3: grossPayout.toLocaleString() }));
   } else {
     const updateRes = await updatePilotBalance(userId, -amount, amount, 0); 
     const mockText = (e1 === e2 || e2 === e3 || e1 === e3) ? "Trời ơi suýt nữa thì nổ hũ!!" : "Lệch nhịp rồi!";
-    await interaction.editReply(t(interaction, 'STR_6C90FBEE', { v0: e1, v1: e2, v2: e3, v3: mockText, v4: amount.toLocaleString() }));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6C90FBEE', { v0: e1, v1: e2, v2: e3, v3: mockText, v4: amount.toLocaleString() }));
     if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
   }
 }
@@ -9713,16 +9681,16 @@ async function handleTaiSiu(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
-  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_2142336D'));
+  if (amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4CC856D7'));
+  if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2142336D'));
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('ts_xiu').setLabel(t(interaction, 'STR_CCC4CBBD')).setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('ts_tai').setLabel(t(interaction, 'STR_A6B2615D')).setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId('ts_xiu').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CCC4CBBD')).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('ts_tai').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A6B2615D')).setStyle(ButtonStyle.Danger)
   );
 
   const msg = await interaction.editReply({ 
-    content : t(interaction, 'STR_80828F30', { v0: balance.displayName, v1: amount.toLocaleString() }), components: [row] 
+    content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_80828F30', { v0: balance.displayName, v1: amount.toLocaleString() }), components: [row] 
   });
 
   const filter = i => i.user.id === interaction.user.id;
@@ -9734,7 +9702,7 @@ async function handleTaiSiu(interaction) {
       const choice = i.customId === 'ts_tai' ? 'tai' : 'xiu';
       
       // Hiện hũ lắc ban đầu
-      await interaction.editReply({ content : t(interaction, 'STR_1335686D', { v0: choice.toUpperCase() }), components: [] });
+      await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1335686D', { v0: choice.toUpperCase() }), components: [] });
 
       // Tính toán kết quả trước trong nền
       let d1, d2, d3;
@@ -9752,20 +9720,20 @@ async function handleTaiSiu(interaction) {
 
       // Tạo hiệu ứng Delay lật từng xí ngầu
       setTimeout(async () => {
-          await interaction.editReply({ content : t(interaction, 'STR_BDA9E7AC', { v0: choice.toUpperCase(), v1: d1 }), components: [] });
+          await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BDA9E7AC', { v0: choice.toUpperCase(), v1: d1 }), components: [] });
           
           setTimeout(async () => {
-              await interaction.editReply({ content : t(interaction, 'STR_CEB3A7F7', { v0: choice.toUpperCase(), v1: d1, v2: d2 }), components: [] });
+              await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CEB3A7F7', { v0: choice.toUpperCase(), v1: d1, v2: d2 }), components: [] });
               
               setTimeout(async () => {
                   // KẾT QUẢ CUỐI CÙNG
                   if (resultType === choice) {
                       await updatePilotBalance(interaction.user.id, amount, amount, amount * 2);
-                      await interaction.editReply(t(interaction, 'STR_68EE68F1', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: amount.toLocaleString() }));
+                      await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68EE68F1', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: amount.toLocaleString() }));
                   } else {
                       const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-                      let loseMsg = t(interaction, 'STR_EA9C9831', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: amount.toLocaleString() });
-                      if (resultType === 'bao') loseMsg = t(interaction, 'STR_1D4B6783', { v0: d1, v1: d2, v2: d3, v3: amount.toLocaleString() });
+                      let loseMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EA9C9831', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: amount.toLocaleString() });
+                      if (resultType === 'bao') loseMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1D4B6783', { v0: d1, v1: d2, v2: d3, v3: amount.toLocaleString() });
                       await interaction.editReply(loseMsg);
                       if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
                   }
@@ -9782,22 +9750,22 @@ async function handleBauCua(interaction) {
     const balance = await checkAndRegisterUser(interaction);
     if (!balance) return;
     const amount = parseBetAmount(amountInput, balance.currentCash);
-    if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
-    if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
+    if (amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4CC856D7'));
+    if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_03D53DF6'));
 
     let choices = [];
     const nameMap = { 'bc_bau': 'Bầu', 'bc_cua': 'Cua', 'bc_tom': 'Tôm', 'bc_ca': 'Cá', 'bc_ga': 'Gà', 'bc_nai': 'Nai' };
 
     const buildRows = () => [
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('bc_bau').setEmoji('🎃').setLabel(t(interaction, 'STR_15858B54')).setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('bc_cua').setEmoji('🦀').setLabel(t(interaction, 'STR_A0F3A7F0')).setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('bc_tom').setEmoji('🦞').setLabel(t(interaction, 'STR_DDF8B51B')).setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('bc_bau').setEmoji('🎃').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_15858B54')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('bc_cua').setEmoji('🦀').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A0F3A7F0')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('bc_tom').setEmoji('🦞').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DDF8B51B')).setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('bc_ca').setEmoji('🐟').setLabel(t(interaction, 'STR_BE391ADD')).setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('bc_ga').setEmoji('🐔').setLabel(t(interaction, 'STR_3EA545F7')).setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('bc_nai').setEmoji('🦌').setLabel(t(interaction, 'STR_D99DAF4A')).setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('bc_ca').setEmoji('🐟').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BE391ADD')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('bc_ga').setEmoji('🐔').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3EA545F7')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('bc_nai').setEmoji('🦌').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D99DAF4A')).setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('bc_chot')
@@ -9808,7 +9776,7 @@ async function handleBauCua(interaction) {
     ];
 
     const msg = await interaction.editReply({ 
-        content : t(interaction, 'STR_8832F3EF', { v0: amount.toLocaleString() }), 
+        content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8832F3EF', { v0: amount.toLocaleString() }), 
         components: buildRows() 
     });
 
@@ -9827,7 +9795,7 @@ async function handleBauCua(interaction) {
         }
 
         await i.update({ 
-            content : t(interaction, 'STR_D345C10F', { v0: amount.toLocaleString(), v1: choices.join(' - ') }), 
+            content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D345C10F', { v0: amount.toLocaleString(), v1: choices.join(' - ') }), 
             components: buildRows() 
         });
     });
@@ -9837,7 +9805,7 @@ async function handleBauCua(interaction) {
             return interaction.editReply({ content: '⏳ Đã hết thời gian chọn cửa! Tiền cược được hoàn lại.', components: [] });
         }
 
-        await interaction.editReply({ content : t(interaction, 'STR_1D32233B', { v0: choices.join(' - ') }), components: [] });
+        await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1D32233B', { v0: choices.join(' - ') }), components: [] });
 
         setTimeout(async () => {
             let riggedMascots = Object.values(nameMap);
@@ -9858,16 +9826,16 @@ async function handleBauCua(interaction) {
                 }
             }
 
-            let resultStr = t(interaction, 'STR_9AA1A3BE', { v0: results[0], v1: results[1], v2: results[2], v3: choices.join(' - ') });
+            let resultStr = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9AA1A3BE', { v0: results[0], v1: results[1], v2: results[2], v3: choices.join(' - ') });
 
             if (matchCount > 0) {
                 const profit = amount * matchCount;
                 const grossPayout = amount + profit;
                await updatePilotBalance(interaction.user.id, profit, amount, grossPayout); 
-                resultStr += t(interaction, 'STR_950C1F98', { v0: matchCount, v1: matchCount, v2: profit.toLocaleString() });
+                resultStr += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_950C1F98', { v0: matchCount, v1: matchCount, v2: profit.toLocaleString() });
             } else {
                 const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-                resultStr += t(interaction, 'STR_C293A01C', { v0: amount.toLocaleString() });
+                resultStr += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C293A01C', { v0: amount.toLocaleString() });
                 if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
             }
 
@@ -9923,14 +9891,14 @@ async function handleBlackjack(interaction) {
     
     // --- LƯU Ý: Sếp tự điều chỉnh lại cách lấy Balance và lấy Tiền của sếp ở đây nha ---
     const balance = await getPilotBalance(interaction.user.id);
-    if (!balance) return interaction.editReply(t(interaction, 'STR_47223628'));
+    if (!balance) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_47223628'));
     
     let amount = parseInt(amountInput);
     if (amountInput === 'all') amount = balance.currentCash;
     else if (amountInput === 'half') amount = Math.floor(balance.currentCash / 2);
     
-    if (isNaN(amount) || amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
-    if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
+    if (isNaN(amount) || amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4CC856D7'));
+    if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_03D53DF6'));
     // -------------------------------------------------------------------------------------
 
     let deck = getDeck();
@@ -9946,26 +9914,26 @@ async function handleBlackjack(interaction) {
     if (pXiBang) {
         // Xì Bàng: Nhân 3 tiền lãi
         await updatePilotBalance(interaction.user.id, amount * 3, amount, amount * 4);
-        return interaction.editReply(t(interaction, 'STR_A5919250', { v0: formatHand(playerHand), v1: (amount * 3).toLocaleString() }));
+        return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A5919250', { v0: formatHand(playerHand), v1: (amount * 3).toLocaleString() }));
     }
     
     if (pXiDach) {
         // Xì Dách: Nhân 2 tiền lãi
         await updatePilotBalance(interaction.user.id, amount * 2, amount, amount * 3);
-        return interaction.editReply(t(interaction, 'STR_F5175DF1', { v0: formatHand(playerHand), v1: (amount * 2).toLocaleString() }));
+        return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F5175DF1', { v0: formatHand(playerHand), v1: (amount * 2).toLocaleString() }));
     }
 
     const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('bj_hit').setLabel(t(interaction, 'STR_CC612F8C')).setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('bj_stand').setLabel(t(interaction, 'STR_823CC1AD')).setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId('bj_hit').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CC612F8C')).setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('bj_stand').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_823CC1AD')).setStyle(ButtonStyle.Secondary)
     );
 
     const embed = new EmbedBuilder()
         .setTitle('🃏 XÌ DÁCH VIỆT NAM 🃏')
         .setColor(0x2ecc71)
         .addFields(
-            { name : t(interaction, 'STR_21DA3C88', { v0: getScore(playerHand) }), value: formatHand(playerHand), inline: true },
-            { name : t(interaction, 'STR_B3A0E1AA'), value : t(interaction, 'STR_411DCA6A', { v0: formatHand([dealerHand[1]]) }), inline: true }
+            { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_21DA3C88', { v0: getScore(playerHand) }), value: formatHand(playerHand), inline: true },
+            { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B3A0E1AA'), value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_411DCA6A', { v0: formatHand([dealerHand[1]]) }), inline: true }
         )
         .setFooter({ text: `Cược: ${amount.toLocaleString()} Cash | Ngũ Linh, Xì Dách x2 | Xì Bàng x3` });
 
@@ -9993,8 +9961,8 @@ async function handleBlackjack(interaction) {
             row.components[0].setDisabled(playerHand.length >= 5);
 
             embed.setFields(
-                { name : t(interaction, 'STR_21DA3C88', { v0: pScore }), value: formatHand(playerHand), inline: true },
-                { name : t(interaction, 'STR_B3A0E1AA'), value : t(interaction, 'STR_411DCA6A', { v0: formatHand([dealerHand[1]]) }), inline: true }
+                { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_21DA3C88', { v0: pScore }), value: formatHand(playerHand), inline: true },
+                { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B3A0E1AA'), value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_411DCA6A', { v0: formatHand([dealerHand[1]]) }), inline: true }
             );
             await i.update({ embeds: [embed], components: [row] });
         } else {
@@ -10014,19 +9982,19 @@ async function handleBlackjack(interaction) {
             await updatePilotBalance(interaction.user.id, amount * 2, amount, amount * 3);
             finalEmbed.setColor(0xf1c40f).setTitle('🌟 NGŨ LINH 🌟')
                 .setFields(
-                    { name : t(interaction, 'STR_E51E897B'), value: formatHand(playerHand), inline: false },
-                    { name : t(interaction, 'STR_B3A0E1AA'), value: formatHand(dealerHand), inline: false }
+                    { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E51E897B'), value: formatHand(playerHand), inline: false },
+                    { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B3A0E1AA'), value: formatHand(dealerHand), inline: false }
                 );
-            return interaction.editReply({ content : t(interaction, 'STR_A2CA1FD1', { v0: (amount * 2).toLocaleString() }), embeds: [finalEmbed], components: [] });
+            return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A2CA1FD1', { v0: (amount * 2).toLocaleString() }), embeds: [finalEmbed], components: [] });
         }
 
         if (reason === 'bust') {
             await updatePilotBalance(interaction.user.id, -amount, amount, 0);
             finalEmbed.setFields(
-                { name : t(interaction, 'STR_C2E60604', { v0: pScore }), value: formatHand(playerHand), inline: false },
-                { name : t(interaction, 'STR_B3A0E1AA'), value: formatHand(dealerHand), inline: false }
+                { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C2E60604', { v0: pScore }), value: formatHand(playerHand), inline: false },
+                { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B3A0E1AA'), value: formatHand(dealerHand), inline: false }
             );
-            return interaction.editReply({ content : t(interaction, 'STR_969DA6F4', { v0: amount.toLocaleString() }), embeds: [finalEmbed], components: [] });
+            return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_969DA6F4', { v0: amount.toLocaleString() }), embeds: [finalEmbed], components: [] });
         }
 
         // Tới lượt Nhà Cái (Bắt buộc dằn khi >= 16)
@@ -10045,27 +10013,27 @@ async function handleBlackjack(interaction) {
         let gross = 0;
 
         if (dXiBang) {
-            profit = -amount; gross = 0; resultMsg = t(interaction, 'STR_3E16452B', { v0: amount.toLocaleString() });
+            profit = -amount; gross = 0; resultMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3E16452B', { v0: amount.toLocaleString() });
         } else if (dXiDach) {
-            profit = -amount; gross = 0; resultMsg = t(interaction, 'STR_065B43DA', { v0: amount.toLocaleString() });
+            profit = -amount; gross = 0; resultMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_065B43DA', { v0: amount.toLocaleString() });
         } else if (dNgulinh) {
-            profit = -amount; gross = 0; resultMsg = t(interaction, 'STR_1AC66018', { v0: amount.toLocaleString() });
+            profit = -amount; gross = 0; resultMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1AC66018', { v0: amount.toLocaleString() });
         } else if (dScore > 21 || pScore > dScore) {
-            profit = amount; gross = amount * 2; resultMsg = t(interaction, 'STR_0A284949', { v0: amount.toLocaleString() });
+            profit = amount; gross = amount * 2; resultMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0A284949', { v0: amount.toLocaleString() });
             finalEmbed.setColor(0x2ecc71);
-            if (dScore > 21) resultMsg = t(interaction, 'STR_9AB3DC11', { v0: amount.toLocaleString() });
+            if (dScore > 21) resultMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9AB3DC11', { v0: amount.toLocaleString() });
         } else if (pScore === dScore) {
-            profit = 0; gross = amount; resultMsg = t(interaction, 'STR_33625979');
+            profit = 0; gross = amount; resultMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_33625979');
             finalEmbed.setColor(0x3498db);
         } else {
-            profit = -amount; gross = 0; resultMsg = t(interaction, 'STR_CB8BB554', { v0: amount.toLocaleString() });
+            profit = -amount; gross = 0; resultMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CB8BB554', { v0: amount.toLocaleString() });
         }
 
         await updatePilotBalance(interaction.user.id, profit, amount, gross);
         
         finalEmbed.setFields(
-            { name : t(interaction, 'STR_21DA3C88', { v0: pScore }), value: formatHand(playerHand), inline: false },
-            { name : t(interaction, 'STR_237D7AFB', { v0: dScore }), value: formatHand(dealerHand), inline: false }
+            { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_21DA3C88', { v0: pScore }), value: formatHand(playerHand), inline: false },
+            { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_237D7AFB', { v0: dScore }), value: formatHand(dealerHand), inline: false }
         );
 
         await interaction.editReply({ content: resultMsg, embeds: [finalEmbed], components: [] });
@@ -10123,8 +10091,8 @@ async function handlePoker(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
-  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
+  if (amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4CC856D7'));
+  if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_03D53DF6'));
 
   const userId = interaction.user.id;
   let deck = createDeck();
@@ -10135,7 +10103,7 @@ async function handlePoker(interaction) {
       while(result.mult >= 9) { deck = createDeck(); hand = [deck.pop(), deck.pop(), deck.pop(), deck.pop(), deck.pop()]; result = evaluatePokerHand(hand); }
   }
 
-  await interaction.editReply({ content : t(interaction, 'STR_E9FA2B3C', { v0: amount.toLocaleString() }) });
+  await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E9FA2B3C', { v0: amount.toLocaleString() }) });
 
   setTimeout(async () => {
     let result = evaluatePokerHand(hand);
@@ -10146,10 +10114,10 @@ async function handlePoker(interaction) {
       let actualProfit = grossPayout - amount; 
       // FIX TÍCH LŨY
       await updatePilotBalance(userId, actualProfit, amount, grossPayout);
-      finalStr = t(interaction, 'STR_A1618F24', { v0: result.name, v1: grossPayout.toLocaleString() });
+      finalStr = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A1618F24', { v0: result.name, v1: grossPayout.toLocaleString() });
     } else {
       didLose = true;
-      finalStr = t(interaction, 'STR_0E36D7FE', { v0: result.name, v1: amount.toLocaleString() });
+      finalStr = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0E36D7FE', { v0: result.name, v1: amount.toLocaleString() });
     }
 
     await interaction.editReply({ content: null, embeds: [new EmbedBuilder().setTitle('🃏 VIDEO POKER').setColor(result.mult > 0 ? 0x2ecc71 : 0xe74c3c).setDescription(finalStr).addFields({ name: '🃏 5 Lá Bài', value: formatHand(hand), inline: false })] });
@@ -10170,8 +10138,8 @@ async function handleRoulette(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_98CE929D'));
-  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
+  if (amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_98CE929D'));
+  if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_03D53DF6'));
 
   let isWin = false;
   let resultColor = '';
@@ -10185,19 +10153,19 @@ async function handleRoulette(interaction) {
   }
 
   const colorNames = { 'red': 'Đỏ 🔴', 'black': 'Đen ⚫', 'green': 'Xanh Lá 🟢' };
-  await interaction.editReply(t(interaction, 'STR_63B88DC6', { v0: amount.toLocaleString(), v1: colorNames[choice] }));
+  await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_63B88DC6', { v0: amount.toLocaleString(), v1: colorNames[choice] }));
 
   setTimeout(async () => {
-    let finalStr = t(interaction, 'STR_4FA4A290', { v0: colorNames[resultColor] });
+    let finalStr = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4FA4A290', { v0: colorNames[resultColor] });
     if (isWin) {
       let grossPayout = choice === 'green' ? amount * 14 : amount * 2; 
       let profit = grossPayout - amount;
       // FIX TÍCH LŨY
       await updatePilotBalance(interaction.user.id, profit, amount, grossPayout);
-      finalStr += t(interaction, 'STR_87C6425F', { v0: choice === 'green' ? '🎰 **NỔ HŨ X14!**' : '🎉 **HÚP TIỀN!**', v1: grossPayout.toLocaleString() });
+      finalStr += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_87C6425F', { v0: choice === 'green' ? '🎰 **NỔ HŨ X14!**' : '🎉 **HÚP TIỀN!**', v1: grossPayout.toLocaleString() });
     } else {
       const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-      finalStr += t(interaction, 'STR_BDD045C2', { v0: amount.toLocaleString() });
+      finalStr += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BDD045C2', { v0: amount.toLocaleString() });
       if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
     }
     await interaction.editReply({ content: null, embeds: [new EmbedBuilder().setColor(resultColor === 'red' ? 0xe74c3c : (resultColor === 'black' ? 0x2b2d31 : 0x2ecc71)).setDescription(finalStr)] });
@@ -10212,39 +10180,39 @@ async function handleOanTuTi(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_98CE929D'));
-  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
+  if (amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_98CE929D'));
+  if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_03D53DF6'));
 
-  const msg = await interaction.editReply(t(interaction, 'STR_B7D946EE', { v0: amount.toLocaleString() }));
+  const msg = await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B7D946EE', { v0: amount.toLocaleString() }));
   const emojis = ['✌️', '✊', '✋'];
   for (const e of emojis) await msg.react(e);
 
   msg.awaitReactions({ filter: (r, u) => emojis.includes(r.emoji.name) && u.id === interaction.user.id, max: 1, time: 30000, errors: ['time'] }).then(async coll => {
     const userChoice = coll.first().emoji.name;
     try { await msg.reactions.removeAll(); } catch (e) {}
-    await interaction.editReply({ content : t(interaction, 'STR_C9F6F460', { v0: userChoice }) });
+    await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C9F6F460', { v0: userChoice }) });
 
     setTimeout(async () => {
       const winning = { '✌️': '✊', '✊': '✋', '✋': '✌️' }, tie = { '✌️': '✌️', '✊': '✊', '✋': '✋' }, losing = { '✌️': '✋', '✊': '✌️', '✋': '✊' };
       let botChoice = Math.random() < (amount >= 1500 ? 0.50 : 0.30) ? (Math.random() < 0.8 ? winning[userChoice] : tie[userChoice]) : emojis[Math.floor(Math.random() * 3)];
-      let resultStr = t(interaction, 'STR_B53D8FE3', { v0: userChoice, v1: botChoice });
+      let resultStr = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B53D8FE3', { v0: userChoice, v1: botChoice });
 
       if (botChoice === losing[userChoice]) {
         // FIX TÍCH LŨY (Lãi x2)
         await updatePilotBalance(interaction.user.id, amount, amount, amount * 2);
-        resultStr += t(interaction, 'STR_04E5ADE7', { v0: (amount * 2).toLocaleString() });
+        resultStr += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_04E5ADE7', { v0: (amount * 2).toLocaleString() });
       } else if (botChoice === winning[userChoice]) {
         const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-        resultStr += t(interaction, 'STR_FC62733A', { v0: amount.toLocaleString() });
+        resultStr += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FC62733A', { v0: amount.toLocaleString() });
         if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
       } else {
         // FIX TÍCH LŨY (Hòa)
         await updatePilotBalance(interaction.user.id, 0, amount, amount);
-        resultStr += t(interaction, 'STR_CF6C2395');
+        resultStr += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CF6C2395');
       }
       await interaction.editReply(resultStr);
     }, 2500);
-  }).catch(() => { interaction.editReply(t(interaction, 'STR_3C6EFE08')); });
+  }).catch(() => { interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3C6EFE08')); });
 }
 
 // ===================== LỆNH GIVE CASH =====================
@@ -10261,29 +10229,29 @@ async function handleGiveCash(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_68E18DE4'));
-  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_2142336D'));
+  if (amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68E18DE4'));
+  if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2142336D'));
 
   // Người gửi bị trừ tiền hiện tại và GHI NHẬN LÀ ĐÃ TIÊU, không cộng Total Earned
   const deduc = await updatePilotBalance(senderId, -amount, amount, 0);
-  if (!deduc.success) return interaction.editReply(t(interaction, 'STR_30C6B297', { v0: deduc.msg }));
+  if (!deduc.success) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_30C6B297', { v0: deduc.msg }));
 
   // FIX TÍCH LŨY CHO NGƯỜI NHẬN: Được cộng tiền hiện tại và CỘNG TOTAL EARNED
   const add = await updatePilotBalance(targetUser.id, amount, 0, amount);
   if (!add.success) {
     // Nếu lỗi, Hoàn tiền cho người gửi (Cộng lại tiền, Trừ lượng đã tiêu ra, Không cộng Total Earned)
     await updatePilotBalance(senderId, amount, -amount, 0); 
-    return interaction.editReply(t(interaction, 'STR_37CF5FE0', { v0: amount.toLocaleString() }));
+    return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_37CF5FE0', { v0: amount.toLocaleString() }));
   }
 
-  await interaction.editReply(t(interaction, 'STR_67792F60', { v0: amount.toLocaleString(), v1: targetUser.id }));
+  await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_67792F60', { v0: amount.toLocaleString(), v1: targetUser.id }));
   await checkBankruptcy(interaction, balance.displayName, deduc.currentCash);
 
   try {
     const dmEmbed = new EmbedBuilder()
       .setTitle('💸 BẠN VỪA NHẬN ĐƯỢC TIỀN!')
       .setColor(0x10b981)
-      .setDescription(t(interaction, 'STR_7BBE17ED', { v0: balance.displayName, v1: senderId, v2: amount.toLocaleString() }))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7BBE17ED', { v0: balance.displayName, v1: senderId, v2: amount.toLocaleString() }))
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/3135/3135706.png')
       .setTimestamp()
       .setFooter({ text: 'Hệ thống ngân hàng trung ương tk.chill' });
@@ -10382,11 +10350,11 @@ async function handleVietlott(interaction) {
   if (!balance) return;
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('btn_mua_ve_loto').setLabel(t(interaction, 'STR_5414F647')).setStyle(ButtonStyle.Primary).setEmoji('🎪')
+    new ButtonBuilder().setCustomId('btn_mua_ve_loto').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5414F647')).setStyle(ButtonStyle.Primary).setEmoji('🎪')
   );
 
   const msg = await interaction.editReply({
-    content : t(interaction, 'STR_C9B1278B', { v0: balance.displayName, v1: balance.currentCash.toLocaleString() }),
+    content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C9B1278B', { v0: balance.displayName, v1: balance.currentCash.toLocaleString() }),
     components: [row]
   });
 
@@ -10398,14 +10366,14 @@ async function handleVietlott(interaction) {
 
     const numInput = new TextInputBuilder()
       .setCustomId('numbers')
-      .setLabel(t(interaction, 'STR_FA0A617F'))
+      .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FA0A617F'))
       .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder(t(interaction, 'STR_65298322'))
+      .setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_65298322'))
       .setRequired(true);
 
     const amtInput = new TextInputBuilder()
       .setCustomId('amount')
-      .setLabel(t(interaction, 'STR_0EB860AD'))
+      .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0EB860AD'))
       .setStyle(TextInputStyle.Short)
       .setRequired(true);
 
@@ -10423,7 +10391,7 @@ async function handleVietlott(interaction) {
       const amount = parseBetAmount(amountStr, currentBal.currentCash);
 
       if (amount <= 0) return interaction.editReply({ content: '❌ Số tiền cược không hợp lệ!', components: [] });
-      if (currentBal.currentCash < amount) return interaction.editReply({ content : t(interaction, 'STR_558836FF', { v0: currentBal.currentCash.toLocaleString() }), components: [] });
+      if (currentBal.currentCash < amount) return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_558836FF', { v0: currentBal.currentCash.toLocaleString() }), components: [] });
 
       let boardNumbers = [];
       if (numberStr === 'AUTO') {
@@ -10436,14 +10404,14 @@ async function handleVietlott(interaction) {
       } else {
           boardNumbers = numberStr.split(/[\s,]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
           if (boardNumbers.length !== 25) {
-              return interaction.editReply({ content : t(interaction, 'STR_874A051F', { v0: boardNumbers.length }), components: [] });
+              return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_874A051F', { v0: boardNumbers.length }), components: [] });
           }
           let unique = new Set(boardNumbers);
           if (unique.size !== 25) {
-              return interaction.editReply({ content : t(interaction, 'STR_8C6B2106'), components: [] });
+              return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8C6B2106'), components: [] });
           }
           if (!boardNumbers.every(n => n >= 1 && n <= 90)) {
-              return interaction.editReply({ content : t(interaction, 'STR_8FEE1DAD'), components: [] });
+              return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8FEE1DAD'), components: [] });
           }
       }
 
@@ -10451,7 +10419,7 @@ async function handleVietlott(interaction) {
 
       // Vừa mua vé xong, cho 1 cái tin nhắn thông báo quay lồng cầu sương sương (3 giây)
       await interaction.editReply({
-          content : t(interaction, 'STR_D4F69450', { v0: balance.displayName, v1: amount.toLocaleString() }),
+          content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D4F69450', { v0: balance.displayName, v1: amount.toLocaleString() }),
           components: []
       });
 
@@ -10475,7 +10443,7 @@ async function handleVietlott(interaction) {
 
       // Xổ kết quả thẳng ra sau 3 giây (Khỏi gọi lắt nhắt làm nghẽn Discord API)
       setTimeout(async () => {
-          let finalStr = t(interaction, 'STR_F99623EB', { v0: drawnSet.size, v1: renderLotoBoard(boardNumbers, drawnSet) });
+          let finalStr = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F99623EB', { v0: drawnSet.size, v1: renderLotoBoard(boardNumbers, drawnSet) });
 
           if (bingoAt !== -1) {
               let mult = 0;
@@ -10489,16 +10457,16 @@ async function handleVietlott(interaction) {
               if (mult > 1) {
                   // SẾP ĐÃ SỬA CÁI TÍCH LŨY DƯỚI ĐÂY RỒI NHÉ (Cộng lãi vào tiền hiện tại, Cộng vốn vào tiền tiêu xài, Cộng nguyên cục lời vào tích lũy)
                   await updatePilotBalance(interaction.user.id, profit - amount, amount, profit);
-                  finalStr += t(interaction, 'STR_611AE6E1', { v0: bingoAt, v1: profit.toLocaleString(), v2: mult });
+                  finalStr += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_611AE6E1', { v0: bingoAt, v1: profit.toLocaleString(), v2: mult });
               } else {
                   // Hòa vốn
                   await updatePilotBalance(interaction.user.id, 0, amount, amount);
-                  finalStr += t(interaction, 'STR_9B90338E', { v0: bingoAt, v1: amount.toLocaleString() });
+                  finalStr += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9B90338E', { v0: bingoAt, v1: amount.toLocaleString() });
               }
           } else {
               // Thu tiền nếu tạch
               const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-              finalStr += t(interaction, 'STR_E1041854', { v0: amount.toLocaleString() });
+              finalStr += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E1041854', { v0: amount.toLocaleString() });
 
               if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
           }
@@ -10563,7 +10531,7 @@ async function handleAddCash(interaction) {
     const updateRes = await updatePilotBalance(targetId, amount, 0, amount);
 
     if (updateRes && updateRes.success) {
-        await interaction.editReply(t(interaction, 'STR_76F32D1A', { v0: amount.toLocaleString(), v1: targetId }));
+        await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_76F32D1A', { v0: amount.toLocaleString(), v1: targetId }));
 
         // =====================================
         // 🚨 BÁO CÁO MẬT VÀO KÊNH ADMIN BOT
@@ -10574,9 +10542,9 @@ async function handleAddCash(interaction) {
                 .setTitle('💸 PHÁT HIỆN GIAO DỊCH BƠM TIỀN')
                 .setColor(0xf1c40f)
                 .addFields(
-                    { name: '👮 Người thực hiện (Staff)', value : t(interaction, 'STR_8CDE7BE9', { v0: interaction.user.id }), inline: true },
-                    { name: '🎯 Người thụ hưởng', value : t(interaction, 'STR_8CDE7BE9', { v0: targetId }), inline: true },
-                    { name: '💰 Số tiền in thêm', value : t(interaction, 'STR_6B439400', { v0: amount.toLocaleString() }), inline: false }
+                    { name: '👮 Người thực hiện (Staff)', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: interaction.user.id }), inline: true },
+                    { name: '🎯 Người thụ hưởng', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: targetId }), inline: true },
+                    { name: '💰 Số tiền in thêm', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6B439400', { v0: amount.toLocaleString() }), inline: false }
                 )
                 .setThumbnail(interaction.user.displayAvatarURL())
                 .setFooter({ text: 'Hệ thống Camera giám sát chống lạm phát kinh tế' })
@@ -10585,7 +10553,7 @@ async function handleAddCash(interaction) {
             await adminChannel.send({ embeds: [logEmbed] }).catch(() => {});
         }
     } else {
-        await interaction.editReply(t(interaction, 'STR_D83B2B7E'));
+        await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D83B2B7E'));
         
         // Lỗi thì hoàn lại cái định mức cho thằng lạm quyền
         if (interaction.user.id === SUSPECT_ADMIN_ID) {
@@ -10669,8 +10637,8 @@ async function handleBaiCao(interaction) {
     const balance = await checkAndRegisterUser(interaction); // Thay bằng hàm check user của sếp
     if (!balance) return;
     const amount = parseBetAmount(amountInput, balance.currentCash); // Thay bằng hàm parse tiền của sếp
-    if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
-    if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
+    if (amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4CC856D7'));
+    if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_03D53DF6'));
 
     // Dùng chung hàm bốc bài của Blackjack
     let deck = getDeck(); 
@@ -10700,22 +10668,22 @@ async function handleBaiCao(interaction) {
     let color = 0x2b2d31;
 
     // Hiệu ứng nặn bài
-    await interaction.editReply(t(interaction, 'STR_E05856B6'));
+    await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E05856B6'));
 
     setTimeout(async () => {
         if (pData.score > dData.score) {
             profit = amount;
             color = 0x2ecc71;
-            resultMsg = t(interaction, 'STR_8E8A69D4', { v0: amount.toLocaleString() });
+            resultMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8E8A69D4', { v0: amount.toLocaleString() });
         } else if (pData.score < dData.score) {
             profit = -amount;
             color = 0xe74c3c;
-            resultMsg = t(interaction, 'STR_D83DA7FC', { v0: amount.toLocaleString() });
+            resultMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D83DA7FC', { v0: amount.toLocaleString() });
         } else {
             // Cào rùa bằng nút thì cái ăn (luật làm cái) hoặc hòa. Cho hòa cho sếp đỡ chửi
             profit = 0;
             color = 0x3498db;
-            resultMsg = t(interaction, 'STR_0D4898B6');
+            resultMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0D4898B6');
         }
 
         await updatePilotBalance(interaction.user.id, profit, amount, profit > 0 ? amount * 2 : 0);
@@ -10724,8 +10692,8 @@ async function handleBaiCao(interaction) {
             .setTitle('🎴 BÀI CÀO 3 LÁ 🎴')
             .setColor(color)
             .addFields(
-                { name : t(interaction, 'STR_BC44D618', { v0: pData.text }), value: formatHand(playerHand), inline: false },
-                { name : t(interaction, 'STR_2CA837A8', { v0: dData.text }), value: formatHand(dealerHand), inline: false }
+                { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BC44D618', { v0: pData.text }), value: formatHand(playerHand), inline: false },
+                { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2CA837A8', { v0: dData.text }), value: formatHand(dealerHand), inline: false }
             )
             .setFooter({ text: `Tiền cược: ${amount.toLocaleString()} Cash` });
 
@@ -10750,16 +10718,16 @@ async function handleCheckBalance(interaction) {
     // Kéo dữ liệu từ Sheet/Database
     const balance = await getPilotBalance(targetUser.id);
     if (!balance) {
-        return interaction.editReply(t(interaction, 'STR_D5A2A95D', { v0: targetUser.id }));
+        return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D5A2A95D', { v0: targetUser.id }));
     }
 
     const embed = new EmbedBuilder()
-        .setTitle(t(interaction, 'STR_218A82C1', { v0: targetUser.username.toUpperCase() }))
+        .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_218A82C1', { v0: targetUser.username.toUpperCase() }))
         .setColor(0x2ecc71)
         .addFields(
-            { name: '💰 Số dư hiện tại', value : t(interaction, 'STR_CE3EC3F7', { v0: parseFloat(balance.currentCash).toLocaleString() }), inline: false },
-            { name: '📥 Tổng tiền đã kiếm', value : t(interaction, 'STR_BD84778D', { v0: parseFloat(balance.totalEarned).toLocaleString() }), inline: true },
-            { name: '📤 Tổng tiền đã tiêu', value : t(interaction, 'STR_BD84778D', { v0: parseFloat(balance.usedCash).toLocaleString() }), inline: true }
+            { name: '💰 Số dư hiện tại', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CE3EC3F7', { v0: parseFloat(balance.currentCash).toLocaleString() }), inline: false },
+            { name: '📥 Tổng tiền đã kiếm', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD84778D', { v0: parseFloat(balance.totalEarned).toLocaleString() }), inline: true },
+            { name: '📤 Tổng tiền đã tiêu', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD84778D', { v0: parseFloat(balance.usedCash).toLocaleString() }), inline: true }
         )
         .setThumbnail(targetUser.displayAvatarURL())
         .setTimestamp();
@@ -10784,12 +10752,12 @@ async function handleClearBalance(interaction) {
     // Lấy số dư hiện tại
     const balance = await getPilotBalance(targetUser.id);
     if (!balance) {
-        return interaction.editReply(t(interaction, 'STR_D5A2A95D', { v0: targetUser.id }));
+        return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D5A2A95D', { v0: targetUser.id }));
     }
 
     const currentCash = parseFloat(balance.currentCash);
     if (currentCash <= 0) {
-        return interaction.editReply(t(interaction, 'STR_98C970A4', { v0: targetUser.id }));
+        return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_98C970A4', { v0: targetUser.id }));
     }
 
     // 2. Trừ đi toàn bộ số dư hiện tại để nó về 0
@@ -10797,7 +10765,7 @@ async function handleClearBalance(interaction) {
     const updateRes = await updatePilotBalance(targetUser.id, -currentCash, 0, 0);
 
     if (updateRes && updateRes.success) {
-        await interaction.editReply(t(interaction, 'STR_DB28B325', { v0: currentCash.toLocaleString(), v1: targetUser.id }));
+        await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DB28B325', { v0: currentCash.toLocaleString(), v1: targetUser.id }));
 
         // 3. 🚨 BÁO CÁO MẬT VÀO KÊNH ADMIN BOT
         const adminChannel = interaction.client.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
@@ -10806,9 +10774,9 @@ async function handleClearBalance(interaction) {
                 .setTitle('🚨 LỆNH TỊCH THU TÀI SẢN (CLEAR BALANCE)')
                 .setColor(0xe74c3c) // Đỏ báo động
                 .addFields(
-                    { name: '👮 Người thi hành án (Staff)', value : t(interaction, 'STR_8CDE7BE9', { v0: interaction.user.id }), inline: true },
-                    { name: '🎯 Nạn nhân', value : t(interaction, 'STR_8CDE7BE9', { v0: targetUser.id }), inline: true },
-                    { name: '💸 Số tiền vừa bị bay màu', value : t(interaction, 'STR_95776D45', { v0: currentCash.toLocaleString() }), inline: false }
+                    { name: '👮 Người thi hành án (Staff)', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: interaction.user.id }), inline: true },
+                    { name: '🎯 Nạn nhân', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: targetUser.id }), inline: true },
+                    { name: '💸 Số tiền vừa bị bay màu', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_95776D45', { v0: currentCash.toLocaleString() }), inline: false }
                 )
                 .setThumbnail(targetUser.displayAvatarURL())
                 .setFooter({ text: 'Biên bản xử lý vi phạm kinh tế' })
@@ -10817,7 +10785,7 @@ async function handleClearBalance(interaction) {
             await adminChannel.send({ embeds: [logEmbed] }).catch(() => {});
         }
     } else {
-        await interaction.editReply(t(interaction, 'STR_22A8AF71'));
+        await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_22A8AF71'));
     }
 }
 
