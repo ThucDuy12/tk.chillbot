@@ -148,6 +148,9 @@ async function savePendingUsers() {
   }
 }
 
+// Khai báo rỗng, lát bot chạy nó sẽ kéo từ MongoDB về
+let userLangs = {};
+
 // ===================== BIẾN THEO DÕI LẠM QUYỀN =====================
 const badAdminTracker = new Map(); // Bộ nhớ tạm theo dõi lượng tiền đã bơm
 const SUSPECT_ADMIN_ID = '927432538736168961'; // ID của thanh niên lạm quyền
@@ -187,53 +190,6 @@ if (!TRIGGER_VOICE_CHANNEL_ID) {
 
 if (!LEADERBOARD_CHANNEL_ID) {
   console.error('Missing LEADERBOARD_CHANNEL_ID in environment.');
-}
-
-const { translate } = require('@vitalets/google-translate-api');
-
-// Hàm gửi tin nhắn thông minh tự dịch
-async function replyBilingual(interaction, textVi) {
-    try {
-        // Lấy ngôn ngữ cài đặt trên Discord của người dùng
-        const userLocale = interaction.locale; 
-        
-        // Nếu người dùng xài Discord tiếng Việt, gửi thẳng không cần dịch
-        if (userLocale === 'vi') {
-            return await interaction.reply({ content: textVi });
-        }
-
-        // Nếu người dùng xài tiếng Anh (hoặc ngôn ngữ khác), dịch sang tiếng Anh
-        const translated = await translate(textVi, { to: 'en' });
-        
-        // Gửi kết quả đã dịch
-        return await interaction.reply({ content: translated.text });
-    } catch (err) {
-        console.error("Lỗi dịch thuật:", err);
-        // Lỗi thì gửi bản Tiếng Việt chữa cháy
-        return await interaction.reply({ content: textVi }); 
-    }
-}
-
-async function sendBilingual(channel, options) {
-    try {
-        const isString = typeof options === 'string';
-        let textVi = isString ? options : options.content;
-
-        if (textVi) {
-            const translated = await translate(textVi, { to: 'en' });
-            // Ghép nối cả tiếng Việt và Tiếng Anh
-            const combinedText = `${textVi}\n${translated.text}`; 
-
-            if (isString) {
-                options = combinedText;
-            } else {
-                options.content = combinedText;
-            }
-        }
-        return await channel.send(options);
-    } catch (err) {
-        return await channel.send(options); 
-    }
 }
 
 // ===================== Gemini setup =====================
@@ -519,7 +475,7 @@ vatsimWorker.on('message', async (data) => {
 
             const embed = new EmbedBuilder()
               .setTitle('📡 ATC Online')
-              .setDescription(`**${cs}** (${c.name || 'N/A'}) đang online!\n📶 Tần số: **${c.frequency || 'N/A'}**\n🎖️ Rating: **${getRatingStr(c.rating)}**\n⏰ Online lúc: <t:${logonUnix}:T> (<t:${logonUnix}:R>)`)
+              .setDescription(t(interaction, 'STR_7ECFF569', { v0: cs, v1: c.name || 'N/A', v2: c.frequency || 'N/A', v3: getRatingStr(c.rating), v4: logonUnix, v5: logonUnix }))
               .setColor(0x00FF00)
               .setTimestamp();
 
@@ -536,7 +492,7 @@ vatsimWorker.on('message', async (data) => {
 
             const embed = new EmbedBuilder()
               .setTitle('🔌 ATC Offline')
-              .setDescription(`**${cs}** (${c.name || 'N/A'}) đã offline.\n⏱️ Tổng thời gian online: **${duration}**`)
+              .setDescription(t(interaction, 'STR_7507DCBD', { v0: cs, v1: c.name || 'N/A', v2: duration }))
               .setColor(0xFF0000)
               .setTimestamp();
 
@@ -583,7 +539,7 @@ vatsimWorker.on('message', async (data) => {
 
     // Xây dựng mảng nội dung cho Pilot (Kết hợp ACDM dpark + Định vị tọa độ)
     const pilotLines = pilots.map(p => {
-      const name = p.name ? p.name : `CID: ${p.cid}`;
+      const name = p.name ? p.name : t(interaction, 'STR_117FC047', { v0: p.cid });
       const dep = p.flight_plan?.departure || 'N/A';
       const arr = p.flight_plan?.arrival || 'N/A';
       const acft = getShortAircraft(p.flight_plan?.aircraft);
@@ -623,7 +579,7 @@ vatsimWorker.on('message', async (data) => {
 
     // Xử lý chèn ATC vào Embed
     if (ctrlChunks.length === 0) {
-      currentEmbed.addFields({ name: `📡 ATC Online (0)`, value: 'Không có ATC nào online', inline: false });
+      currentEmbed.addFields({ name : t(interaction, 'STR_ED1D7132'), value: 'Không có ATC nào online', inline: false });
     } else {
       ctrlChunks.forEach((chunk, index) => {
         // Tràn dung lượng 1 Embed -> Tạo Embed mới
@@ -642,7 +598,7 @@ vatsimWorker.on('message', async (data) => {
         currentEmbed = new EmbedBuilder().setColor(0x2ecc71);
         embeds.push(currentEmbed);
       }
-      currentEmbed.addFields({ name: `🛫 Pilots Online (0)`, value: 'Không có Pilot nào online', inline: false });
+      currentEmbed.addFields({ name : t(interaction, 'STR_58AE7B66'), value: 'Không có Pilot nào online', inline: false });
     } else {
       pilotChunks.forEach((chunk, index) => {
         // Tràn dung lượng 1 Embed -> Tạo Embed mới
@@ -989,7 +945,7 @@ async function updateControllerLeaderboardEmbed() {
     // Create embed
     const embed = new EmbedBuilder()
       .setTitle('Member Iron Mic Awards Leaderboard')
-      .setDescription(`**VCLvACC Controllers**\n\nCập nhật lúc: ${utcHourMinute} UTC`)
+      .setDescription(t(interaction, 'STR_D346E24D', { v0: utcHourMinute }))
       .setColor(0xFFD700)
       .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
       .setFooter({ text: 'Tự động cập nhật mỗi giờ | Giờ hiển thị: UTC' })
@@ -1055,7 +1011,7 @@ async function updateControllerLeaderboardEmbed() {
       }
 
       embed.addFields({
-        name: `${categoryName} (${Object.keys(members).length})`,
+        name : t(interaction, 'STR_427C805B', { v0: categoryName, v1: Object.keys(members).length }),
         value: categoryDescription + '\n' + (fieldValue || 'Không có dữ liệu'),
         inline: false
       });
@@ -1074,7 +1030,7 @@ async function updateControllerLeaderboardEmbed() {
 
     embed.addFields({
       name: '📊 Thống kê',
-      value: `• **Tổng controller:** ${totalMembers}\n• **Tổng giờ:** ${totalHours}h\n• **Tháng:** ${leaderboardData.month}/${leaderboardData.year}`,
+      value : t(interaction, 'STR_04080BD8', { v0: totalMembers, v1: totalHours, v2: leaderboardData.month, v3: leaderboardData.year }),
       inline: false
     });
 
@@ -1299,7 +1255,7 @@ async function updatePilotLeaderboardEmbed() {
     // Create embed
     const embed = new EmbedBuilder()
       .setTitle('✈️ VCLvACC Pilot Leaderboard')
-      .setDescription(`**Member Iron Mic Awards - Pilots**\n\nCập nhật lúc: ${utcHourMinute} UTC`)
+      .setDescription(t(interaction, 'STR_1B722899', { v0: utcHourMinute }))
       .setColor(0x1E90FF)
       .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
       .setFooter({ text: 'Tự động cập nhật mỗi giờ | Giờ hiển thị: UTC' })
@@ -1356,7 +1312,7 @@ async function updatePilotLeaderboardEmbed() {
 
     embed.addFields({
       name: '📊 Thống kê',
-      value: `• **Tổng pilot:** ${totalPilots}\n• **Tổng giờ bay:** ${totalHours}h\n• **Tổng chuyến bay:** ${totalFlights}\n• **Tháng:** ${pilotLeaderboardData.month}/${pilotLeaderboardData.year}`,
+      value : t(interaction, 'STR_3EBD4B27', { v0: totalPilots, v1: totalHours, v2: totalFlights, v3: pilotLeaderboardData.month, v4: pilotLeaderboardData.year }),
       inline: false
     });
 
@@ -1661,7 +1617,7 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
     // Build Embed với giao diện xịn xò + Ảnh Banner sếp đưa
     const embed = new EmbedBuilder()
       .setTitle('🌐 BẢNG XẾP HẠNG ATC VATSEA')
-      .setDescription(`**Thống kê thời gian kiểm soát tại các sân bay lớn trong khu vực VATSEA**\n📅 Dữ liệu từ **${startStr}** đến **${endStr}**\n🕒 Cập nhật lúc: ${utcHourMinute} UTC`)
+      .setDescription(t(interaction, 'STR_C851CEF2', { v0: startStr, v1: endStr, v2: utcHourMinute }))
       .setColor(0x004c8f) // Màu xanh đậm chuẩn VATSIM
       // Sếp dán link ảnh trực tiếp vào đây (Tui lấy tạm link ảnh sếp vừa gửi)
       .setImage('https://i.ibb.co/5yMXWyR/VATSEA-LOGO-1000x310-Photoroom.png')
@@ -1700,7 +1656,7 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
       if (category === 'Ground') catIcon = '🛬';
 
       embed.addFields({
-        name: `${catIcon} ${category}`,
+        name : t(interaction, 'STR_FA337741', { v0: catIcon, v1: category }),
         value: hasData ? textBlock : 'Không có dữ liệu.\n',
         inline: false
       });
@@ -1743,14 +1699,14 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
 // ===================== MARKETPLACE HELPERS =====================
 function createMarketplaceEmbed(data, sellerId, images) {
   const embed = new EmbedBuilder()
-    .setTitle(`📦 SẢN PHẨM: ${data.name}`)
+    .setTitle(t(interaction, 'STR_EC1B533B', { v0: data.name }))
     .setColor(0x3498db)
     .addFields(
-      { name: '💰 Giá', value: `**${data.price}**`, inline: true },
+      { name: '💰 Giá', value : t(interaction, 'STR_137BAD49', { v0: data.price }), inline: true },
       { name: '🔢 Thông tin', value: data.info, inline: true },
       { name: '📝 Mô tả', value: data.description, inline: false },
       { name: '📞 Liên hệ', value: data.contact, inline: false },
-      { name: '👤 Người bán', value: `<@${sellerId}>`, inline: true }
+      { name: '👤 Người bán', value : t(interaction, 'STR_8CDE7BE9', { v0: sellerId }), inline: true }
     );
 
   if (images && images.length > 0) {
@@ -2554,7 +2510,7 @@ function buildTranscript(messages, maxChars = SUMMARY_MAX_TRANSCRIPT_CHARS) {
         .map((a) => `${a.name || 'file'}: ${a.url}`)
         .join(' | ');
       content = content ? `${content}\n(Attachments: ${attText})` : `(Attachments: ${attText})`;
-      if (msg.attachments.size > 3) content += ` | (+${msg.attachments.size - 3} files)`;
+      if (msg.attachments.size > 3) content += t(interaction, 'STR_4E17B2E2', { v0: msg.attachments.size - 3 });
     }
 
     if (content.length > 800) content = content.slice(0, 800) + '…';
@@ -2577,7 +2533,7 @@ async function createDiscordEvent(guild, eventData) {
     const endTime = new Date(eventData.startTime + 3 * 60 * 60 * 1000);
 
     const scheduledEvent = await guild.scheduledEvents.create({
-      name: `✈️ Group Flight: ${eventData.dep} → ${eventData.arr}`,
+      name : t(interaction, 'STR_BBD09545', { v0: eventData.dep, v1: eventData.arr }),
       description: `**Route:** ${eventData.route}\n\nJoin our group flight event! All pilots are welcome.\n\nCreated by: <@${eventData.creator}>`,
       scheduledStartTime: startTime,
       scheduledEndTime: endTime,
@@ -2616,12 +2572,12 @@ function createEventEmbed(event, startTime) {
     .setColor(0x0099ff)
     .setThumbnail('https://cdn-icons-png.flaticon.com/512/1836/1836986.png')
     .addFields(
-      { name: '🛫 Departure', value: `**${event.dep}**`, inline: true },
-      { name: '🛬 Arrival', value: `**${event.arr}**`, inline: true },
-      { name: '🧭 Route', value: `\`\`\`${event.route}\`\`\``, inline: false },
-      { name: '⏰ Start Time', value: `${formatDateTime(startTime)}\n(${formatRelativeTime(startTime)})`, inline: false },
-      { name: '👤 Created By', value: `<@${event.creator}>`, inline: true },
-      { name: '👥 Participants', value: `**${event.participants.length}** người tham gia`, inline: true }
+      { name: '🛫 Departure', value : t(interaction, 'STR_137BAD49', { v0: event.dep }), inline: true },
+      { name: '🛬 Arrival', value : t(interaction, 'STR_137BAD49', { v0: event.arr }), inline: true },
+      { name: '🧭 Route', value : t(interaction, 'STR_ECDDADBE', { v0: event.route }), inline: false },
+      { name: '⏰ Start Time', value : t(interaction, 'STR_BFE5F9C1', { v0: formatDateTime(startTime), v1: formatRelativeTime(startTime) }), inline: false },
+      { name: '👤 Created By', value : t(interaction, 'STR_8CDE7BE9', { v0: event.creator }), inline: true },
+      { name: '👥 Participants', value : t(interaction, 'STR_9D382665', { v0: event.participants.length }), inline: true }
     )
     .setFooter({ text: 'Chúc mọi người có chuyến bay vui vẻ!', iconURL: 'https://cdn-icons-png.flaticon.com/512/929/929430.png' })
     .setTimestamp();
@@ -2630,7 +2586,7 @@ function createEventEmbed(event, startTime) {
   if (roles.eventParticipantRoleId) {
     embed.addFields({
       name: '🎫 Event Role',
-      value: `Người tham gia sẽ được gán role <@&${roles.eventParticipantRoleId}>`,
+      value : t(interaction, 'STR_BC050C1C', { v0: roles.eventParticipantRoleId }),
       inline: false
     });
   }
@@ -2647,7 +2603,7 @@ function createEventEmbed(event, startTime) {
   if (event.discordEventId) {
     embed.addFields({
       name: '📅 Discord Event',
-      value: `[Join Discord Event](https://discord.com/events/${GUILD_ID}/${event.discordEventId})`,
+      value : t(interaction, 'STR_BDE685C7', { v0: GUILD_ID, v1: event.discordEventId }),
       inline: true,
     });
   }
@@ -3426,6 +3382,17 @@ client.once('ready', async () => {
       .setDescription('Tịch thu sạch tiền của một người dùng về 0')
       .addUserOption(opt => opt.setName('target').setDescription('Người muốn reset tiền').setRequired(true))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    new SlashCommandBuilder()
+      .setName('set_lang')
+      .setDescription('Change bot language / Đổi ngôn ngữ bot')
+      .addStringOption(opt => opt.setName('lang')
+        .setDescription('Select language / Chọn ngôn ngữ')
+        .setRequired(true)
+        .addChoices(
+          { name: 'English', value: 'en' },
+          { name: 'Tiếng Việt', value: 'vi' }
+        )
+      ),
     ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3594,7 +3561,7 @@ client.once('ready', async () => {
         // 1. Kick (Sau đúng 8 ngày - Hết 1 ngày gia hạn)
         if (daysElapsed >= 8) {
           try {
-            await member.send(`Đã hết 1 ngày gia hạn mà bạn vẫn chưa xin role. Tạm biệt bạn nhé, bạn có thể rejoin server: ${SERVER_INVITE_LINK}`);
+            await member.send(t(interaction, 'STR_F195E1CE', { v0: SERVER_INVITE_LINK }));
           } catch (e) { }
 
           await member.kick("Không xin role Member sau 8 ngày");
@@ -3607,7 +3574,7 @@ client.once('ready', async () => {
         // 2. Nhắc nhở tối hậu thư (Sau 7 ngày)
         if (daysElapsed >= 7 && !data.notified7Days) {
           try {
-            await member.send("⚠️ Bạn có 1 ngày để xin role Member trước khi bị kick khỏi server. Hãy vào <#1405214914662109294> và xin role ngay nhé!");
+            await member.send(t(interaction, 'STR_48FFD483'));
           } catch (e) { }
           data.notified7Days = true;
           isModified = true;
@@ -3616,7 +3583,7 @@ client.once('ready', async () => {
         // 3. Nhắc nhở 5 ngày
         if (daysElapsed >= 5 && daysElapsed < 7 && !data.notified5Days) {
           try {
-            await member.send("Bạn ơi đã 5 ngày rồi mà sao chưa xin role Member để trò chuyện cùng tui nhỉ? Hãy vào <#1405214914662109294> và xin role Member để trò chuyện nhé");
+            await member.send(t(interaction, 'STR_D5172757'));
           } catch (e) { }
           data.notified5Days = true;
           isModified = true;
@@ -3701,7 +3668,7 @@ client.on('guildMemberAdd', async (member) => {
         savePendingUsers();
 
         try {
-          await member.send("Welcome to tk.chill server, hãy vào kênh <#1405214914662109294> để lấy role Member và trò chuyện cùng mọi người nhá. **Lưu ý nếu bạn không xin role 1 tuần kể từ ngày bạn vào server thì bot sẽ tự kick bạn ra**");
+          await member.send(t(interaction, 'STR_DFD57495'));
         } catch (dmErr) {
           console.log(`[Auto-Role] Không thể gửi DM cho ${member.user.tag}`);
         }
@@ -3754,16 +3721,16 @@ client.on('interactionCreate', async (interaction) => {
     const [searchId, index] = interaction.values[0].split('_');
     const songs = temporarySearchResults.get(searchId);
 
-    if (!songs) return replyBilingual(interaction,{ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
+    if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
 
     const selectedSong = songs[index];
     let queue = musicQueues.get(interaction.guild.id);
-    if (!queue) return replyBilingual(interaction,{ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
+    if (!queue) return interaction.reply({ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
 
     // Bơm bài hát đã chọn vào hàng chờ
     queue.songs.push(selectedSong);
 
-    interaction.update({ content: `✅ Đã chọn và thêm bài **${selectedSong.title}** vào hàng chờ!`, components: [] });
+    interaction.update({ content : t(interaction, 'STR_1A61A0B7', { v0: selectedSong.title }), components: [] });
 
     // Kích hoạt hát ngay nếu bot đang nghỉ
     if (queue.songs.length === 1 || !queue.playing) {
@@ -3779,15 +3746,15 @@ client.on('interactionCreate', async (interaction) => {
     const searchId = interaction.customId.split('_')[2];
     const songs = temporarySearchResults.get(searchId);
 
-    if (!songs) return replyBilingual(interaction,{ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
+    if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
 
     let queue = musicQueues.get(interaction.guild.id);
-    if (!queue) return replyBilingual(interaction,{ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
+    if (!queue) return interaction.reply({ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
 
     // Bơm CÙNG LÚC TOÀN BỘ 100 BÀI HÁT vào hàng chờ
     queue.songs.push(...songs);
 
-    interaction.update({ content: `✅ Đã nuốt trọn **${songs.length} bài hát** vào hàng chờ thành công!`, components: [] });
+    interaction.update({ content : t(interaction, 'STR_BB4AF479', { v0: songs.length }), components: [] });
 
     // Kích hoạt hát ngay nếu bot đang nghỉ
     if (queue.songs.length === songs.length || !queue.playing) {
@@ -3813,7 +3780,7 @@ client.on('interactionCreate', async (interaction) => {
     
     if (casinoCommands.includes(interaction.commandName)) {
         // SẾP THAY ID ROLE "CON NGHIỆN" CỦA SẾP VÀO ĐÂY NHÉ:
-        const CON_NGHIEN_ROLE_ID = '123456789012345678'; 
+        const CON_NGHIEN_ROLE_ID = '1524980931067379732'; 
         
         try {
             const member = interaction.member;
@@ -3991,6 +3958,25 @@ client.on('interactionCreate', async (interaction) => {
         case 'clear_balance':
           await handleClearBalance(interaction);
           break;
+        case 'set_lang': {
+          const chosenLang = interaction.options.getString('lang');
+          
+          // Cập nhật bộ nhớ RAM
+          userLangs[interaction.user.id] = chosenLang;
+          
+          // Lưu thẳng lên MongoDB cho bất tử
+          await db.saveBotConfig('user_langs', userLangs);
+
+          // Gắn ngay ngôn ngữ mới
+          interaction.userLang = chosenLang;
+
+          if (chosenLang === 'vi') {
+            await interaction.reply({ content: '✅ Đã đổi ngôn ngữ giao diện bot sang **Tiếng Việt**!', ephemeral: true });
+          } else {
+            await interaction.reply({ content: '✅ Bot interface language has been changed to **English**!', ephemeral: true });
+          }
+          break;
+        }
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
           const anh2 = interaction.options.getAttachment('anh2');
@@ -4000,7 +3986,7 @@ client.on('interactionCreate', async (interaction) => {
           const attachments = [anh1, anh2, anh3, anh4].filter(a => a && a.contentType?.startsWith('image')).map(a => a.url);
 
           if (attachments.length === 0) {
-            return replyBilingual(interaction,{ content: '❌ Bạn phải gửi ít nhất 1 ảnh (định dạng hình ảnh)!', ephemeral: true });
+            return interaction.reply({ content: '❌ Bạn phải gửi ít nhất 1 ảnh (định dạng hình ảnh)!', ephemeral: true });
           }
 
           const saleId = Date.now().toString();
@@ -4008,11 +3994,11 @@ client.on('interactionCreate', async (interaction) => {
 
           const sellModal = new ModalBuilder().setCustomId(`sell_modal_${saleId}`).setTitle('Thông tin sản phẩm đăng bán');
           sellModal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Tên sản phẩm').setPlaceholder('Ex: Livery A321...').setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel('Số lượng & Tình trạng').setPlaceholder('Ex: 1 / Mới').setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel('Giá bán').setPlaceholder('Ex: 80.000 VNĐ').setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel('Mô tả sản phẩm').setStyle(TextInputStyle.Paragraph).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Liên hệ khác').setPlaceholder('Link FB, SĐT...').setStyle(TextInputStyle.Paragraph).setRequired(true))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel(t(interaction, 'STR_DB91BB37')).setPlaceholder(t(interaction, 'STR_697C39D0')).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel(t(interaction, 'STR_ADFCBD3F')).setPlaceholder(t(interaction, 'STR_DE88C35A')).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel(t(interaction, 'STR_6430156F')).setPlaceholder(t(interaction, 'STR_48D3C539')).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel(t(interaction, 'STR_168E3133')).setStyle(TextInputStyle.Paragraph).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel(t(interaction, 'STR_758C766E')).setPlaceholder(t(interaction, 'STR_4DBA7A3E')).setStyle(TextInputStyle.Paragraph).setRequired(true))
           );
           await interaction.showModal(sellModal);
           break;
@@ -4025,11 +4011,11 @@ client.on('interactionCreate', async (interaction) => {
       if (customId.startsWith('music_')) {
         const queue = musicQueues.get(interaction.guild.id);
         if (!queue) {
-          return replyBilingual(interaction,{ content: '❌ Nhạc đang tắt, bạn không thể bấm nút này.', ephemeral: true }).catch(() => { });
+          return interaction.reply({ content: '❌ Nhạc đang tắt, bạn không thể bấm nút này.', ephemeral: true }).catch(() => { });
         }
 
         if (interaction.member.voice.channel?.id !== queue.voiceChannel.id) {
-          return replyBilingual(interaction,{ content: '❌ Bạn phải vào chung phòng Voice với bot mới điều khiển được!', ephemeral: true }).catch(() => { });
+          return interaction.reply({ content: '❌ Bạn phải vào chung phòng Voice với bot mới điều khiển được!', ephemeral: true }).catch(() => { });
         }
 
         try {
@@ -4078,7 +4064,7 @@ client.on('interactionCreate', async (interaction) => {
       if (interaction.customId.startsWith('ann_editai_')) {
         const reqId = interaction.customId.replace('ann_editai_', '');
         const data = pendingAnnouncements.get(reqId);
-        if (!data) return replyBilingual(interaction,{ content: '❌ Phiên đã hết hạn.', ephemeral: true });
+        if (!data) return interaction.reply({ content: '❌ Phiên đã hết hạn.', ephemeral: true });
 
         const modal = new ModalBuilder()
           .setCustomId(`modalai_${reqId}`)
@@ -4086,7 +4072,7 @@ client.on('interactionCreate', async (interaction) => {
 
         const textInput = new TextInputBuilder()
           .setCustomId('ai_text')
-          .setLabel('Sửa theo ý bạn (sẽ gửi bản này)')
+          .setLabel(t(interaction, 'STR_8D57EC36'))
           .setStyle(TextInputStyle.Paragraph)
           .setValue(data.aiMessage.substring(0, 4000))
           .setRequired(true);
@@ -4106,7 +4092,7 @@ client.on('interactionCreate', async (interaction) => {
         if (action === 'edit' || action === 'approve' || action === 'reject') {
           const hasAdmin = interaction.member.roles.cache.some(r => r.name === 'Admin') || interaction.member.roles.cache.has(roles.adminRoleId);
           if (!hasAdmin && interaction.user.id !== OWNER_ID) {
-            return replyBilingual(interaction,{ content: '❌ Chỉ Admin mới được thực hiện thao tác này!', ephemeral: true });
+            return interaction.reply({ content: '❌ Chỉ Admin mới được thực hiện thao tác này!', ephemeral: true });
           }
         }
 
@@ -4117,11 +4103,11 @@ client.on('interactionCreate', async (interaction) => {
           const saleId = parts[2];
           const editModal = new ModalBuilder().setCustomId(`market_edit_modal_${saleId}`).setTitle('Chỉnh sửa thông tin sản phẩm');
           editModal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel('Tên sản phẩm').setDefaultValue(parsedData.name).setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel('Số lượng & Tình trạng').setDefaultValue(parsedData.info).setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel('Giá bán').setDefaultValue(parsedData.price).setStyle(TextInputStyle.Short).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel('Mô tả sản phẩm').setDefaultValue(parsedData.description).setStyle(TextInputStyle.Paragraph).setRequired(true)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel('Liên hệ').setDefaultValue(parsedData.contact).setStyle(TextInputStyle.Paragraph).setRequired(true))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel(t(interaction, 'STR_DB91BB37')).setDefaultValue(parsedData.name).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel(t(interaction, 'STR_ADFCBD3F')).setDefaultValue(parsedData.info).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel(t(interaction, 'STR_6430156F')).setDefaultValue(parsedData.price).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel(t(interaction, 'STR_168E3133')).setDefaultValue(parsedData.description).setStyle(TextInputStyle.Paragraph).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('contact').setLabel(t(interaction, 'STR_9276B119')).setDefaultValue(parsedData.contact).setStyle(TextInputStyle.Paragraph).setRequired(true))
           );
           await interaction.showModal(editModal);
           return;
@@ -4131,7 +4117,7 @@ client.on('interactionCreate', async (interaction) => {
           const saleId = parts[2];
           const rejectModal = new ModalBuilder().setCustomId(`market_reject_modal_${saleId}`).setTitle('Lý do từ chối sản phẩm');
           rejectModal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Lý do từ chối').setPlaceholder('Ví dụ: Thiếu ảnh chi tiết, giá quá cao...').setStyle(TextInputStyle.Paragraph).setRequired(true))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel(t(interaction, 'STR_7AB1EC02')).setPlaceholder(t(interaction, 'STR_FF829A05')).setStyle(TextInputStyle.Paragraph).setRequired(true))
           );
           await interaction.showModal(rejectModal);
           return;
@@ -4139,19 +4125,19 @@ client.on('interactionCreate', async (interaction) => {
 
         if (action === 'approve') {
           const marketChannel = interaction.guild.channels.cache.get(MARKETPLACE_CHANNEL_ID);
-          if (!marketChannel) return replyBilingual(interaction, { content: '❌ Không tìm thấy kênh Marketplace!', ephemeral: true });
+          if (!marketChannel) return interaction.reply({ content: '❌ Không tìm thấy kênh Marketplace!', ephemeral: true });
 
           const publicEmbed = EmbedBuilder.from(oldEmbed)
             .setFooter({ text: `Ngày đăng: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}` });
 
           const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setLabel('Liên hệ người bán').setStyle(ButtonStyle.Link).setURL(`https://discord.com/users/${parsedData.sellerId}`).setEmoji('💬'),
-            new ButtonBuilder().setCustomId(`market_soldout_${parsedData.sellerId}`).setLabel('Hết hàng / Đã bán').setStyle(ButtonStyle.Danger).setEmoji('✖️')
+            new ButtonBuilder().setLabel(t(interaction, 'STR_8473213A')).setStyle(ButtonStyle.Link).setURL(`https://discord.com/users/${parsedData.sellerId}`).setEmoji('💬'),
+            new ButtonBuilder().setCustomId(`market_soldout_${parsedData.sellerId}`).setLabel(t(interaction, 'STR_6B7B0658')).setStyle(ButtonStyle.Danger).setEmoji('✖️')
           );
 
-          await sendBilingual(marketChannel,{ content: '📢 **CÓ SẢN PHẨM MỚI!**', embeds: [publicEmbed], components: [row] });
-          await editBilingual(interaction,{ content: `✅ **Đã duyệt** bởi ${interaction.user.mention}`, components: [], embeds: [] });
-          await replyBilingual(interaction,{ content: '✅ Đã đăng bài thành công ra kênh Marketplace!', ephemeral: true });
+          await marketChannel.send({ content: '📢 **CÓ SẢN PHẨM MỚI!**', embeds: [publicEmbed], components: [row] });
+          await interaction.message.edit({ content : t(interaction, 'STR_0477D27A', { v0: interaction.user.mention }), components: [], embeds: [] });
+          await interaction.reply({ content: '✅ Đã đăng bài thành công ra kênh Marketplace!', ephemeral: true });
           return;
         }
 
@@ -4161,19 +4147,19 @@ client.on('interactionCreate', async (interaction) => {
           const isSeller = interaction.user.id === sellerId;
 
           if (!isSeller && !hasAdmin && interaction.user.id !== OWNER_ID) {
-            return replyBilingual(interaction,{ content: '❌ Chỉ người bán hoặc Admin mới được đóng bài!', ephemeral: true });
+            return interaction.reply({ content: '❌ Chỉ người bán hoặc Admin mới được đóng bài!', ephemeral: true });
           }
 
           const soldEmbed = EmbedBuilder.from(oldEmbed)
-            .setTitle(`${oldEmbed.title} [HẾT HÀNG]`)
+            .setTitle(t(interaction, 'STR_431DDDA9', { v0: oldEmbed.title }))
             .setColor(0x95a5a6);
 
           const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('disabled_sold').setLabel('Đã Hết Hàng').setStyle(ButtonStyle.Secondary).setDisabled(true)
+            new ButtonBuilder().setCustomId('disabled_sold').setLabel(t(interaction, 'STR_074F9349')).setStyle(ButtonStyle.Secondary).setDisabled(true)
           );
 
-          await editBilingual(interaction,{ embeds: [soldEmbed], components: [row] });
-          await replyBilingual(interaction,{ content: '✅ Đã đóng bài đăng bán thành công.', ephemeral: true });
+          await interaction.message.edit({ embeds: [soldEmbed], components: [row] });
+          await interaction.reply({ content: '✅ Đã đóng bài đăng bán thành công.', ephemeral: true });
           return;
         }
       }
@@ -4198,16 +4184,16 @@ client.on('interactionCreate', async (interaction) => {
 
         const embed = createMarketplaceEmbed(data, interaction.user.id, images);
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId(`market_edit_${saleId}`).setLabel('Sửa bài').setStyle(ButtonStyle.Secondary).setEmoji('📝'),
-          new ButtonBuilder().setCustomId(`market_approve_${saleId}`).setLabel('DUYỆT').setStyle(ButtonStyle.Success).setEmoji('✅'),
-          new ButtonBuilder().setCustomId(`market_reject_${saleId}`).setLabel('TỪ CHỐI').setStyle(ButtonStyle.Danger).setEmoji('❌')
+          new ButtonBuilder().setCustomId(`market_edit_${saleId}`).setLabel(t(interaction, 'STR_79486130')).setStyle(ButtonStyle.Secondary).setEmoji('📝'),
+          new ButtonBuilder().setCustomId(`market_approve_${saleId}`).setLabel(t(interaction, 'STR_2C0CC944')).setStyle(ButtonStyle.Success).setEmoji('✅'),
+          new ButtonBuilder().setCustomId(`market_reject_${saleId}`).setLabel(t(interaction, 'STR_86CF180D')).setStyle(ButtonStyle.Danger).setEmoji('❌')
         );
 
         const adminChannel = interaction.guild.channels.cache.get(ADMIN_CHANNEL_ID);
         if (adminChannel) {
-          await adminChannel.send({ content: `📩 **ĐƠN BÁN MỚI** từ <@${interaction.user.id}>`, embeds: [embed], components: [row] });
+          await adminChannel.send({ content : t(interaction, 'STR_C8E22486', { v0: interaction.user.id }), embeds: [embed], components: [row] });
         }
-        await replyBilingual(interaction,{ content: '✅ Đã gửi đơn đăng bán cho Admin duyệt!', ephemeral: true });
+        await interaction.reply({ content: '✅ Đã gửi đơn đăng bán cho Admin duyệt!', ephemeral: true });
         return;
       }
 
@@ -4240,9 +4226,9 @@ client.on('interactionCreate', async (interaction) => {
           const channel = await interaction.client.channels.fetch(channelId);
           const msg = await channel.messages.fetch(messageId);
           await msg.edit(newText);
-          await replyBilingual(interaction, { content: '✅ Đã cập nhật thành công thông báo cũ!', ephemeral: true });
+          await interaction.reply({ content: '✅ Đã cập nhật thành công thông báo cũ!', ephemeral: true });
         } catch (err) {
-          await replyBilingual(interaction, { content: '❌ Lỗi không sửa được tin nhắn (Có thể khác tác giả).', ephemeral: true });
+          await interaction.reply({ content: '❌ Lỗi không sửa được tin nhắn (Có thể khác tác giả).', ephemeral: true });
         }
       }
 
@@ -4252,7 +4238,7 @@ client.on('interactionCreate', async (interaction) => {
         const newText = interaction.fields.getTextInputValue('ai_text');
         const data = pendingAnnouncements.get(reqId);
 
-        if (!data) return replyBilingual(interaction, { content: '❌ Phiên đã hết hạn.', ephemeral: true });
+        if (!data) return interaction.reply({ content: '❌ Phiên đã hết hạn.', ephemeral: true });
 
         // Lưu lại nội dung người dùng vừa sửa vào bộ nhớ tạm
         data.aiMessage = newText;
@@ -4265,8 +4251,8 @@ client.on('interactionCreate', async (interaction) => {
         const embed = EmbedBuilder.from(interaction.message.embeds[0])
           .setDescription('✨ **Bạn đã tự chỉnh sửa lại bản AI.** Bạn chốt gửi đi chưa?')
           .setFields(
-            { name: '📝 Bản gốc của bạn', value: `\`\`\`\n${previewRaw}\n\`\`\`` },
-            { name: '🤖 Bản do AI nâng cấp (ĐÃ SỬA)', value: `\`\`\`\n${previewAi}\n\`\`\`` },
+            { name: '📝 Bản gốc của bạn', value : t(interaction, 'STR_68A1141F', { v0: previewRaw }) },
+            { name: '🤖 Bản do AI nâng cấp (ĐÃ SỬA)', value : t(interaction, 'STR_68A1141F', { v0: previewAi }) },
             { name: '⏰ Lịch trình', value: data.targetTime ? `<t:${Math.floor(data.targetTime / 1000)}:F>` : 'Gửi ngay lập tức' }
           )
           .setColor(0xf1c40f); // Đổi sang màu vàng cho biết là đã edit
@@ -4282,9 +4268,9 @@ client.on('interactionCreate', async (interaction) => {
         if (scheduledIndex !== -1) {
           scheduledAnnouncements[scheduledIndex].content = newText;
           await db.saveAnnouncements(scheduledAnnouncements);
-          await replyBilingual(interaction,{ content: '✅ Đã cập nhật nội dung cho thông báo hẹn giờ thành công!', ephemeral: true });
+          await interaction.reply({ content: '✅ Đã cập nhật nội dung cho thông báo hẹn giờ thành công!', ephemeral: true });
         } else {
-          await replyBilingual(interaction, { content: '❌ Lịch trình này không còn tồn tại hoặc đã được gửi đi.', ephemeral: true });
+          await interaction.reply({ content: '❌ Lịch trình này không còn tồn tại hoặc đã được gửi đi.', ephemeral: true });
         }
       }
       // Nộp form từ chối bài bán
@@ -4311,7 +4297,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         await interaction.update({
-          content: `❌ **Đã từ chối:** ${parsedData.name}\n👤 **Người bán:** <@${parsedData.sellerId}>\n📝 **Lý do:** ${reason}${dmStatus}`,
+          content : t(interaction, 'STR_8BBF9B01', { v0: parsedData.name, v1: parsedData.sellerId, v2: reason, v3: dmStatus }),
           embeds: [],
           components: []
         });
@@ -4327,7 +4313,7 @@ client.on('interactionCreate', async (interaction) => {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({ content: '❌ Đã có lỗi nội bộ.', ephemeral: true });
       } else {
-        await replyBilingual(interaction,{ content: '❌ Đã có lỗi nội bộ.', ephemeral: true });
+        await interaction.reply({ content: '❌ Đã có lỗi nội bộ.', ephemeral: true });
       }
     } catch (_) { }
   }
@@ -4347,14 +4333,14 @@ client.on('messageCreate', async (message) => {
 
     if (Date.now() > verifySession.expires) {
       pendingVerifyDMs.delete(message.author.id);
-      return message.reply('❌ Phiên xác thực của bạn đã hết hạn (quá 5 phút). Vui lòng quay lại Server bấm nút lại từ đầu.');
+      return message.reply(t(interaction, 'STR_ED1B3410'));
     }
 
     if (message.attachments.size === 0) {
-      return message.reply('❌ Bạn chưa đính kèm ảnh chụp màn hình profile VATSIM!');
+      return message.reply(t(interaction, 'STR_9EA82672'));
     }
 
-    const processingMsg = await message.reply('⏳ Đang yêu cầu BOT quét ảnh của bạn. Xin vui lòng chờ...');
+    const processingMsg = await message.reply(t(interaction, 'STR_DCE4DBAE'));
 
     try {
       const attachment = message.attachments.first();
@@ -4600,7 +4586,7 @@ client.on('messageCreate', async (message) => {
 
       const adminChannel = message.guild.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
       if (adminChannel) {
-        adminChannel.send(`🚨 **CẢNH BÁO BẢO MẬT:** Người dùng ${message.author} (\`${message.author.id}\`) vừa cố gắng tag \`@everyone\` hoặc \`@here\` trái phép ở kênh ${message.channel}.\n🛑 Tin nhắn đã bị xóa tự động vì nghi ngờ tài khoản bị hack.\n💬 **Nội dung:** ${message.content}`);
+        adminChannel.send(t(interaction, 'STR_7CE2E5E0', { v0: message.author, v1: message.author.id, v2: message.channel, v3: message.content }));
       }
       return;
     }
@@ -4623,7 +4609,7 @@ client.on('messageCreate', async (message) => {
   if (message.content === '!debug_pilot_leaderboard' && message.author.id === OWNER_ID) {
     const embed = new EmbedBuilder()
       .setTitle('Debug Pilot Leaderboard Data')
-      .setDescription(`Dữ liệu từ file JSON:`)
+      .setDescription(t(interaction, 'STR_BD04F904'))
       .setColor(0xFF0000);
 
     const pilotEntries = Object.entries(pilotLeaderboardData.pilots || {});
@@ -4636,7 +4622,7 @@ client.on('messageCreate', async (message) => {
         const hours = (data.seconds / 3600).toFixed(2);
         fieldValue += `${data.name} (${id}) - ${data.seconds}s (${hours}h) - ${data.flights || 1} chuyến\n`;
       });
-      embed.addFields({ name: `Pilots (${pilotEntries.length})`, value: fieldValue || 'Không có', inline: false });
+      embed.addFields({ name : t(interaction, 'STR_F04399DE', { v0: pilotEntries.length }), value: fieldValue || 'Không có', inline: false });
     }
     await message.channel.send({ embeds: [embed] });
   }
@@ -4657,16 +4643,16 @@ async function handleTimeCommand(interaction) {
       { name: '💬 Discord Format', value: timeInfo.discord, inline: false },
       {
         name: '📋 Chi tiết',
-        value: `${timeInfo.detailed.dayOfWeek}, ngày ${timeInfo.detailed.day} ${timeInfo.detailed.monthName} năm ${timeInfo.detailed.year}\n${timeInfo.detailed.hours
+        value : t(interaction, 'STR_992D2BC1', { v0: timeInfo.detailed.dayOfWeek, v1: timeInfo.detailed.day, v2: timeInfo.detailed.monthName, v3: timeInfo.detailed.year, v4: timeInfo.detailed.hours
           .toString()
-          .padStart(2, '0')}:${timeInfo.detailed.minutes.toString().padStart(2, '0')}:${timeInfo.detailed.seconds.toString().padStart(2, '0')}`,
+          .padStart(2, '0'), v5: timeInfo.detailed.minutes.toString().padStart(2, '0'), v6: timeInfo.detailed.seconds.toString().padStart(2, '0') }),
         inline: false,
       }
     )
     .setFooter({ text: 'Bot được cung cấp thông tin thời gian thực', iconURL: 'https://cdn-icons-png.flaticon.com/512/3114/3114840.png' })
     .setTimestamp();
 
-  await replyBilingual(interaction,{ embeds: [embed] });
+  await interaction.reply({ embeds: [embed] });
 }
 
 // ===================== AWARD FUNCTIONS =====================
@@ -4771,7 +4757,7 @@ async function sendATCAward(interaction = null) {
 
     const embed = new EmbedBuilder()
       .setTitle('🏆 **THÔNG BÁO CHÚC MỪNG TOP 5 ATC** 🏆')
-      .setDescription(`**${monthName} năm ${currentYear}**\n\n🎉 *Xin chúc mừng những ATC có thời gian kiểm soát nhiều nhất trong tháng!* 🎉`)
+      .setDescription(t(interaction, 'STR_FF12B5C2', { v0: monthName, v1: currentYear }))
       .setColor(0xFFD700)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/2107/2107845.png')
       .setFooter({ text: 'VCLvACC - Member Iron Mic Awards', iconURL: 'https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960' })
@@ -4793,8 +4779,8 @@ async function sendATCAward(interaction = null) {
         const categories = atc.categories.join(', ');
 
         embed.addFields({
-          name: `${rank} ${atc.name} (${atc.cid})`,
-          value: `⏱️ **Thời gian:** ${timeFormatted}\n📡 **Vị trí:** ${categories}\n✈️ **Callsign gần nhất:** ${atc.callsign || 'N/A'}`,
+          name : t(interaction, 'STR_DCEE5CC3', { v0: rank, v1: atc.name, v2: atc.cid }),
+          value : t(interaction, 'STR_4C7C8A73', { v0: timeFormatted, v1: categories, v2: atc.callsign || 'N/A' }),
           inline: false
         });
       });
@@ -4803,7 +4789,7 @@ async function sendATCAward(interaction = null) {
       const winnerNames = top5.map(a => a.name).join(', ');
       embed.addFields({
         name: '🎊 Chúc mừng!',
-        value: `Xin chúc mừng **${winnerNames}** đã xuất sắc lọt vào top 5 ATC của tháng!\nCảm ơn các bạn đã đóng góp cho cộng đồng VCLvACC!`,
+        value : t(interaction, 'STR_DACD4359', { v0: winnerNames }),
         inline: false
       });
     }
@@ -4833,8 +4819,8 @@ async function sendATCAward(interaction = null) {
 
     // Nếu gọi từ interaction, reply
     if (interaction) {
-      await replyBilingual(interaction,{
-        content: `✅ Đã gửi thông báo chúc mừng top 5 ATC vào <#${channelId}>!`,
+      await interaction.reply({
+        content : t(interaction, 'STR_67AD761E', { v0: channelId }),
         ephemeral: true
       });
     }
@@ -4844,7 +4830,7 @@ async function sendATCAward(interaction = null) {
   } catch (err) {
     console.error('Error sending ATC award:', err);
     if (interaction) {
-      await replyBilingual(interaction,{
+      await interaction.reply({
         content: '❌ Đã có lỗi khi gửi thông báo award ATC!',
         ephemeral: true
       });
@@ -4871,7 +4857,7 @@ async function sendPilotAward(interaction = null) {
 
     const embed = new EmbedBuilder()
       .setTitle('✈️ **THÔNG BÁO CHÚC MỪNG TOP 5 PILOT** ✈️')
-      .setDescription(`**${monthName} năm ${currentYear}**\n\n🎉 *Xin chúc mừng những pilot có thời gian bay nhiều nhất trong khu vực VCL!* 🎉`)
+      .setDescription(t(interaction, 'STR_CF980B83', { v0: monthName, v1: currentYear }))
       .setColor(0x1E90FF)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/824/824100.png')
       .setFooter({ text: 'VCLvACC - Member Iron Mic Awards', iconURL: 'https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960' })
@@ -4892,8 +4878,8 @@ async function sendPilotAward(interaction = null) {
         const timeFormatted = formatAwardTime(pilot.totalSeconds);
 
         embed.addFields({
-          name: `${rank} ${pilot.name} (${pilot.cid})`,
-          value: `⏱️ **Thời gian bay:** ${timeFormatted}\n✈️ **Số chuyến bay:** ${pilot.flights}\n🛩️ **Callsign gần nhất:** ${pilot.callsign || 'N/A'}`,
+          name : t(interaction, 'STR_DCEE5CC3', { v0: rank, v1: pilot.name, v2: pilot.cid }),
+          value : t(interaction, 'STR_CF820668', { v0: timeFormatted, v1: pilot.flights, v2: pilot.callsign || 'N/A' }),
           inline: false
         });
       });
@@ -4902,7 +4888,7 @@ async function sendPilotAward(interaction = null) {
       const winnerNames = top5.map(p => p.name).join(', ');
       embed.addFields({
         name: '🎊 Chúc mừng!',
-        value: `Xin chúc mừng **${winnerNames}** đã xuất sắc lọt vào top 5 pilot của tháng!\nChúc các bạn luôn có những chuyến bay an toàn và thú vị!`,
+        value : t(interaction, 'STR_C275C90D', { v0: winnerNames }),
         inline: false
       });
     }
@@ -4932,8 +4918,8 @@ async function sendPilotAward(interaction = null) {
 
     // Nếu gọi từ interaction, reply
     if (interaction) {
-      await replyBilingual(interaction,{
-        content: `✅ Đã gửi thông báo chúc mừng top 5 pilot vào <#${channelId}>!`,
+      await interaction.reply({
+        content : t(interaction, 'STR_DD07FC4B', { v0: channelId }),
         ephemeral: true
       });
     }
@@ -4943,7 +4929,7 @@ async function sendPilotAward(interaction = null) {
   } catch (err) {
     console.error('Error sending pilot award:', err);
     if (interaction) {
-      await replyBilingual(interaction,{
+      await interaction.reply({
         content: '❌ Đã có lỗi khi gửi thông báo award pilot!',
         ephemeral: true
       });
@@ -5020,7 +5006,7 @@ async function resetAwardStatus() {
 async function handleSummarize(interaction) {
   try {
     if (!interaction.inGuild()) {
-      return replyBilingual(interaction,{ content: '❌ Lệnh này chỉ dùng trong server.', ephemeral: true });
+      return interaction.reply({ content: '❌ Lệnh này chỉ dùng trong server.', ephemeral: true });
     }
 
     const sub = interaction.options.getSubcommand();
@@ -5028,7 +5014,7 @@ async function handleSummarize(interaction) {
     const durationMs = parseDurationToMs(durationStr);
 
     if (!durationMs || isNaN(durationMs) || durationMs <= 0) {
-      return replyBilingual(interaction,{
+      return interaction.reply({
         content: '❌ Duration không hợp lệ. Ví dụ: `30m`, `2h`, `1d` (hoặc `45` = 45 phút).',
         ephemeral: true,
       });
@@ -5036,12 +5022,12 @@ async function handleSummarize(interaction) {
 
     const maxAllowed = 7 * 24 * 60 * 60 * 1000;
     if (durationMs > maxAllowed) {
-      return replyBilingual(interaction,{ content: '❌ Duration quá dài. Tối đa 7 ngày.', ephemeral: true });
+      return interaction.reply({ content: '❌ Duration quá dài. Tối đa 7 ngày.', ephemeral: true });
     }
 
     const channel = interaction.options.getChannel('channel') || interaction.channel;
     if (!channel || typeof channel.isTextBased !== 'function' || !channel.isTextBased()) {
-      return replyBilingual(interaction,{ content: '❌ Kênh này không phải text channel.', ephemeral: true });
+      return interaction.reply({ content: '❌ Kênh này không phải text channel.', ephemeral: true });
     }
 
     const targetUser = sub === 'user' ? interaction.options.getUser('user', true) : null;
@@ -5059,8 +5045,7 @@ async function handleSummarize(interaction) {
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
     if (msgs.length === 0) {
-      return interaction.editReply(
-        `ℹ️ Không có tin nhắn phù hợp trong ${durationStr} gần nhất ở <#${channel.id}>.`
+      return interaction.editReply(t(interaction, 'STR_76B64DD4', { v0: durationStr, v1: channel.id })
       );
     }
 
@@ -5132,9 +5117,9 @@ ${transcript}
     console.error('handleSummarize error:', err);
     try {
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply('❌ Tóm tắt thất bại do lỗi nội bộ. Admin kiểm tra log giúp nhé.');
+        await interaction.editReply(t(interaction, 'STR_6D1095A6'));
       } else {
-        await replyBilingual(interaction,{ content: '❌ Tóm tắt thất bại do lỗi nội bộ. Admin kiểm tra log giúp nhé.', ephemeral: true });
+        await interaction.reply({ content: '❌ Tóm tắt thất bại do lỗi nội bộ. Admin kiểm tra log giúp nhé.', ephemeral: true });
       }
     } catch (_) { }
   }
@@ -5146,25 +5131,25 @@ async function handleLeaderboardCommand(interaction) {
 
   if (subcommand === 'show') {
     await updateControllerLeaderboardEmbed();
-    await replyBilingual(interaction,{ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
+    await interaction.reply({ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
 
   } else if (subcommand === 'update') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return replyBilingual(interaction,{ content: '❌ Bạn không có quyền cập nhật leaderboard.', ephemeral: true });
+      return interaction.reply({ content: '❌ Bạn không có quyền cập nhật leaderboard.', ephemeral: true });
     }
 
     await updateControllerLeaderboardEmbed();
-    await replyBilingual(interaction,{ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
+    await interaction.reply({ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
 
   } else if (subcommand === 'reset') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return replyBilingual(interaction,{ content: '❌ Bạn không có quyền reset leaderboard.', ephemeral: true });
+      return interaction.reply({ content: '❌ Bạn không có quyền reset leaderboard.', ephemeral: true });
     }
 
     const now = new Date();
@@ -5177,7 +5162,7 @@ async function handleLeaderboardCommand(interaction) {
     };
     await saveControllerLeaderboard(currentMonth, currentYear, leaderboardData.stats);
     await updateControllerLeaderboardEmbed();
-    await replyBilingual(interaction,{ content: '✅ Controller Leaderboard đã được reset!', ephemeral: true });
+    await interaction.reply({ content: '✅ Controller Leaderboard đã được reset!', ephemeral: true });
   }
 }
 
@@ -5187,25 +5172,25 @@ async function handlePilotLeaderboardCommand(interaction) {
 
   if (subcommand === 'show') {
     await updatePilotLeaderboardEmbed();
-    await replyBilingual(interaction,{ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
+    await interaction.reply({ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
 
   } else if (subcommand === 'update') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return replyBilingual(interaction,{ content: '❌ Bạn không có quyền cập nhật pilot leaderboard.', ephemeral: true });
+      return interaction.reply({ content: '❌ Bạn không có quyền cập nhật pilot leaderboard.', ephemeral: true });
     }
 
     await updatePilotLeaderboardEmbed();
-    await replyBilingual(interaction,{ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
+    await interaction.reply({ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
 
   } else if (subcommand === 'reset') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return replyBilingual(interaction,{ content: '❌ Bạn không có quyền reset pilot leaderboard.', ephemeral: true });
+      return interaction.reply({ content: '❌ Bạn không có quyền reset pilot leaderboard.', ephemeral: true });
     }
 
     const now = new Date();
@@ -5218,7 +5203,7 @@ async function handlePilotLeaderboardCommand(interaction) {
     };
     await savePilotLeaderboard(currentMonth, currentYear, pilotLeaderboardData.pilots);
     await updatePilotLeaderboardEmbed();
-    await replyBilingual(interaction,{ content: '✅ Pilot Leaderboard đã được reset!', ephemeral: true });
+    await interaction.reply({ content: '✅ Pilot Leaderboard đã được reset!', ephemeral: true });
 
   } else if (subcommand === 'full') {
     await interaction.deferReply();
@@ -5232,17 +5217,17 @@ async function handlePilotLeaderboardCommand(interaction) {
 
       // Create a txt file attachment
       const buffer = Buffer.from(txtContent, 'utf8');
-      const attachment = new AttachmentBuilder(buffer, { name: `pilot_leaderboard_${pilotLeaderboardData.month}_${pilotLeaderboardData.year}.txt` });
+      const attachment = new AttachmentBuilder(buffer, { name : t(interaction, 'STR_3D889985', { v0: pilotLeaderboardData.month, v1: pilotLeaderboardData.year }) });
 
       const embed = new EmbedBuilder()
         .setTitle('📊 Full Pilot Leaderboard')
-        .setDescription(`Toàn bộ danh sách pilot trong khu vực VCL (VV/VD/VL)\nTháng: ${pilotLeaderboardData.month}/${pilotLeaderboardData.year}`)
+        .setDescription(t(interaction, 'STR_3F207FF2', { v0: pilotLeaderboardData.month, v1: pilotLeaderboardData.year }))
         .setColor(0x1E90FF)
         .setFooter({ text: 'Tải file .txt để xem chi tiết' })
         .setTimestamp();
 
       await interaction.editReply({
-        content: `✅ Đây là toàn bộ pilot leaderboard (${Object.keys(pilotLeaderboardData.pilots || {}).length} pilot)`,
+        content : t(interaction, 'STR_186BC419'),
         embeds: [embed],
         files: [attachment]
       });
@@ -5260,7 +5245,7 @@ async function handleRequestRole(interaction) {
   const userId = member.id;
 
   if ((bans.users[userId] && bans.users[userId].endTime > Date.now()) || (member.roles && member.roles.cache.has(roles.banRoleId))) {
-    return replyBilingual(interaction,{ content: 'Bạn đang bị ban, không thể xin role.', ephemeral: true });
+    return interaction.reply({ content: 'Bạn đang bị ban, không thể xin role.', ephemeral: true });
   }
 
   const hasDev = member.roles.cache.has(roles.devRoleId);
@@ -5271,20 +5256,20 @@ async function handleRequestRole(interaction) {
     const filteredRoles = (roles.otherRoles || []).filter(
       (r) => r.id !== roles.devRoleId && r.id !== roles.adminRoleId && r.id !== roles.verifiedMemberRoleId
     );
-    if (filteredRoles.length === 0) return replyBilingual(interaction,{ content: 'Không có role nào có thể xin.', ephemeral: true });
+    if (filteredRoles.length === 0) return interaction.reply({ content: 'Không có role nào có thể xin.', ephemeral: true });
 
     const row = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('select_role')
-        .setPlaceholder('Chọn role')
+        .setPlaceholder(t(interaction, 'STR_F4935F43'))
         .addOptions(filteredRoles.map((r) => ({ label: r.name, value: r.id })))
     );
-    await replyBilingual(interaction,{ content: 'Chọn role bạn muốn xin:', components: [row], ephemeral: true });
+    await interaction.reply({ content: 'Chọn role bạn muốn xin:', components: [row], ephemeral: true });
   } else {
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('request_member').setLabel('Xin Role Member').setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId('request_member').setLabel(t(interaction, 'STR_628B65DA')).setStyle(ButtonStyle.Primary)
     );
-    await replyBilingual(interaction,{ content: 'Bạn cần có role Member trước. Bấm để xin:', components: [row], ephemeral: true });
+    await interaction.reply({ content: 'Bạn cần có role Member trước. Bấm để xin:', components: [row], ephemeral: true });
   }
 }
 
@@ -5298,10 +5283,10 @@ async function handleSelect(interaction) {
     const modal = new ModalBuilder().setCustomId(`role_info_modal_${roleId}`).setTitle('Thông tin xin role');
     modal.addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('name').setLabel('Tên').setStyle(TextInputStyle.Short).setRequired(true)
+        new TextInputBuilder().setCustomId('name').setLabel(t(interaction, 'STR_2AA8EFE4')).setStyle(TextInputStyle.Short).setRequired(true)
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('intro').setLabel('Giới thiệu bản thân').setStyle(TextInputStyle.Paragraph).setRequired(true)
+        new TextInputBuilder().setCustomId('intro').setLabel(t(interaction, 'STR_9AF91E7F')).setStyle(TextInputStyle.Paragraph).setRequired(true)
       )
     );
     await interaction.showModal(modal);
@@ -5315,14 +5300,14 @@ async function handleButton(interaction) {
     const modal = new ModalBuilder().setCustomId(`role_info_modal_${roles.basicMemberRoleId}`).setTitle('Thông tin xin role Member');
     modal.addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('name').setLabel('Tên').setStyle(TextInputStyle.Short).setRequired(true)
+        new TextInputBuilder().setCustomId('name').setLabel(t(interaction, 'STR_2AA8EFE4')).setStyle(TextInputStyle.Short).setRequired(true)
       ),
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('intro').setLabel('Giới thiệu bản thân').setStyle(TextInputStyle.Paragraph).setRequired(true)
+        new TextInputBuilder().setCustomId('intro').setLabel(t(interaction, 'STR_9AF91E7F')).setStyle(TextInputStyle.Paragraph).setRequired(true)
       ),
       // THÊM: Trường nhập CID
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('cid').setLabel('VATSIM CID (Tùy chọn)').setPlaceholder('Nhập CID nếu bạn có').setStyle(TextInputStyle.Short).setRequired(false)
+        new TextInputBuilder().setCustomId('cid').setLabel(t(interaction, 'STR_86798297')).setPlaceholder(t(interaction, 'STR_0892EABE')).setStyle(TextInputStyle.Short).setRequired(false)
       )
     );
     await interaction.showModal(modal);
@@ -5335,7 +5320,7 @@ async function handleButton(interaction) {
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasVerified && !hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return replyBilingual(interaction,{ content: '❌ Bạn không có quyền duyệt request này.', ephemeral: true });
+      return interaction.reply({ content: '❌ Bạn không có quyền duyệt request này.', ephemeral: true });
     }
 
     const action = customId.split('_')[0];
@@ -5343,7 +5328,7 @@ async function handleButton(interaction) {
     const request = pendingRequests.get(requestId);
 
     if (!request) {
-      return replyBilingual(interaction,{ content: '❌ Yêu cầu này đã hết hạn hoặc đã được xử lý.', ephemeral: true });
+      return interaction.reply({ content: '❌ Yêu cầu này đã hết hạn hoặc đã được xử lý.', ephemeral: true });
     }
 
     pendingRequests.delete(requestId);
@@ -5354,7 +5339,7 @@ async function handleButton(interaction) {
       const newEmbed = EmbedBuilder.from(oldEmbed)
         .addFields({
           name: action === 'approve' ? '✅ Đã duyệt bởi' : '❌ Đã từ chối bởi',
-          value: `<@${interaction.user.id}>`,
+          value : t(interaction, 'STR_8CDE7BE9', { v0: interaction.user.id }),
           inline: true
         })
         .setTimestamp();
@@ -5369,7 +5354,7 @@ async function handleButton(interaction) {
       await interaction.followUp({ content: '❌ Đã từ chối yêu cầu cấp role.', ephemeral: true });
       try {
         const user = await client.users.fetch(request.userId);
-        await user.send('❌ Yêu cầu xin role của bạn đã bị từ chối.');
+        await user.send(t(interaction, 'STR_44221952'));
       } catch (err) {
         console.error('Error notifying user (deny):', err);
       }
@@ -5434,7 +5419,7 @@ async function handleButton(interaction) {
                               }
                           }
                       } else {
-                          responseMsg += `\n⚠️ **Lưu ý:** CID ${cidNum} đã bị người khác đăng ký, hệ thống TỪ CHỐI ghi vào Database và từ chối cấp Role VATSIM.`;
+                          responseMsg += t(interaction, 'STR_EDEB3E30', { v0: cidNum });
                       }
                   } catch (e) {
                       console.error("Lỗi khi tự động check VATSIM CID:", e);
@@ -5445,7 +5430,7 @@ async function handleButton(interaction) {
           await interaction.followUp({ content: responseMsg, ephemeral: true });
 
           try {
-            await member.send(`🎉 Yêu cầu xin role của bạn đã được duyệt!\n${responseMsg}`);
+            await member.send(t(interaction, 'STR_F9814BD7', { v0: responseMsg }));
           } catch (err) {
             console.error('Error sending DM to user (approve):', err);
           }
@@ -5460,7 +5445,7 @@ async function handleButton(interaction) {
     const eventId = customId.split('_')[2];
     const event = events.get(eventId);
     if (!event || event.creator !== interaction.user.id) {
-      return replyBilingual(interaction,{ content: 'Không tìm thấy sự kiện hoặc bạn không phải người tạo.', ephemeral: true });
+      return interaction.reply({ content: 'Không tìm thấy sự kiện hoặc bạn không phải người tạo.', ephemeral: true });
     }
 
     const guild = await client.guilds.fetch(GUILD_ID);
@@ -5471,19 +5456,19 @@ async function handleButton(interaction) {
     const embed = createEventEmbed(event, startTime);
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`group_join_${eventId}`).setLabel('✈️ Tham gia').setStyle(ButtonStyle.Primary).setEmoji('✈️'),
-      new ButtonBuilder().setCustomId(`group_canceljoin_${eventId}`).setLabel('❌ Hủy tham gia').setStyle(ButtonStyle.Secondary).setEmoji('❌')
+      new ButtonBuilder().setCustomId(`group_join_${eventId}`).setLabel(t(interaction, 'STR_F52119B2')).setStyle(ButtonStyle.Primary).setEmoji('✈️'),
+      new ButtonBuilder().setCustomId(`group_canceljoin_${eventId}`).setLabel(t(interaction, 'STR_B1BF3D4D')).setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
     if (hasDev || hasAdmin || interaction.user.id === event.creator) {
-      row.addComponents(new ButtonBuilder().setCustomId(`group_cancelevent_${eventId}`).setLabel('🚫 Hủy sự kiện').setStyle(ButtonStyle.Danger).setEmoji('🚫'));
+      row.addComponents(new ButtonBuilder().setCustomId(`group_cancelevent_${eventId}`).setLabel(t(interaction, 'STR_BB814A95')).setStyle(ButtonStyle.Danger).setEmoji('🚫'));
     }
 
     const channel = client.channels.cache.get(GROUP_FLIGHT_CHANNEL_ID) || interaction.channel;
     const message = await channel.send({
-      content: `🎉 **SỰ KIỆN GROUP FLIGHT MỚI!** <@&${roles.basicMemberRoleId}>`,
+      content : t(interaction, 'STR_ECE107C4', { v0: roles.basicMemberRoleId }),
       embeds: [embed],
       components: [row],
       allowedMentions: { parse: [] },
@@ -5559,7 +5544,7 @@ async function handleButton(interaction) {
       pendingAnnouncements.delete(reqId);
 
       await interaction.editReply({ 
-        content: `✅ Đã lên lịch gửi thông báo vào <t:${Math.floor(pendingData.targetTime/1000)}:F>!\n**ID Lịch trình:** \`${reqId}\``, 
+        content : t(interaction, 'STR_165080B7', { v0: Math.floor(pendingData.targetTime/1000), v1: reqId }), 
         embeds: [], 
         components: [] 
       });
@@ -5570,10 +5555,10 @@ async function handleButton(interaction) {
         
         pendingAnnouncements.delete(reqId);
 
-        await interaction.editReply({ content: `✅ Đã gửi thông báo thành công!\n**ID Tin nhắn:** \`${sentMsg.id}\``, embeds: [], components: [] });
+        await interaction.editReply({ content : t(interaction, 'STR_F267247D', { v0: sentMsg.id }), embeds: [], components: [] });
       } catch (err) {
         pendingData.isProcessing = false;
-        await interaction.followUp({ content: `❌ Lỗi khi gửi thông báo: ${err.message}`, ephemeral: true });
+        await interaction.followUp({ content : t(interaction, 'STR_DCBC35F9', { v0: err.message }), ephemeral: true });
       }
     }
     return;
@@ -5587,10 +5572,10 @@ async function handleButton(interaction) {
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('request_member')
-          .setLabel('Xin Role Member')
+          .setLabel(t(interaction, 'STR_628B65DA'))
           .setStyle(ButtonStyle.Primary)
       );
-      return replyBilingual(interaction,{ 
+      return interaction.reply({ 
         content: '❌ Chầm chậm đã! Bạn cần có role **Member** để chính thức tham gia server trước khi liên kết tài khoản VATSIM. Bấm nút dưới đây để xin role nha:', 
         components: [row], 
         ephemeral: true 
@@ -5638,30 +5623,30 @@ async function handleButton(interaction) {
 
         if (!stats) {
           notifyAdmin('🚨 Cảnh báo: Lỗi API Bypass', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Không tìm thấy dữ liệu trên VATSIM API.`, 0xff0000);
-          return interaction.editReply({ content: `❌ Lỗi: Không tìm thấy dữ liệu VATSIM cho CID **${existingCid}**.` });
+          return interaction.editReply({ content : t(interaction, 'STR_C9D264D9', { v0: existingCid }) });
         }
         if (stats.rating === 0) {
           notifyAdmin('🚨 Cảnh báo: Tài khoản bị khóa (Bypass)', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Tài khoản đang bị Suspended.`, 0xff0000);
-          return interaction.editReply({ content: `❌ Tài khoản VATSIM của bạn hiện đang bị **Suspended**.` });
+          return interaction.editReply({ content : t(interaction, 'STR_C9B3AD8B') });
         }
 
         if (roleType === 'pilot') {
           if (stats.pilot_hours > 10) {
             await member.roles.add(PILOT_ROLE_ID).catch(() => { });
             notifyAdmin('✅ Xác thực VATSIM thành công (Bypass)', `**User:** <@${interaction.user.id}>\n**Role xin thêm:** VATSIM PILOT\n**CID:** ${existingCid}`, 0x2ecc71);
-            return interaction.editReply({ content: `✅ **Thành công!** Bạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã cấp thêm role **Pilot**!` });
+            return interaction.editReply({ content : t(interaction, 'STR_918449F0', { v0: stats.pilot_hours.toFixed(1) }) });
           } else {
             notifyAdmin('⚠️ Cảnh báo: Chưa đủ giờ bay (Bypass)', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Xin thêm role Pilot nhưng mới có ${stats.pilot_hours.toFixed(1)} giờ bay (Yêu cầu > 10).`, 0xffa500);
-            return interaction.editReply({ content: `❌ Từ chối: Bạn mới có **${stats.pilot_hours.toFixed(1)}** giờ bay. Cần >10 giờ để nhận role Pilot.` });
+            return interaction.editReply({ content : t(interaction, 'STR_0F419B00', { v0: stats.pilot_hours.toFixed(1) }) });
           }
         } else if (roleType === 'atc') {
           if (stats.rating > 1) {
             await member.roles.add(ATC_ROLE_ID).catch(() => { });
             notifyAdmin('✅ Xác thực VATSIM thành công (Bypass)', `**User:** <@${interaction.user.id}>\n**Role xin thêm:** VATSIM ATC\n**CID:** ${existingCid}`, 0x2ecc71);
-            return interaction.editReply({ content: `✅ **Thành công!** Rating của bạn hợp lệ. Đã cấp thêm role **ATC**!` });
+            return interaction.editReply({ content : t(interaction, 'STR_82B28266') });
           } else {
             notifyAdmin('⚠️ Cảnh báo: Chưa đủ Rating ATC (Bypass)', `**User:** <@${interaction.user.id}>\n**CID:** ${existingCid}\n**Lý do:** Xin thêm role ATC nhưng Rating đang là OBS (Yêu cầu >= S1).`, 0xffa500);
-            return interaction.editReply({ content: `❌ Từ chối: Rating của bạn hiện tại là OBS. Yêu cầu >= S1 để nhận role ATC.` });
+            return interaction.editReply({ content : t(interaction, 'STR_A36CE332') });
           }
         }
         return; // Chặn ngang ở đây, không cho code chạy xuống dưới đòi gửi ảnh nữa
@@ -5681,7 +5666,7 @@ async function handleButton(interaction) {
       const expireTimer = setTimeout(async () => {
         if (pendingVerifyDMs.has(interaction.user.id)) {
           pendingVerifyDMs.delete(interaction.user.id); // Hết giờ thì đá ra khỏi bộ nhớ
-          await interaction.user.send('⏳ **Hết 5 phút!** Phiên xác thực của bạn đã tự động đóng. Vui lòng quay lại Server và bấm nút xin Role lại từ đầu nếu bạn vẫn muốn xác thực nhé!').catch(() => { });
+          await interaction.user.send(t(interaction, 'STR_5341F2A1')).catch(() => { });
         }
       }, 5 * 60 * 1000);
 
@@ -5694,8 +5679,7 @@ async function handleButton(interaction) {
       });
 
       // Nhắn tin riêng: CHỈ ĐÒI ẢNH!
-      await interaction.user.send(
-        `👋 Chào bạn! Bạn đang yêu cầu xác thực role **VATSIM ${roleType.toUpperCase()}**.\n\n` +
+      await interaction.user.send(t(interaction, 'STR_D6CD1DB2', { v0: roleType.toUpperCase() }) +
         `Để hoàn tất, hãy gửi cho mình **1 tấm ảnh chụp màn hình** trang Profile VATSIM chính thức (my.vatsim.net).\n` +
         `⚠️ **LƯU Ý QUAN TRỌNG:**\n` +
         `- Ảnh phải thể hiện rõ giao diện trang web, có chữ VATSIM ID, Tên, Rating...\n` +
@@ -5730,7 +5714,7 @@ async function handleButton(interaction) {
     const action = parts[1];
     const eventId = parts.slice(2).join('_');
     const event = events.get(eventId);
-    if (!event) return replyBilingual(interaction,{ content: 'Không tìm thấy sự kiện.', ephemeral: true });
+    if (!event) return interaction.reply({ content: 'Không tìm thấy sự kiện.', ephemeral: true });
 
     if (action === 'join') {
       if (!event.participants.includes(interaction.user.id)) {
@@ -5740,7 +5724,7 @@ async function handleButton(interaction) {
         // Thêm user vào event tracking
         await addUserToEvent(interaction.user.id, eventId);
       }
-      await replyBilingual(interaction,{ content: '✅ Đã tham gia sự kiện!', ephemeral: true });
+      await interaction.reply({ content: '✅ Đã tham gia sự kiện!', ephemeral: true });
       return;
     }
 
@@ -5751,7 +5735,7 @@ async function handleButton(interaction) {
       // Xóa user khỏi event tracking
       await removeUserFromEvent(interaction.user.id, eventId);
 
-      await replyBilingual(interaction,{ content: '❌ Đã hủy tham gia sự kiện!', ephemeral: true });
+      await interaction.reply({ content: '❌ Đã hủy tham gia sự kiện!', ephemeral: true });
       return;
     }
 
@@ -5780,9 +5764,9 @@ async function handleButton(interaction) {
         } catch (_) { }
 
         events.delete(eventId);
-        await replyBilingual(interaction,{ content: '🚫 Sự kiện đã bị hủy!', ephemeral: true });
+        await interaction.reply({ content: '🚫 Sự kiện đã bị hủy!', ephemeral: true });
       } else {
-        await replyBilingual(interaction,{ content: 'Bạn không có quyền hủy sự kiện.', ephemeral: true });
+        await interaction.reply({ content: 'Bạn không có quyền hủy sự kiện.', ephemeral: true });
       }
     }
   }
@@ -5792,16 +5776,16 @@ async function handleGroupFlight(interaction) {
   const modal = new ModalBuilder().setCustomId('group_modal').setTitle('Tạo Group Flight');
   modal.addComponents(
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('dep').setLabel('Departure (ICAO)').setStyle(TextInputStyle.Short).setRequired(true)
+      new TextInputBuilder().setCustomId('dep').setLabel(t(interaction, 'STR_FB1E74CA')).setStyle(TextInputStyle.Short).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('arr').setLabel('Arrival (ICAO)').setStyle(TextInputStyle.Short).setRequired(true)
+      new TextInputBuilder().setCustomId('arr').setLabel(t(interaction, 'STR_1DC53808')).setStyle(TextInputStyle.Short).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('route').setLabel('Route').setStyle(TextInputStyle.Paragraph).setRequired(true)
+      new TextInputBuilder().setCustomId('route').setLabel(t(interaction, 'STR_9405C3AF')).setStyle(TextInputStyle.Paragraph).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('time').setLabel('Giờ bắt đầu (UTC, YYYY-MM-DD HH:MM)').setStyle(TextInputStyle.Short).setRequired(true)
+      new TextInputBuilder().setCustomId('time').setLabel(t(interaction, 'STR_07447312')).setStyle(TextInputStyle.Short).setRequired(true)
     )
   );
   await interaction.showModal(modal);
@@ -5814,7 +5798,7 @@ async function handleSendAward(interaction) {
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return replyBilingual(interaction,{
+      return interaction.reply({
         content: '❌ Chỉ admin và dev mới có thể sử dụng lệnh này!',
         ephemeral: true
       });
@@ -5863,7 +5847,7 @@ async function handleModal(interaction) {
     const cid = parseInt(cidStr);
 
     if (isNaN(cid)) {
-      return replyBilingual(interaction,{ content: '❌ CID không hợp lệ. Vui lòng nhập số.', ephemeral: true });
+      return interaction.reply({ content: '❌ CID không hợp lệ. Vui lòng nhập số.', ephemeral: true });
     }
 
     await interaction.deferReply({ ephemeral: true }); // Chờ API VATSIM phản hồi
@@ -5872,12 +5856,12 @@ async function handleModal(interaction) {
     const stats = await fetchVatsimStatsById(cid);
 
     if (!stats) {
-      return interaction.editReply({ content: `❌ Không tìm thấy thông tin trên VATSIM cho CID **${cid}**. Vui lòng kiểm tra lại.` });
+      return interaction.editReply({ content : t(interaction, 'STR_95E780C5', { v0: cid }) });
     }
 
     // Tài khoản bị Suspended (VATSIM API trả về rating 0)
     if (stats.rating === 0) {
-      return interaction.editReply({ content: `❌ Tài khoản VATSIM của bạn (CID: ${cid}) hiện đang bị **Suspended**. Hệ thống từ chối cấp Role.` });
+      return interaction.editReply({ content : t(interaction, 'STR_5EC6D4A5', { v0: cid }) });
     }
 
     // XÉT DUYỆT PILOT
@@ -5886,12 +5870,12 @@ async function handleModal(interaction) {
         try {
           const member = await interaction.guild.members.fetch(interaction.user.id);
           await member.roles.add(roles.vatsimPilotRoleId);
-          return interaction.editReply({ content: `✅ Xác thực thành công! Bạn có **${stats.pilot_hours.toFixed(1)}** giờ bay. Đã cấp Role **VATSIM Pilot**.` });
+          return interaction.editReply({ content : t(interaction, 'STR_DF2FA653', { v0: stats.pilot_hours.toFixed(1) }) });
         } catch (err) {
-          return interaction.editReply({ content: `⚠️ Đã đủ điều kiện nhưng bot không thể cấp role. Vị trí Role của Bot phải nằm trên Role Pilot trong cài đặt Server.` });
+          return interaction.editReply({ content : t(interaction, 'STR_4A9D80F0') });
         }
       } else {
-        return interaction.editReply({ content: `❌ Từ chối: Bạn mới có **${stats.pilot_hours.toFixed(1)}** giờ bay. Cần bay trên 10 giờ để nhận role Pilot.` });
+        return interaction.editReply({ content : t(interaction, 'STR_D775BBC5', { v0: stats.pilot_hours.toFixed(1) }) });
       }
     }
     // XÉT DUYỆT ATC
@@ -5904,12 +5888,12 @@ async function handleModal(interaction) {
           const vatsimRatingsSpoken = { 2: 'S1', 3: 'S2', 4: 'S3', 5: 'C1', 6: 'C2', 7: 'C3', 8: 'I1', 9: 'I2', 10: 'I3', 11: 'SUP', 12: 'ADM' };
           const ratingStr = vatsimRatingsSpoken[stats.rating] || `R${stats.rating}`;
 
-          return interaction.editReply({ content: `✅ Xác thực thành công! Rating của bạn là **${ratingStr}**. Đã cấp Role **VATSIM ATC**.` });
+          return interaction.editReply({ content : t(interaction, 'STR_7E94150E', { v0: ratingStr }) });
         } catch (err) {
-          return interaction.editReply({ content: `⚠️ Đã đủ điều kiện nhưng bot không thể cấp role. Vị trí Role của Bot phải nằm trên Role ATC trong cài đặt Server.` });
+          return interaction.editReply({ content : t(interaction, 'STR_BB546E2F') });
         }
       } else {
-        return interaction.editReply({ content: `❌ Từ chối: Rating của bạn hiện tại là **OBS** (hoặc thấp hơn). Yêu cầu ATC từ hạng S1 trở lên.` });
+        return interaction.editReply({ content : t(interaction, 'STR_BF28707A') });
       }
     }
     return;
@@ -5922,8 +5906,8 @@ async function handleModal(interaction) {
     const timeStr = interaction.fields.getTextInputValue('time');
     const startTime = parseUTCDateTime(timeStr);
 
-    if (isNaN(startTime)) return replyBilingual(interaction,{ content: 'Giờ không hợp lệ. Vui lòng dùng định dạng YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
-    if (startTime <= Date.now()) return replyBilingual(interaction,{ content: 'Thời gian bắt đầu phải ở tương lai.', ephemeral: true });
+    if (isNaN(startTime)) return interaction.reply({ content: 'Giờ không hợp lệ. Vui lòng dùng định dạng YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
+    if (startTime <= Date.now()) return interaction.reply({ content: 'Thời gian bắt đầu phải ở tương lai.', ephemeral: true });
 
     const eventId = Date.now().toString();
     events.set(eventId, {
@@ -5942,11 +5926,11 @@ async function handleModal(interaction) {
 
     const startTimeObj = new Date(startTime);
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`confirm_event_${eventId}`).setLabel('🚀 Xác nhận và công bố').setStyle(ButtonStyle.Success).setEmoji('🚀')
+      new ButtonBuilder().setCustomId(`confirm_event_${eventId}`).setLabel(t(interaction, 'STR_9E100D9C')).setStyle(ButtonStyle.Success).setEmoji('🚀')
     );
 
-    await replyBilingual(interaction,{
-      content: `📋 **Xem trước sự kiện:**\n🛫 **Departure:** ${dep}\n🛬 **Arrival:** ${arr}\n🧭 **Route:** ${route}\n⏰ **Start Time (UTC):** ${formatDateTime(startTimeObj)}`,
+    await interaction.reply({
+      content : t(interaction, 'STR_A939345F', { v0: dep, v1: arr, v2: route, v3: formatDateTime(startTimeObj) }),
       components: [row],
       ephemeral: true,
     });
@@ -5964,10 +5948,10 @@ async function handleModal(interaction) {
       // Cập nhật luôn vào RAM để AI đọc được ngay lập tức
       profiles[interaction.user.id] = { name, age, bio };
 
-      await replyBilingual(interaction,{ content: '✅ Profile của bạn đã được lưu vĩnh viễn lên MongoDB!', ephemeral: true });
+      await interaction.reply({ content: '✅ Profile của bạn đã được lưu vĩnh viễn lên MongoDB!', ephemeral: true });
     } catch (err) {
       console.error(err);
-      await replyBilingual(interaction,{ content: '⚠️ Lỗi lưu Database.', ephemeral: true });
+      await interaction.reply({ content: '⚠️ Lỗi lưu Database.', ephemeral: true });
     }
     return;
   }
@@ -5993,12 +5977,12 @@ async function handleModal(interaction) {
           const channel = await client.channels.fetch(ROLE_APPROVAL_CHANNEL_ID);
           const roleName = roleId === roles.basicMemberRoleId ? 'Member' : roles.otherRoles.find((r) => r.id === roleId)?.name || 'Unknown';
 
-          let embedDesc = `User <@${interaction.user.id}> (${interaction.user.tag}) requests role **${roleName}**.\n\n**Tên:** ${name}\n**Giới thiệu:** ${intro}\n**Thời gian:** ${timestamp}`;
+          let embedDesc = t(interaction, 'STR_49580542', { v0: interaction.user.id, v1: interaction.user.tag, v2: roleName, v3: name, v4: intro, v5: timestamp });
           
           let alertMsg = '';
           // Nếu có nhập CID, bot sẽ kiểm tra trước và thêm ghi chú vào thông báo cho Admin
           if (cidValue) {
-             embedDesc += `\n**VATSIM CID Khai báo:** ${cidValue}`;
+             embedDesc += t(interaction, 'STR_97DDFD7E', { v0: cidValue });
              const cidNum = parseInt(cidValue);
              if (!isNaN(cidNum)) {
                  // CHECK SỔ ĐỎ XEM CÓ BỊ TRÙNG LẶP / MẠO DANH KHÔNG
@@ -6007,26 +5991,26 @@ async function handleModal(interaction) {
                  const isCidTaken = Object.values(currentVatsimLinks).some(val => getCid(val) === cidNum);
 
                  if (isCidTaken) {
-                     alertMsg = `\n🚨 **BÁO ĐỘNG ĐỎ:** CID ${cidNum} này ĐÃ CÓ người khác đăng ký trong Database! Nghi vấn dùng chung hoặc mạo danh! (KHÔNG ĐƯỢC DUYỆT ROLE VATSIM)`;
+                     alertMsg = t(interaction, 'STR_85DC2A46', { v0: cidNum });
                  } else {
                      // Nếu Sổ Đỏ sạch thì mới check API VATSIM
                      const stats = await fetchVatsimStatsById(cidNum);
                      if (stats) {
                          if (stats.rating === 0) {
-                             alertMsg = `\n⚠️ **Lưu ý:** CID ${cidNum} này đang bị Suspended trên VATSIM.`;
+                             alertMsg = t(interaction, 'STR_4921B447', { v0: cidNum });
                          } else {
-                             if (stats.pilot_hours > 10) alertMsg += `\n✅ User này đủ điều kiện cấp Role Pilot (>10h).`;
-                             if (stats.rating > 1) alertMsg += `\n✅ User này đủ điều kiện cấp Role ATC (Rating >= S1).`;
-                             if (alertMsg) alertMsg += `\n*(Sẽ tự động cấp và lưu vào Database khi bạn bấm Approve)*`;
+                             if (stats.pilot_hours > 10) alertMsg += t(interaction, 'STR_4B2C245A');
+                             if (stats.rating > 1) alertMsg += t(interaction, 'STR_659D1C18');
+                             if (alertMsg) alertMsg += t(interaction, 'STR_A1D219BC');
                          }
                      } else {
-                         alertMsg = `\n❌ **Lưu ý:** CID ${cidNum} không tồn tại trên VATSIM API.`;
+                         alertMsg = t(interaction, 'STR_12388AF5', { v0: cidNum });
                      }
                  }
              }
           }
 
-          if (alertMsg) embedDesc += `\n${alertMsg}`;
+          if (alertMsg) embedDesc += t(interaction, 'STR_1E1AD719', { v0: alertMsg });
 
           const embed = new EmbedBuilder()
             .setTitle('Role Request')
@@ -6036,8 +6020,8 @@ async function handleModal(interaction) {
           const mentionText = `<@&${roles.adminRoleId}> <@&${roles.devRoleId}> <@&${roles.verifiedMemberRoleId}>`;
 
           const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel('Approve').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId(`deny_${requestId}`).setLabel('Deny').setStyle(ButtonStyle.Danger)
+            new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel(t(interaction, 'STR_6F735165')).setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`deny_${requestId}`).setLabel(t(interaction, 'STR_3682D166')).setStyle(ButtonStyle.Danger)
           );
 
           const sentMessage = await channel.send({
@@ -6048,10 +6032,10 @@ async function handleModal(interaction) {
           });
 
           pendingRequests.get(requestId).messageId = sentMessage.id;
-          await replyBilingual(interaction,{ content: '✅ Request sent for approval.', ephemeral: true });
+          await interaction.reply({ content: '✅ Request sent for approval.', ephemeral: true });
         } catch (err) {
           console.error('Error sending request to channel:', err);
-          await replyBilingual(interaction,{ content: '❌ Error sending request.', ephemeral: true });
+          await interaction.reply({ content: '❌ Error sending request.', ephemeral: true });
           pendingRequests.delete(requestId);
         }
       }
@@ -6070,7 +6054,7 @@ async function remindParticipants(eventId) {
       .setFooter({ text: 'Sự kiện sắp bắt đầu!', iconURL: 'https://cdn-icons-png.flaticon.com/512/1828/1828884.png' });
 
     await message.edit({
-      content: `⏰ **SỰ KIỆN SẮP BẮT ĐẦU!** <@&${roles.basicMemberRoleId}>`,
+      content : t(interaction, 'STR_3BDDC1F1', { v0: roles.basicMemberRoleId }),
       embeds: [embed],
       allowedMentions: { parse: [] },
     });
@@ -6081,8 +6065,7 @@ async function remindParticipants(eventId) {
   for (const userId of event.participants) {
     try {
       const user = await client.users.fetch(userId);
-      await user.send(
-        `⏰ **Group flight của bạn sẽ bắt đầu sau 15 phút!**\n\n🛫 **Departure:** ${event.dep}\n🛬 **Arrival:** ${event.arr}\n🧭 **Route:** ${event.route}\n\nSee you soon! ✈️`
+      await user.send(t(interaction, 'STR_BDCFB4D9', { v0: event.dep, v1: event.arr, v2: event.route })
       );
     } catch (err) {
       console.error(`Không gửi DM cho ${userId}: ${err}`);
@@ -6105,7 +6088,7 @@ async function startEvent(eventId) {
       .setFooter({ text: 'Sự kiện đang diễn ra', iconURL: 'https://cdn-icons-png.flaticon.com/512/929/929430.png' });
 
     await message.edit({
-      content: `🎯 **GROUP FLIGHT ĐANG DIỄN RA!** <@&${roles.basicMemberRoleId}>`,
+      content : t(interaction, 'STR_3BE66820', { v0: roles.basicMemberRoleId }),
       embeds: [embed],
       components: [],
       allowedMentions: { parse: [] },
@@ -6114,8 +6097,7 @@ async function startEvent(eventId) {
     for (const userId of event.participants) {
       try {
         const user = await client.users.fetch(userId);
-        await user.send(
-          `🎯 **Group flight của bạn đã bắt đầu!**\n\nHãy tham gia ngay!\n🛫 **Departure:** ${event.dep}\n🛬 **Arrival:** ${event.arr}\n🧭 **Route:** ${event.route}\n\nHappy flying! ✈️`
+        await user.send(t(interaction, 'STR_97AADDBC', { v0: event.dep, v1: event.arr, v2: event.route })
         );
       } catch (err) {
         console.error(`Không gửi DM cho ${userId}: ${err}`);
@@ -6146,7 +6128,7 @@ async function handleSubmitProfile(interaction) {
   // 1. Tạo ô nhập Tên
   const nameInput = new TextInputBuilder()
     .setCustomId('name')
-    .setLabel('Tên')
+    .setLabel(t(interaction, 'STR_2AA8EFE4'))
     .setStyle(TextInputStyle.Short)
     .setRequired(true);
   // Chỉ điền sẵn nếu có tên cũ
@@ -6155,7 +6137,7 @@ async function handleSubmitProfile(interaction) {
   // 2. Tạo ô nhập Tuổi
   const ageInput = new TextInputBuilder()
     .setCustomId('age')
-    .setLabel('Tuổi')
+    .setLabel(t(interaction, 'STR_A39DEFDF'))
     .setStyle(TextInputStyle.Short)
     .setRequired(false);
   // Chỉ điền sẵn nếu có tuổi cũ
@@ -6164,7 +6146,7 @@ async function handleSubmitProfile(interaction) {
   // 3. Tạo ô nhập Bio
   const bioInput = new TextInputBuilder()
     .setCustomId('bio')
-    .setLabel('Bio')
+    .setLabel(t(interaction, 'STR_713A01AB'))
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(false);
   // Chỉ điền sẵn nếu có bio cũ
@@ -6184,7 +6166,7 @@ async function handleSubmitProfile(interaction) {
 async function handleAnnouncement(interaction) {
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
-  if (!hasDev && !hasAdmin) return replyBilingual(interaction,{ content: '❌ Bạn không có quyền.', ephemeral: true });
+  if (!hasDev && !hasAdmin) return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
 
   const channel = interaction.options.getChannel('channel');
   const rawMessage = interaction.options.getString('message');
@@ -6195,7 +6177,7 @@ async function handleAnnouncement(interaction) {
   if (timeStr) {
     targetTime = parseUTCDateTime(timeStr);
     if (isNaN(targetTime) || targetTime <= Date.now()) {
-      return replyBilingual(interaction,{ content: '❌ Giờ không hợp lệ hoặc đã qua. Định dạng đúng: YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
+      return interaction.reply({ content: '❌ Giờ không hợp lệ hoặc đã qua. Định dạng đúng: YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
     }
   }
 
@@ -6287,27 +6269,27 @@ async function handleAnnouncement(interaction) {
     .setTitle('✨ Gợi ý từ Gemini')
     .setDescription('Mình đã viết lại nội dung của bạn cho chuyên nghiệp hơn. Bạn muốn dùng bản nào để gửi đi?\n\n⚠️ *Lưu ý: Bảng preview bên dưới có thể bị ẩn bớt nếu quá dài, nhưng khi bạn bấm nút gửi thì nội dung sẽ đăng lên ĐẦY ĐỦ 100%.*')
     .addFields(
-      { name: '📝 Bản gốc của bạn', value: `\`\`\`\n${previewRaw}\n\`\`\`` },
-      { name: '🤖 Bản do AI nâng cấp', value: `\`\`\`\n${previewAi}\n\`\`\`` },
+      { name: '📝 Bản gốc của bạn', value : t(interaction, 'STR_68A1141F', { v0: previewRaw }) },
+      { name: '🤖 Bản do AI nâng cấp', value : t(interaction, 'STR_68A1141F', { v0: previewAi }) },
       { name: '⏰ Lịch trình', value: targetTime ? `<t:${Math.floor(targetTime / 1000)}:F>` : 'Gửi ngay lập tức' }
     )
     .setColor(0x3498db);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`ann_okay_${reqId}`).setLabel('✅ Gửi bản AI').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`ann_okay_${reqId}`).setLabel(t(interaction, 'STR_40D94481')).setStyle(ButtonStyle.Success),
     // THÊM NÚT SỬA VÀO ĐÂY:
-    new ButtonBuilder().setCustomId(`ann_editai_${reqId}`).setLabel('✏️ Sửa bản AI').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`ann_orig_${reqId}`).setLabel('✅ Gửi bản gốc').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`ann_reject_${reqId}`).setLabel('❌ Hủy gửi').setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId(`ann_editai_${reqId}`).setLabel(t(interaction, 'STR_B4FA29A9')).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`ann_orig_${reqId}`).setLabel(t(interaction, 'STR_392975FE')).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`ann_reject_${reqId}`).setLabel(t(interaction, 'STR_8F0AED44')).setStyle(ButtonStyle.Danger)
   );
 
-  await interaction.editReply({ content: `**Lưu ID lịch trình nếu cần hủy:** \`${reqId}\``, embeds: [embed], components: [row] });
+  await interaction.editReply({ content : t(interaction, 'STR_43B93608', { v0: reqId }), embeds: [embed], components: [row] });
 }
 
 async function handleSetupAtcNoti(interaction) {
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   if (!hasAdmin && interaction.user.id !== OWNER_ID) {
-    return replyBilingual(interaction,{ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
+    return interaction.reply({ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
   }
 
   const embed = new EmbedBuilder()
@@ -6325,7 +6307,7 @@ async function handleSetupAtcNoti(interaction) {
   fs.writeFileSync(REACTION_ROLES_FILE, JSON.stringify(reactionRoleData, null, 2));
   // ------------------------------------
 
-  await replyBilingual(interaction,{ content: '✅ Đã khởi tạo tin nhắn lấy role và lưu vào cơ sở dữ liệu thành công!', ephemeral: true });
+  await interaction.reply({ content: '✅ Đã khởi tạo tin nhắn lấy role và lưu vào cơ sở dữ liệu thành công!', ephemeral: true });
 }
 
 async function ensureVatsimMessageExists() {
@@ -6586,9 +6568,9 @@ client.on('threadCreate', async (thread) => {
     const fetchedLogs = await thread.guild.fetchAuditLogs({ type: 110, limit: 5 });
     const log = fetchedLogs.entries.find(e => e.target.id === thread.id && Math.abs(e.createdTimestamp - Date.now()) < 5000);
     if (log?.executor) embed.addFields({ name: '🛠️ Created by', value: getUserIdentifier(log.executor), inline: false });
-    else if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value: `<@${thread.ownerId}>`, inline: false });
+    else if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value : t(interaction, 'STR_8CDE7BE9', { v0: thread.ownerId }), inline: false });
   } catch (err) {
-    if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value: `<@${thread.ownerId}>`, inline: false });
+    if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value : t(interaction, 'STR_8CDE7BE9', { v0: thread.ownerId }), inline: false });
   }
 
   await sendLog(embed);
@@ -6904,9 +6886,9 @@ async function handleMetar(interaction) {
 
     // 3. Xử lý hiển thị METAR
     if (metarText) {
-      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`${metarText}\`\`\``;
+      replyContent += t(interaction, 'STR_8A0CB816', { v0: icao, v1: metarText });
     } else {
-      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`❌ Không tìm thấy METAR trên cả atis.guru lẫn CheckWX.\`\`\``;
+      replyContent += t(interaction, 'STR_185E275D', { v0: icao });
     }
 
     // 4. Xử lý hiển thị D-ATIS
@@ -6980,22 +6962,22 @@ async function handleMetar(interaction) {
       // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr
       if (atisData.arrival && atisData.departure && atisData.arrival === atisData.departure) {
         const formatted = formatATISText(atisData.arrival);
-        replyContent += `\n📻 **D-ATIS(${icao}):**\n\`\`\`${formatted}\`\`\``;
+        replyContent += t(interaction, 'STR_DD31CDE2', { v0: icao, v1: formatted });
       }
       // Trường hợp 2: Tách biệt rõ ràng
       else {
         if (atisData.arrival) {
           const formattedArr = formatATISText(atisData.arrival);
-          replyContent += `\n🛬 **Arrival ATIS (${icao}):**\n\`\`\`${formattedArr}\`\`\``;
+          replyContent += t(interaction, 'STR_CF8E06B3', { v0: icao, v1: formattedArr });
         }
 
         if (atisData.departure) {
           const formattedDep = formatATISText(atisData.departure);
-          replyContent += `\n🛫 **Departure ATIS (${icao}):**\n\`\`\`${formattedDep}\`\`\``;
+          replyContent += t(interaction, 'STR_0561B3B6', { v0: icao, v1: formattedDep });
         }
       }
     } else {
-      replyContent += `\n⚠️ Hiện tại không có dữ liệu D-ATIS cho ${icao}. Pilot vui lòng tự đọc METAR ở trên nhé!`;
+      replyContent += t(interaction, 'STR_B763D956', { v0: icao });
     }
 
     await interaction.editReply({ content: replyContent });
@@ -7023,21 +7005,21 @@ async function handleRunway(interaction) {
     }
 
     if (!metar) {
-      return await interaction.editReply({ content: `❌ Không lấy được dữ liệu METAR cho sân bay ${icao} trên toàn bộ hệ thống để tính toán gió.` });
+      return await interaction.editReply({ content : t(interaction, 'STR_D9C0CB4D', { v0: icao }) });
     }
 
     // Tìm hướng gió và tốc độ gió trong METAR (VD: 25015G25KT, VRB02KT)
     const windMatch = metar.match(/(VRB|\d{3})(\d{2,3})(?:G\d{2,3})?KT/);
     if (!windMatch) {
-      return await interaction.editReply({ content: `❌ Không tìm thấy thông số gió hợp lệ trong METAR của ${icao}.\n\`METAR: ${metar}\`` });
+      return await interaction.editReply({ content : t(interaction, 'STR_D9D31F31', { v0: icao, v1: metar }) });
     }
 
     const windDirStr = windMatch[1];
     const windSpeed = parseInt(windMatch[2], 10);
 
     let embed = new EmbedBuilder()
-      .setTitle(`🛫 Active Runway Indicator - ${icao}`)
-      .setDescription(`Dựa trên METAR gần nhất:\n\`\`\`${metar}\`\`\``)
+      .setTitle(t(interaction, 'STR_798F2F7B', { v0: icao }))
+      .setDescription(t(interaction, 'STR_75BAEF5B', { v0: metar }))
       .setColor(0x3498db)
       .setTimestamp();
 
@@ -7049,7 +7031,7 @@ async function handleRunway(interaction) {
     }
 
     const windDir = parseInt(windDirStr, 10);
-    embed.addFields({ name: '🌬️ Gió hiện tại', value: `Hướng: **${windDir}°** | Tốc độ: **${windSpeed} KT**`, inline: false });
+    embed.addFields({ name: '🌬️ Gió hiện tại', value : t(interaction, 'STR_9618842C', { v0: windDir, v1: windSpeed }), inline: false });
 
     // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỪ OPENAIP (ĐÃ FIX CƠ CHẾ TÌM KIẾM)
     let runways = [];
@@ -7209,7 +7191,7 @@ async function handleRunway(interaction) {
     if (runways.length === 0) {
       embed.addFields({
         name: '⚠️ Lưu ý',
-        value: `Sân bay **${icao}** không có dữ liệu đường băng trong hệ thống OpenAIP lẫn Database nội bộ. Tuy nhiên, dựa vào METAR, gió đang thổi từ hướng **${windDir}°**, bạn có thể tự đối chiếu với Chart nhé!`
+        value : t(interaction, 'STR_C0D1B8C0', { v0: icao, v1: windDir })
       });
     } else {
       let bestRunway = null;
@@ -7233,12 +7215,12 @@ async function handleRunway(interaction) {
 
       embed.addFields({
         name: '🎯 Đường băng thuận lợi nhất',
-        value: `**Runway ${bestRunway.id}** (Lệch gió so với trục đường băng: ${minDiff}°)`,
+        value : t(interaction, 'STR_63D760BB', { v0: bestRunway.id, v1: minDiff }),
         inline: false
       });
       embed.addFields({
         name: '✈️ Phân tích thành phần gió',
-        value: `Gió ngược (Headwind): **${headwind} KT**\nGió ngang (Crosswind): **${crosswind} KT**`,
+        value : t(interaction, 'STR_0B521CDE', { v0: headwind, v1: crosswind }),
         inline: false
       });
       embed.setFooter({ text: `Dữ liệu đường băng: ${dataSource} • Lưu ý: Luôn tuân theo huấn lệnh của ATC.` });
@@ -7268,13 +7250,13 @@ async function handleTaf(interaction) {
     });
 
     if (!response.ok) {
-      return await interaction.editReply({ content: `❌ Lỗi khi lấy TAF từ server (Mã lỗi: ${response.status}).` });
+      return await interaction.editReply({ content : t(interaction, 'STR_68510BC4', { v0: response.status }) });
     }
 
     const data = await response.json();
 
     if (!data || data.results === 0 || !data.data || data.data.length === 0) {
-      return await interaction.editReply({ content: `❌ Không tìm thấy dữ liệu TAF cho sân bay **${icao}**.` });
+      return await interaction.editReply({ content : t(interaction, 'STR_1B22A187', { v0: icao }) });
     }
 
     const tafData = data.data[0];
@@ -7284,8 +7266,8 @@ async function handleTaf(interaction) {
     const validTo = tafData.timestamp?.to ? `Đến ${tafData.timestamp.to}` : '';
 
     const embed = new EmbedBuilder()
-      .setTitle(`🌦️ TAF Decoder - ${icao}`)
-      .setDescription(`**Hiệu lực:** ${validFrom} ➔ ${validTo}\n\n**Bản gốc (Raw TAF):**\n\`\`\`${tafData.raw_text}\`\`\``)
+      .setTitle(t(interaction, 'STR_AF48574B', { v0: icao }))
+      .setDescription(t(interaction, 'STR_FC64E637', { v0: validFrom, v1: validTo, v2: tafData.raw_text }))
       .setColor(0x00A8FF) // Màu xanh dương chuyên nghiệp
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/1163/1163624.png')
       .setTimestamp()
@@ -7353,7 +7335,7 @@ async function handleTaf(interaction) {
         let niceIndicator = indicatorMap[indicatorCode] || `🔹 ${indicatorCode}`;
 
         embed.addFields({
-          name: `${niceIndicator} [${timeStr}]`,
+          name : t(interaction, 'STR_2F343072', { v0: niceIndicator, v1: timeStr }),
           value: details.length > 0 ? details.join('\n') : '> Thời tiết không có hiện tượng cản trở.',
           inline: false
         });
@@ -7362,7 +7344,7 @@ async function handleTaf(interaction) {
       if (tafData.forecast.length > MAX_FORECASTS) {
         embed.addFields({
           name: '...',
-          value: `*Còn ${tafData.forecast.length - MAX_FORECASTS} mốc thời gian phụ nữa được ẩn đi cho gọn.*`,
+          value : t(interaction, 'STR_F995A173', { v0: tafData.forecast.length - MAX_FORECASTS }),
           inline: false
         });
       }
@@ -7488,7 +7470,7 @@ async function handleStats(interaction) {
   const stats = await fetchVatsimStatsById(cid);
 
   if (!stats) {
-    return interaction.editReply(`❌ Không tìm thấy dữ liệu trên VATSIM cho CID **${cid}**.`);
+    return interaction.editReply(t(interaction, 'STR_B2203FFA', { v0: cid }));
   }
 
   // Chuyển đổi Rating ATC
@@ -7504,11 +7486,11 @@ async function handleStats(interaction) {
 
   // Xây dựng Giao Diện (Embed)
   const embed = new EmbedBuilder()
-    .setTitle(`🔍 ${stats.id} - MEMBER INFO`)
+    .setTitle(t(interaction, 'STR_5280B75C', { v0: stats.id }))
     .setColor(0x2b2d31) // Màu nền tối giống trong ảnh
     .addFields(
       // Hàng 1
-      { name: '📡 PID', value: `${stats.id}`, inline: true },
+      { name: '📡 PID', value : t(interaction, 'STR_10533D7D', { v0: stats.id }), inline: true },
       { name: '🗓️ REGISTER DATE', value: formatVatsimDate(stats.reg_date), inline: true },
       { name: '\u200b', value: '\u200b', inline: true }, // Cột tàng hình để ép xuống dòng
 
@@ -7541,7 +7523,7 @@ async function handleStats(interaction) {
     for (const [pos, hours] of Object.entries(stats.atc_breakdown)) {
       if (hours > 0) {
         breakdownFields.push({
-          name: `🔵 ${pos.toUpperCase()}`,
+          name : t(interaction, 'STR_69AEDD5C', { v0: pos.toUpperCase() }),
           value: hours.toFixed(2),
           inline: true
         });
@@ -7619,7 +7601,7 @@ async function handleEvent(interaction) {
     });
 
     if (airportEvents.length === 0) {
-      return await interaction.editReply({ content: `❌ Hiện tại không có sự kiện nào sắp diễn ra tại sân bay **${icao}**.` });
+      return await interaction.editReply({ content : t(interaction, 'STR_467CCCE8', { v0: icao }) });
     }
 
     const embeds = [];
@@ -7632,11 +7614,11 @@ async function handleEvent(interaction) {
       const endTime = new Date(ev.end_time);
 
       const embed = new EmbedBuilder()
-        .setTitle(`📌 ${ev.name}`)
+        .setTitle(t(interaction, 'STR_E5CEB46C', { v0: ev.name }))
         .setColor(0x9b59b6)
         .addFields({
           name: '⏰ Thời gian',
-          value: `**Bắt đầu:** <t:${Math.floor(startTime.getTime() / 1000)}:F>\n**Kết thúc:** <t:${Math.floor(endTime.getTime() / 1000)}:F>`,
+          value : t(interaction, 'STR_F9D5BAA1', { v0: Math.floor(startTime.getTime() / 1000), v1: Math.floor(endTime.getTime() / 1000) }),
           inline: false
         });
 
@@ -7656,7 +7638,7 @@ async function handleEvent(interaction) {
       // Embed đầu tiên sẽ có dòng chữ mô tả tổng quát trên cùng
       if (index === 0) {
         embed.setAuthor({
-          name: `📅 Các sự kiện VATSIM tại ${icao}`,
+          name : t(interaction, 'STR_F3CEBAB5', { v0: icao }),
           iconURL: 'https://cdn-icons-png.flaticon.com/512/3652/3652191.png'
         });
       }
@@ -7750,14 +7732,14 @@ async function handleRoute(interaction) {
     // 3. NẾU CẢ WEB VÀ JSON ĐỀU KHÔNG CÓ
     if (!routesList || routesList.length === 0) {
       return await interaction.editReply({
-        content: `❌ Hiện tại hệ thống chưa có gợi ý route cho chặng bay **${dep} ➔ ${arr}**.\nBạn có thể tự tra cứu thêm trên SimBrief hoặc Chart nhé!`
+        content : t(interaction, 'STR_8C2A6052', { v0: dep, v1: arr })
       });
     }
 
     // ================= BẮT ĐẦU CHỈNH SỬA GIAO DIỆN =================
     const embed = new EmbedBuilder()
       .setColor(0x3B3F45) // Đổi màu sắc cho giống viền nền của hình ảnh (tùy chọn)
-      .setAuthor({ name: `🛰️ Route Info - ${dep} > ${arr}` }) // Thay cho title để format đẹp như hình
+      .setAuthor({ name : t(interaction, 'STR_60DD2187', { v0: dep, v1: arr }) }) // Thay cho title để format đẹp như hình
       .addFields(
         { name: '🛫 Departure', value: dep, inline: true },
         { name: '🛬 Arrival', value: arr, inline: true }
@@ -7767,15 +7749,15 @@ async function handleRoute(interaction) {
     if (Array.isArray(routesList)) {
       routesList.forEach((rt, index) => {
         embed.addFields({
-          name: `🗺️ Flight Route${routesList.length > 1 ? ` (Phương án ${index + 1})` : ''}`,
-          value: `\`\`\`\n${rt}\n\`\`\``,
+          name : t(interaction, 'STR_231C991F', { v0: index + 1 }),
+          value : t(interaction, 'STR_68A1141F', { v0: rt }),
           inline: false
         });
       });
     } else {
       embed.addFields({
         name: '🗺️ Flight Route',
-        value: `\`\`\`\n${routesList}\n\`\`\``,
+        value : t(interaction, 'STR_68A1141F', { v0: routesList }),
         inline: false
       });
     }
@@ -7802,12 +7784,12 @@ async function handleRoute(interaction) {
     // Tạo hàng chứa các nút bấm
     const actionRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setLabel('Import to SimBrief')
+        .setLabel(t(interaction, 'STR_6D3F8F7C'))
         .setStyle(ButtonStyle.Link)
         .setURL(simbriefUrl)
         .setEmoji('📝'),
       new ButtonBuilder()
-        .setLabel('Import to VATSIM')
+        .setLabel(t(interaction, 'STR_E0F1D436'))
         .setStyle(ButtonStyle.Link)
         .setURL(vatsimUrl)
         .setEmoji('🌐')
@@ -7827,7 +7809,7 @@ async function handleEditAnnoun(interaction) {
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-    return replyBilingual(interaction,{ content: '❌ Bạn không có quyền.', ephemeral: true });
+    return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
   }
 
   const channel = interaction.options.getChannel('channel');
@@ -7842,7 +7824,7 @@ async function handleEditAnnoun(interaction) {
 
     const textInput = new TextInputBuilder()
       .setCustomId('new_content')
-      .setLabel('Nội dung cần sửa')
+      .setLabel(t(interaction, 'STR_5C7C0DEB'))
       .setStyle(TextInputStyle.Paragraph)
       .setValue(scheduledAnnouncements[scheduledIndex].content.substring(0, 4000))
       .setRequired(true);
@@ -7853,12 +7835,12 @@ async function handleEditAnnoun(interaction) {
 
   // 2. Nếu KHÔNG PHẢI lịch trình hẹn giờ, bắt buộc phải có Channel để móc tin nhắn cũ
   if (!channel) {
-    return replyBilingual(interaction,{ content: '❌ Đây không phải ID lịch trình. Nếu bạn muốn sửa tin nhắn đã gửi, vui lòng chọn thêm mục `channel` (kênh chứa tin nhắn đó) nhé!', ephemeral: true });
+    return interaction.reply({ content: '❌ Đây không phải ID lịch trình. Nếu bạn muốn sửa tin nhắn đã gửi, vui lòng chọn thêm mục `channel` (kênh chứa tin nhắn đó) nhé!', ephemeral: true });
   }
 
   try {
     const targetMsg = await channel.messages.fetch(messageId);
-    if (!targetMsg) return replyBilingual(interaction,{ content: '❌ Không tìm thấy tin nhắn với ID này.', ephemeral: true });
+    if (!targetMsg) return interaction.reply({ content: '❌ Không tìm thấy tin nhắn với ID này.', ephemeral: true });
 
     // Tạo bảng nhập (Modal) cho tin nhắn đã gửi
     const modal = new ModalBuilder()
@@ -7867,7 +7849,7 @@ async function handleEditAnnoun(interaction) {
 
     const textInput = new TextInputBuilder()
       .setCustomId('new_content')
-      .setLabel('Nội dung cần sửa')
+      .setLabel(t(interaction, 'STR_5C7C0DEB'))
       .setStyle(TextInputStyle.Paragraph)
       .setValue(targetMsg.content.substring(0, 4000))
       .setRequired(true);
@@ -7879,7 +7861,7 @@ async function handleEditAnnoun(interaction) {
 
   } catch (error) {
     console.error('Lỗi lấy tin nhắn cũ:', error);
-    await replyBilingual(interaction,{ content: '❌ Có lỗi xảy ra, đảm bảo ID đúng và bot có quyền xem kênh đó.', ephemeral: true });
+    await interaction.reply({ content: '❌ Có lỗi xảy ra, đảm bảo ID đúng và bot có quyền xem kênh đó.', ephemeral: true });
   }
 }
 
@@ -7887,7 +7869,7 @@ async function handleCancelAnnoun(interaction) {
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-    return replyBilingual(interaction,{ content: '❌ Bạn không có quyền.', ephemeral: true });
+    return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
   }
 
   const id = interaction.options.getString('id');
@@ -7896,9 +7878,9 @@ async function handleCancelAnnoun(interaction) {
 
   if (scheduledAnnouncements.length < initialLength) {
     await db.saveAnnouncements(scheduledAnnouncements);
-    return replyBilingual(interaction,{ content: `✅ Đã hủy lịch trình gửi thông báo (ID: \`${id}\`)!`, ephemeral: true });
+    return interaction.reply({ content : t(interaction, 'STR_922EDAFC', { v0: id }), ephemeral: true });
   } else {
-    return replyBilingual(interaction,{ content: `❌ Không tìm thấy lịch trình nào với ID: \`${id}\` (Có thể nó đã được gửi đi rồi)`, ephemeral: true });
+    return interaction.reply({ content : t(interaction, 'STR_6FC19979', { v0: id }), ephemeral: true });
   }
 }
 
@@ -7935,7 +7917,7 @@ async function handleVatseaRankCommand(interaction) {
     const embed = await updateVatseaLeaderboardEmbed(startTime, endTime);
     await interaction.editReply({ content: '✅ Đã cập nhật thành công bảng xếp hạng VATSEA!', embeds: [embed] });
   } catch (error) {
-    await interaction.editReply({ content: `❌ Đã xảy ra lỗi khi tạo bảng xếp hạng VATSEA: ${error.message}` });
+    await interaction.editReply({ content : t(interaction, 'STR_54F7E5F7', { v0: error.message }) });
   }
 }
 
@@ -7956,17 +7938,17 @@ async function handleNotam(interaction) {
     });
 
     if (!response.ok) {
-      return await interaction.editReply({ content: `❌ Lỗi kết nối đến máy chủ CheckWX (Mã lỗi: ${response.status}).` });
+      return await interaction.editReply({ content : t(interaction, 'STR_2F455706', { v0: response.status }) });
     }
 
     const data = await response.json();
 
     if (!data || data.results === 0 || !data.data || data.data.length === 0) {
-      return await interaction.editReply({ content: `✅ Hiện tại không có NOTAM (thông báo hàng không) nào được ban hành cho sân bay **${icao}**.` });
+      return await interaction.editReply({ content : t(interaction, 'STR_AB0F8F8D', { v0: icao }) });
     }
 
     const embed = new EmbedBuilder()
-      .setTitle(`⚠️ Thông Báo Hàng Không (NOTAM) - ${icao}`)
+      .setTitle(t(interaction, 'STR_3F38F411', { v0: icao }))
       .setColor(0xe74c3c)
       .setTimestamp()
       .setFooter({ text: 'Powered by CheckWX API' });
@@ -7981,8 +7963,8 @@ async function handleNotam(interaction) {
       const safeText = notamText.length > 1000 ? notamText.slice(0, 1000) + '...' : notamText;
 
       embed.addFields({
-        name: `📌 NOTAM #${i + 1}`,
-        value: `\`\`\`\n${safeText}\n\`\`\``,
+        name : t(interaction, 'STR_3C87EFAC', { v0: i + 1 }),
+        value : t(interaction, 'STR_68A1141F', { v0: safeText }),
         inline: false
       });
     }
@@ -7990,7 +7972,7 @@ async function handleNotam(interaction) {
     if (data.data.length > MAX_NOTAMS) {
       embed.addFields({
         name: '...',
-        value: `*Còn ${data.data.length - MAX_NOTAMS} thông báo khác bị ẩn đi để tránh quá tải tin nhắn.*`,
+        value : t(interaction, 'STR_0550F2E2', { v0: data.data.length - MAX_NOTAMS }),
         inline: false
       });
     }
@@ -8045,7 +8027,7 @@ async function handleSimbrief(interaction) {
     // Giữ nguyên phần code còn lại của bạn...
     if (data.fetch?.status !== 'Success') {
       return await interaction.editReply({
-        content: `❌ **Lỗi:** Không tìm thấy kế hoạch bay nào của \`${username}\`.\n⚠️ *Lưu ý: Bạn phải nhấn nút "Generate Flight" trên web SimBrief trước thì bot mới đọc được nhé!*`
+        content : t(interaction, 'STR_422F072A', { v0: username })
       });
     }
 
@@ -8069,16 +8051,16 @@ async function handleSimbrief(interaction) {
     const ci = data.general?.costindex || 'AUTO';
 
     const embed = new EmbedBuilder()
-      .setTitle(`✈️ Kế Hoạch Bay (OFP) - ${username}`)
-      .setDescription(`**${dep} ➔ ${arr}** | Callsign: **${callsign || 'N/A'}**`)
+      .setTitle(t(interaction, 'STR_90A16B58', { v0: username }))
+      .setDescription(t(interaction, 'STR_CE5B5755', { v0: dep, v1: arr, v2: callsign || 'N/A' }))
       .setColor(0x3498db)
       .addFields(
-        { name: '🛩️ Aircraft', value: `**${acft}**`, inline: true },
-        { name: '🛫 Cruise Alt', value: `**${crzAlt}**`, inline: true },
-        { name: '📈 Cost Index', value: `**${ci}**`, inline: true },
-        { name: '⚖️ ZFW', value: `**${zfw}** kgs`, inline: true },
-        { name: '⛽ Block Fuel', value: `**${blockFuel}** kgs`, inline: true },
-        { name: '🧭 Route', value: `\`\`\`\n${route}\n\`\`\``, inline: false }
+        { name: '🛩️ Aircraft', value : t(interaction, 'STR_137BAD49', { v0: acft }), inline: true },
+        { name: '🛫 Cruise Alt', value : t(interaction, 'STR_137BAD49', { v0: crzAlt }), inline: true },
+        { name: '📈 Cost Index', value : t(interaction, 'STR_137BAD49', { v0: ci }), inline: true },
+        { name: '⚖️ ZFW', value : t(interaction, 'STR_C71AD253', { v0: zfw }), inline: true },
+        { name: '⛽ Block Fuel', value : t(interaction, 'STR_C71AD253', { v0: blockFuel }), inline: true },
+        { name: '🧭 Route', value : t(interaction, 'STR_68A1141F', { v0: route }), inline: false }
       )
       .setFooter({ text: 'Dữ liệu trực tiếp từ SimBrief', iconURL: 'https://www.simbrief.com/logo/simbrief_logo_icon.png' })
       .setTimestamp();
@@ -8124,12 +8106,12 @@ async function handleOnlineAtc(interaction) {
 
     // Nếu không có ai online
     if (airportATCs.length === 0) {
-      return await interaction.editReply({ content: `📡 Hiện tại không có ATC nào đang online tại sân bay **${icao}**.` });
+      return await interaction.editReply({ content : t(interaction, 'STR_45D190DD', { v0: icao }) });
     }
 
     // Xây dựng Embed hiển thị danh sách
     const embed = new EmbedBuilder()
-      .setTitle(`📡 ATC Đang Online - ${icao}`)
+      .setTitle(t(interaction, 'STR_8A6328F7', { v0: icao }))
       .setColor(0x2ecc71)
       .setThumbnail('https://cdn-icons-png.freepik.com/512/6938/6938996.png')
       .setTimestamp()
@@ -8151,8 +8133,8 @@ async function handleOnlineAtc(interaction) {
         : 'Đang thiết lập...';
 
       embed.addFields({
-        name: `📻 ${c.callsign}`,
-        value: `👤 **Controller:** ${c.name || 'Ẩn danh'}\n🎖️ **Rating:** ${rating}\n📶 **Tần số:** ${freq}\n⏰ **Online từ:** <t:${logonUnix}:R>`,
+        name : t(interaction, 'STR_805EE57A', { v0: c.callsign }),
+        value : t(interaction, 'STR_7FED98BC', { v0: c.name || 'Ẩn danh', v1: rating, v2: freq, v3: logonUnix }),
         inline: false
       });
     });
@@ -8232,7 +8214,7 @@ function createMusicDashboard(queue) {
     .setAuthor({ name: 'NOW PLAYING', iconURL: 'https://cdn-icons-png.flaticon.com/512/659/659056.png' })
     .setTitle(currentSong.title)
     .setURL(currentSong.url)
-    .setDescription(`${progressBar} \`[${elapsedStr} / ${currentSong.durationRaw}]\`\n\n> 👤 **Yêu cầu bởi:** <@${currentSong.requester}>\n> 🔊 **Âm lượng:** \`${volPercent}%\`\n> ${loopText}`)
+    .setDescription(t(interaction, 'STR_B6FF535C', { v0: progressBar, v1: elapsedStr, v2: currentSong.durationRaw, v3: currentSong.requester, v4: volPercent, v5: loopText }))
     .setImage(currentSong.thumbnail)
     .setColor(0x2b2d31)
     .setFooter({ text: `Hàng chờ: ${queue.songs.length - 1} bài • Độc quyền Tk.Chill` });
@@ -8272,14 +8254,14 @@ async function playNextSong(guildId) {
     // ================= KHU VỰC LAZY LOAD (GIẢI MÃ ÂM THANH) =================
     if (!song.url && song.resolveQuery) {
       if (queue.dashboardMsg) await queue.dashboardMsg.edit({
-        embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription(`🔍 Đang tải luồng âm thanh: **${song.title.replace('🔎 Đang tìm: ', '')}**...`)],
+        embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription(t(interaction, 'STR_FB65CCF2', { v0: song.title.replace('🔎 Đang tìm: ', '') }))],
         components: []
       }).catch(() => { });
 
       // Ném tên bài hát qua kho SoundCloud để lấy link ẩn
       const searchResults = await play.search(song.resolveQuery, { limit: 1, source: { soundcloud: 'tracks' } });
       if (!searchResults || searchResults.length === 0) {
-        if (queue.textChannel) queue.textChannel.send(`⚠️ Bỏ qua bài **${song.title.replace('🔎 Đang tìm: ', '')}** vì không tìm thấy âm thanh thay thế.`).then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
+        if (queue.textChannel) queue.textChannel.send(t(interaction, 'STR_E9F4A8C4', { v0: song.title.replace('🔎 Đang tìm: ', '') })).then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
         queue.songs.shift();
         return playNextSong(guildId);
       }
@@ -8339,7 +8321,7 @@ async function handlePlayMusic(interaction) {
   const voiceChannel = interaction.member.voice.channel;
 
   if (!voiceChannel) {
-    return replyBilingual(interaction,{ content: '❌ Bạn phải vào một kênh thoại (Voice Channel) trước mới nghe nhạc được chứ!', ephemeral: true });
+    return interaction.reply({ content: '❌ Bạn phải vào một kênh thoại (Voice Channel) trước mới nghe nhạc được chứ!', ephemeral: true });
   }
 
   await interaction.deferReply();
@@ -8370,7 +8352,7 @@ async function handlePlayMusic(interaction) {
         } else { // Nếu là Bài đơn
           const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(query)}&format=json`;
           const oembedRes = await fetch(oembedUrl);
-          if (!oembedRes.ok) return interaction.editReply('❌ Không thể đọc được link YouTube này.');
+          if (!oembedRes.ok) return interaction.editReply(t(interaction, 'STR_D60790C5'));
           const oembedData = await oembedRes.json();
           songsToAdd.push({
             title: oembedData.title,
@@ -8408,7 +8390,7 @@ async function handlePlayMusic(interaction) {
           }
         } catch (spErr) {
           console.error('Lỗi lõi Spotify mới:', spErr);
-          return interaction.editReply('❌ Bot không thể đọc được link Spotify này (Có thể playlist đang ở chế độ Riêng tư hoặc sai link).');
+          return interaction.editReply(t(interaction, 'STR_91B16117'));
         }
       }
       // -------------------------------------------------------------
@@ -8481,7 +8463,7 @@ async function handlePlayMusic(interaction) {
           } else {
             // NẾU KHÔNG TÌM THẤY BÀI NÀO TRONG PLAYLIST
             if (query.includes('/playlist/') || query.includes('/album/')) {
-              return interaction.editReply('❌ **Apple Music chặn Bot đọc Playlist này!**\nLý do: Đây là Playlist **Cộng tác (Collaborative)** hoặc **Riêng tư**. Vui lòng tắt tính năng Cộng tác và chuyển thành Công khai (Public) nhé!');
+              return interaction.editReply(t(interaction, 'STR_5A300390'));
             } else {
               // CỨU CÁNH CHO BÀI HÁT ĐƠN
               let title = $('meta[property="og:title"]').attr('content') || $('title').text();
@@ -8499,7 +8481,7 @@ async function handlePlayMusic(interaction) {
           }
         } catch (apErr) {
           console.error('Lỗi xử lý Apple Music:', apErr);
-          return interaction.editReply('❌ Bot không thể đọc được link Apple Music này do lỗi kết nối.');
+          return interaction.editReply(t(interaction, 'STR_1BA3B686'));
         }
       }
       // -------------------------------------------------------------
@@ -8534,7 +8516,7 @@ async function handlePlayMusic(interaction) {
           });
         }
       } else {
-        return interaction.editReply('❌ **Đường link không hợp lệ!** Bot chỉ hỗ trợ YouTube, Spotify, Apple Music và SoundCloud.');
+        return interaction.editReply(t(interaction, 'STR_EF801B10'));
       }
     } else {
       // TÌM KIẾM BẰNG TEXT -> Đẩy qua Lazy Load cho nhanh
@@ -8548,7 +8530,7 @@ async function handlePlayMusic(interaction) {
       });
     }
 
-    if (songsToAdd.length === 0) return interaction.editReply('❌ Không tìm thấy bài hát nào từ yêu cầu của bạn.');
+    if (songsToAdd.length === 0) return interaction.editReply(t(interaction, 'STR_6A289138'));
 
     let queue = musicQueues.get(interaction.guild.id);
 
@@ -8597,13 +8579,13 @@ async function handlePlayMusic(interaction) {
       // Chỉ hiển thị 25 bài đầu tiên lên Menu Dropdown (Giới hạn của Discord)
       const options = songsToAdd.slice(0, 25).map((song, index) => ({
         label: song.title.length > 50 ? song.title.substring(0, 47) + '...' : song.title,
-        value: `${searchId}_${index}`
+        value : t(interaction, 'STR_0E085810', { v0: searchId, v1: index })
       }));
 
       const menu = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId('select_song')
-          .setPlaceholder('Chọn 1 bài để phát ngay...')
+          .setPlaceholder(t(interaction, 'STR_57767B96'))
           .addOptions(options)
       );
 
@@ -8615,14 +8597,14 @@ async function handlePlayMusic(interaction) {
       );
 
       await interaction.editReply({
-        content: `🔍 Tìm thấy **${songsToAdd.length}** bài hát! Bạn muốn phát bài nào hay nạp tất cả?`,
+        content : t(interaction, 'STR_F7582EEE', { v0: songsToAdd.length }),
         components: [menu, btnAll]
       });
     }
     // TRƯỜNG HỢP TÌM THẤY CHỈ ĐÚNG 1 BÀI
     else {
       queue.songs.push(songsToAdd[0]);
-      await interaction.editReply(`✅ Đã thêm vào hàng chờ: **${songsToAdd[0].title.replace('🔎 Đang tìm: ', '')}**`);
+      await interaction.editReply(t(interaction, 'STR_6A527FB4', { v0: songsToAdd[0].title.replace('🔎 Đang tìm: ', '') }));
       setTimeout(() => interaction.deleteReply().catch(() => { }), 5000);
 
       // Nếu bot đang ngủ (chưa hát bài nào), thì gọi dậy hát luôn
@@ -8635,7 +8617,7 @@ async function handlePlayMusic(interaction) {
 
   } catch (error) {
     console.error('Lỗi khi tải nhạc:', error);
-    await interaction.editReply('❌ Có vẻ Playlist này để chế độ riêng tư hoặc API đang quá tải. Thử lại sau nhé!');
+    await interaction.editReply(t(interaction, 'STR_D118EE7F'));
   }
 } // <--- Đóng hàm handlePlayMusic tại đây
 
@@ -8646,7 +8628,7 @@ async function handleQueue(interaction) {
 
   // Nếu không có nhạc hoặc chỉ có mỗi 1 bài đang hát (hàng chờ = 0)
   if (!queue || queue.songs.length <= 1) {
-    return replyBilingual(interaction,{
+    return interaction.reply({
       content: '📭 **Hàng chờ hiện tại đang trống!** Hãy dùng lệnh `/play` để thêm nhạc vào nhé.',
       ephemeral: true
     });
@@ -8663,13 +8645,13 @@ async function handleQueue(interaction) {
     .setAuthor({ name: '📜 DANH SÁCH HÀNG CHỜ', iconURL: 'https://cdn-icons-png.flaticon.com/512/3281/3281289.png' })
     .setColor(0x2b2d31)
     .setThumbnail(currentSong.thumbnail)
-    .setDescription(`**🎵 Đang phát:**\n[${currentSong.title}](${currentSong.url})\n👤 Yêu cầu bởi: <@${currentSong.requester}>\n\n**🔜 Sắp phát tiếp theo:**`);
+    .setDescription(t(interaction, 'STR_42C4070B', { v0: currentSong.title, v1: currentSong.url, v2: currentSong.requester }));
 
   // Duyệt qua 10 bài tiếp theo và in ra
   upcomingSongs.forEach((song, index) => {
     embed.addFields({
-      name: `\`${index + 1}.\` ${song.title}`,
-      value: `⏱️ \`${song.durationRaw}\` | 👤 <@${song.requester}>`,
+      name : t(interaction, 'STR_47454EDF', { v0: index + 1, v1: song.title }),
+      value : t(interaction, 'STR_99DAEC98', { v0: song.durationRaw, v1: song.requester }),
       inline: false
     });
   });
@@ -8690,7 +8672,7 @@ async function handleClearQueue(interaction) {
 
   // Nếu không có hàng chờ hoặc chỉ có mỗi 1 bài đang hát thì không có gì để xóa
   if (!queue || queue.songs.length <= 1) {
-    return replyBilingual(interaction,{
+    return interaction.reply({
       content: '❌ Hàng chờ đang trống sẵn rồi, không có gì để dọn đâu!',
       ephemeral: true
     });
@@ -8701,7 +8683,7 @@ async function handleClearQueue(interaction) {
   // Giữ lại bài ở vị trí số 0 (đang phát), chém bay màu toàn bộ bài từ vị trí số 1 trở đi
   queue.songs.splice(1);
 
-  await replyBilingual(interaction,{ content: `🧹 Đã dọn dẹp sạch sẽ **${removeCount}** bài hát khỏi hàng chờ!` });
+  await interaction.reply({ content : t(interaction, 'STR_82DF590F', { v0: removeCount }) });
 
   // Cập nhật lại cái bảng điều khiển Dashboard ngay lập tức cho con số nó nhảy về 0
   if (queue.dashboardMsg) {
@@ -8715,7 +8697,7 @@ async function handleSetupVatsimVerify(interaction) {
   const hasAdmin = memberRoles?.cache?.has(roles.adminRoleId) || (Array.isArray(memberRoles) && memberRoles.includes(roles.adminRoleId));
 
   if (!hasAdmin && interaction.user.id !== OWNER_ID) {
-    return replyBilingual(interaction,{ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
+    return interaction.reply({ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
   }
 
   const embed = new EmbedBuilder()
@@ -8724,12 +8706,12 @@ async function handleSetupVatsimVerify(interaction) {
     .setColor(0x3498db);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('btn_verify_pilot').setLabel('Xin Role Pilot').setStyle(ButtonStyle.Primary).setEmoji('✈️'),
-    new ButtonBuilder().setCustomId('btn_verify_atc').setLabel('Xin Role ATC').setStyle(ButtonStyle.Success).setEmoji('📡')
+    new ButtonBuilder().setCustomId('btn_verify_pilot').setLabel(t(interaction, 'STR_EA013000')).setStyle(ButtonStyle.Primary).setEmoji('✈️'),
+    new ButtonBuilder().setCustomId('btn_verify_atc').setLabel(t(interaction, 'STR_DEFA5A50')).setStyle(ButtonStyle.Success).setEmoji('📡')
   );
 
   await interaction.channel.send({ embeds: [embed], components: [row] });
-  await replyBilingual(interaction,{ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
+  await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
 }
 
 // ===================== SIÊU LOGGING: BẮT TRỌN MỌI CHUYỂN ĐỘNG CỦA SERVER =====================
@@ -8971,7 +8953,7 @@ async function handleAtcProfile(interaction) {
     const fetch = (await import('node-fetch')).default;
     // Gọi API v3 của VATSIM
     const response = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
-    if (!response.ok) return interaction.editReply('❌ Lỗi kết nối đến hệ thống máy chủ VATSIM.');
+    if (!response.ok) return interaction.editReply(t(interaction, 'STR_5F7FD9E5'));
 
     const data = await response.json();
 
@@ -8979,7 +8961,7 @@ async function handleAtcProfile(interaction) {
     const atc = data.controllers.find(c => c.callsign === station);
 
     if (!atc) {
-      return interaction.editReply(`❌ Trạm **${station}** hiện tại đang Offline trên mạng bay VATSIM.`);
+      return interaction.editReply(t(interaction, 'STR_01ABE817', { v0: station }));
     }
 
     // Format Rating
@@ -9016,14 +8998,14 @@ async function handleAtcProfile(interaction) {
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: 'VATSIM Controller Profile', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
-      .setTitle(`📡 Station: ${atc.callsign}`)
+      .setTitle(t(interaction, 'STR_6F57484F', { v0: atc.callsign }))
       .setColor(0x00A8FF)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/10623/10623991.png')
       .addFields(
-        { name: '👤 Controller', value: `**${atc.name || atc.cid}**`, inline: true },
-        { name: '🎖️ Rating', value: `\`${ratingStr}\``, inline: true },
-        { name: '📶 Frequency', value: `\`${freq}\``, inline: true },
-        { name: '⏱️ Time on duty', value: `\`${timeOnline}\` (from <t:${logonUnix}:t>)`, inline: false },
+        { name: '👤 Controller', value : t(interaction, 'STR_137BAD49', { v0: atc.name || atc.cid }), inline: true },
+        { name: '🎖️ Rating', value : t(interaction, 'STR_271F3F4C', { v0: ratingStr }), inline: true },
+        { name: '📶 Frequency', value : t(interaction, 'STR_271F3F4C', { v0: freq }), inline: true },
+        { name: '⏱️ Time on duty', value : t(interaction, 'STR_E8816EEB', { v0: timeOnline, v1: logonUnix }), inline: false },
         { name: '📝 Remarks', value: textRemarks, inline: false }
       )
       .setFooter({ text: `VATSIM CID: ${atc.cid}` })
@@ -9033,7 +9015,7 @@ async function handleAtcProfile(interaction) {
 
   } catch (err) {
     console.error('Lỗi lệnh atc_profile:', err);
-    await interaction.editReply('❌ Đã có lỗi xảy ra khi kéo dữ liệu từ VATSIM.');
+    await interaction.editReply(t(interaction, 'STR_42EC7EF2'));
   }
 }
 
@@ -9045,7 +9027,7 @@ async function handleAtisVatsim(interaction) {
   try {
     const fetch = (await import('node-fetch')).default;
     const response = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
-    if (!response.ok) return interaction.editReply('❌ Lỗi kết nối đến hệ thống máy chủ VATSIM.');
+    if (!response.ok) return interaction.editReply(t(interaction, 'STR_5F7FD9E5'));
 
     const data = await response.json();
 
@@ -9053,7 +9035,7 @@ async function handleAtisVatsim(interaction) {
     const atisList = data.atis.filter(a => a.callsign.startsWith(icao) && a.callsign.includes('ATIS'));
 
     if (!atisList || atisList.length === 0) {
-      return interaction.editReply(`❌ Hiện tại không có trạm ATIS nào đang phát sóng tại sân bay **${icao}** trên VATSIM.`);
+      return interaction.editReply(t(interaction, 'STR_5EC55598', { v0: icao }));
     }
 
     const embeds = [];
@@ -9073,13 +9055,13 @@ async function handleAtisVatsim(interaction) {
 
       const embed = new EmbedBuilder()
         .setAuthor({ name: 'VATSIM ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
-        .setTitle(`📻 Station: ${atis.callsign} (${atis.frequency})`)
+        .setTitle(t(interaction, 'STR_A5C7D5EA', { v0: atis.callsign, v1: atis.frequency }))
         .setColor(0x2ecc71)
         .setThumbnail('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSZTpaHOLCaND817gJ28iYTv1WRWnf4wUQoocDs6VYj_guu8gDc2VFKqCxp&s=10')
         .addFields(
           { name: '🏷️ Identifier', value: atisCode, inline: true },
-          { name: '⏱️ Upadate at', value: `<t:${logonUnix}:R>`, inline: true },
-          { name: '📝 Atis', value: `\`\`\`yaml\n${textInfo}\n\`\`\``, inline: false }
+          { name: '⏱️ Upadate at', value : t(interaction, 'STR_4B10E5E6', { v0: logonUnix }), inline: true },
+          { name: '📝 Atis', value : t(interaction, 'STR_8BED3981', { v0: textInfo }), inline: false }
         )
         .setFooter({ text: 'Dữ liệu lấy trực tiếp từ mạng bay VATSIM' })
         .setTimestamp();
@@ -9091,7 +9073,7 @@ async function handleAtisVatsim(interaction) {
 
   } catch (err) {
     console.error('Lỗi lệnh atis_vatsim:', err);
-    await interaction.editReply('❌ Đã có lỗi xảy ra khi kéo dữ liệu ATIS từ VATSIM.');
+    await interaction.editReply(t(interaction, 'STR_6ACAD996'));
   }
 }
 
@@ -9104,7 +9086,7 @@ async function handleIvaoAtc(interaction) {
     const fetch = (await import('node-fetch')).default;
     // Gọi API dữ liệu trực tiếp của IVAO
     const response = await fetch('https://api.ivao.aero/v2/tracker/whazzup');
-    if (!response.ok) return interaction.editReply('❌ Lỗi kết nối đến hệ thống máy chủ IVAO.');
+    if (!response.ok) return interaction.editReply(t(interaction, 'STR_1E1C4CC4'));
 
     const data = await response.json();
 
@@ -9113,7 +9095,7 @@ async function handleIvaoAtc(interaction) {
     const atc = atcs.find(c => c.callsign === station);
 
     if (!atc) {
-      return interaction.editReply(`❌ Trạm **${station}** hiện tại đang Offline trên mạng bay IVAO.`);
+      return interaction.editReply(t(interaction, 'STR_1B7436F4', { v0: station }));
     }
 
     // Format Rating của IVAO
@@ -9152,14 +9134,14 @@ async function handleIvaoAtc(interaction) {
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: 'IVAO Controller Profile', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
-      .setTitle(`📡 Trạm: ${atc.callsign}`)
+      .setTitle(t(interaction, 'STR_53DDFC0F', { v0: atc.callsign }))
       .setColor(0x0A2B5E)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/10623/10623991.png')
       .addFields(
-        { name: '👤 Controller', value: `**VID: ${atc.userId || 'Ẩn danh'}**`, inline: true },
-        { name: '🎖️ Rating', value: `\`${ratingStr}\``, inline: true },
-        { name: '📶 Frequency', value: `\`${freq}\``, inline: true },
-        { name: '⏱️ Time on duty', value: `\`${timeOnline}\` (từ <t:${logonUnix}:t>)`, inline: false },
+        { name: '👤 Controller', value : t(interaction, 'STR_9DA523DA', { v0: atc.userId || 'Ẩn danh' }), inline: true },
+        { name: '🎖️ Rating', value : t(interaction, 'STR_271F3F4C', { v0: ratingStr }), inline: true },
+        { name: '📶 Frequency', value : t(interaction, 'STR_271F3F4C', { v0: freq }), inline: true },
+        { name: '⏱️ Time on duty', value : t(interaction, 'STR_82881C12', { v0: timeOnline, v1: logonUnix }), inline: false },
         { name: '📝 Remarks', value: textRemarks, inline: false }
       )
       .setFooter({ text: `IVAO VID: ${atc.userId || 'N/A'}` })
@@ -9169,7 +9151,7 @@ async function handleIvaoAtc(interaction) {
 
   } catch (err) {
     console.error('Lỗi lệnh ivao_atc:', err);
-    await interaction.editReply('❌ Đã có lỗi xảy ra khi kéo dữ liệu từ IVAO.');
+    await interaction.editReply(t(interaction, 'STR_18CC14F1'));
   }
 }
 
@@ -9181,7 +9163,7 @@ async function handleIvaoAtis(interaction) {
   try {
     const fetch = (await import('node-fetch')).default;
     const response = await fetch('https://api.ivao.aero/v2/tracker/whazzup');
-    if (!response.ok) return interaction.editReply('❌ Lỗi kết nối đến hệ thống máy chủ IVAO.');
+    if (!response.ok) return interaction.editReply(t(interaction, 'STR_1E1C4CC4'));
 
     const data = await response.json();
 
@@ -9190,7 +9172,7 @@ async function handleIvaoAtis(interaction) {
     const atisList = atcs.filter(a => a.callsign.startsWith(icao) && a.atis && a.atis.lines && a.atis.lines.length > 0);
 
     if (!atisList || atisList.length === 0) {
-      return interaction.editReply(`❌ Hiện tại không có trạm nào đang phát ATIS tại sân bay **${icao}** trên mạng bay IVAO.`);
+      return interaction.editReply(t(interaction, 'STR_7A088031', { v0: icao }));
     }
 
     const embeds = [];
@@ -9205,13 +9187,13 @@ async function handleIvaoAtis(interaction) {
 
       const embed = new EmbedBuilder()
         .setAuthor({ name: 'IVAO ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
-        .setTitle(`📻 Station: ${atc.callsign} (${atc.atcSession?.frequency?.toFixed(3) || 'N/A'})`)
+        .setTitle(t(interaction, 'STR_A5C7D5EA', { v0: atc.callsign, v1: atc.atcSession?.frequency?.toFixed(3) || 'N/A' }))
         .setColor(0x0A2B5E) // Xanh Navy
         .setThumbnail('https://xe.ivao.aero/wordpress/wp-content/uploads/website/the-division/about/brand_logo_no_text.png')
         .addFields(
           { name: '🏷️ Identifier', value: atisCode, inline: true },
-          { name: '⏱️ Update at', value: `<t:${logonUnix}:R>`, inline: true },
-          { name: '📝 Atis', value: `\`\`\`yaml\n${textInfo}\n\`\`\``, inline: false }
+          { name: '⏱️ Update at', value : t(interaction, 'STR_4B10E5E6', { v0: logonUnix }), inline: true },
+          { name: '📝 Atis', value : t(interaction, 'STR_8BED3981', { v0: textInfo }), inline: false }
         )
         .setFooter({ text: 'Dữ liệu phát sóng trực tiếp từ mạng IVAO' })
         .setTimestamp();
@@ -9224,7 +9206,7 @@ async function handleIvaoAtis(interaction) {
 
   } catch (err) {
     console.error('Lỗi lệnh ivao_atis:', err);
-    await interaction.editReply('❌ Đã có lỗi xảy ra khi kéo dữ liệu ATIS từ mạng bay IVAO.');
+    await interaction.editReply(t(interaction, 'STR_54D5E278'));
   }
 }
 
@@ -9257,22 +9239,22 @@ async function handleRealFlight(interaction) {
     });
 
     if (!response.ok) {
-      return await interaction.editReply({ content: `❌ Lỗi kết nối đến FlightRadar24 (Status: ${response.status}). Có thể IP của bot đang bị hệ thống chống bot tạm thời chặn.` });
+      return await interaction.editReply({ content : t(interaction, 'STR_F97F073B', { v0: response.status }) });
     }
 
     const data = await response.json();
     const airportData = data?.result?.response?.airport;
 
     if (!airportData || !airportData.pluginData?.schedule) {
-      return await interaction.editReply({ content: `❌ Không tìm thấy dữ liệu sân bay ngoài đời thực cho mã **${icao}**.` });
+      return await interaction.editReply({ content : t(interaction, 'STR_CCAA1559', { v0: icao }) });
     }
 
     const arrivals = airportData.pluginData.schedule.arrivals?.data || [];
     const departures = airportData.pluginData.schedule.departures?.data || [];
 
     const embed = new EmbedBuilder()
-      .setTitle(`✈️ Bảng Lịch Trình Bay Thực Tế - ${icao}`)
-      .setDescription(`Dữ liệu chuyến bay thương mại tại **${airportData.pluginData?.details?.name || icao}**`)
+      .setTitle(t(interaction, 'STR_E8D984EB', { v0: icao }))
+      .setDescription(t(interaction, 'STR_DF02291A', { v0: airportData.pluginData?.details?.name || icao }))
       .setColor(0xF1C40F)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/3180/3180118.png')
       .setFooter({ text: 'Dữ liệu được cập nhật trực tiếp từ FlightRadar24' })
@@ -9334,7 +9316,7 @@ async function checkAndRegisterUser(interaction) {
   const isOwner = userId === OWNER_ID;
 
   if (!hasAdmin && !hasDev && !hasStaff && !isOwner && interaction.channelId !== CASH_CHANNEL_ID) {
-    await interaction.editReply(`❌ Sếp gõ lệnh sai kênh rồi! Vui lòng qua đúng kênh <#${CASH_CHANNEL_ID}> để sử dụng các lệnh tiền tệ nhé.`);
+    await interaction.editReply(t(interaction, 'STR_D5BF1B18', { v0: CASH_CHANNEL_ID }));
     return null; 
   }
 
@@ -9345,7 +9327,7 @@ async function checkAndRegisterUser(interaction) {
     if (balance) {
       // Đã nâng vốn khởi nghiệp lên 2000 Cash
       await interaction.followUp({
-        content: `🎉 Chào mừng cơ trưởng **${discordName}** lần đầu tham gia hệ thống kinh tế **tk.chill**!\nNgân hàng đã cấp cho sếp **2000 Cash** khởi nghiệp. Chơi vui vẻ nhé! 💸`,
+        content : t(interaction, 'STR_512695F1', { v0: discordName }),
         ephemeral: true
       });
       balance.displayName = discordName;
@@ -9393,7 +9375,7 @@ async function handleDaily(interaction) {
     const hours = Math.floor(remainingTime / (1000 * 60 * 60));
     const minutes = Math.floor((remainingTime % (1000 * 60 * 60)) / (1000 * 60));
     
-    return interaction.editReply(`❌ Hôm nay sếp đã điểm danh rồi cơ trưởng **${balance.displayName}**!\n⏳ Hãy quay lại sau: **${hours} giờ ${minutes} phút** nữa (Hệ thống tự động reset lúc 00:00 đêm giờ Việt Nam).`);
+    return interaction.editReply(t(interaction, 'STR_9C2739EE', { v0: balance.displayName, v1: hours, v2: minutes }));
   }
 
   // Check chuỗi ngày (Streak)
@@ -9422,10 +9404,10 @@ async function handleDaily(interaction) {
   const embed = new EmbedBuilder()
     .setTitle('📅 ĐIỂM DANH HÀNG NGÀY')
     .setColor(0x2ecc71)
-    .setDescription(`Chúc mừng **${balance.displayName}** nhận được **${reward.toLocaleString()} Cash**!`)
+    .setDescription(t(interaction, 'STR_B8C4F460', { v0: balance.displayName, v1: reward.toLocaleString() }))
     .addFields(
-      { name: '🔥 Chuỗi liên tiếp', value: `${userDb.dailyStreak} ngày`, inline: true },
-      { name: '💰 Tổng số dư', value: `${updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash.toLocaleString()} Cash`, inline: true }
+      { name: '🔥 Chuỗi liên tiếp', value : t(interaction, 'STR_DCE461FA', { v0: userDb.dailyStreak }), inline: true },
+      { name: '💰 Tổng số dư', value : t(interaction, 'STR_BD84778D', { v0: updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash.toLocaleString() }), inline: true }
     )
     .setFooter({ text: 'Lượt điểm danh mới sẽ mở vào 00:00 (Giờ VN) mỗi ngày' });
 
@@ -9496,7 +9478,7 @@ async function checkAndRegisterUser(interaction) {
   const isOwner = userId === OWNER_ID;
 
   if (!hasAdmin && !hasDev && !hasStaff && !isOwner && interaction.channelId !== CASH_CHANNEL_ID) {
-    await interaction.editReply(`❌ Sếp gõ lệnh sai kênh rồi! Vui lòng qua đúng kênh <#${CASH_CHANNEL_ID}> để sử dụng các lệnh tiền tệ nhé.`);
+    await interaction.editReply(t(interaction, 'STR_D5BF1B18', { v0: CASH_CHANNEL_ID }));
     return null; 
   }
 
@@ -9505,7 +9487,7 @@ async function checkAndRegisterUser(interaction) {
     balance = await registerPilot(userId, discordName);
     if (balance) {
       await interaction.followUp({
-        content: `🎉 Chào mừng cơ trưởng **${discordName}** lần đầu tham gia hệ thống kinh tế **tk.chill**!\nNgân hàng đã cấp cho sếp **2000 Cash** khởi nghiệp. Chơi vui vẻ nhé! 💸`,
+        content : t(interaction, 'STR_512695F1', { v0: discordName }),
         ephemeral: true
       });
       balance.displayName = discordName;
@@ -9519,7 +9501,7 @@ async function checkAndRegisterUser(interaction) {
 // ===================== LOA PHÁT THANH PHÁ SẢN =====================
 async function checkBankruptcy(interaction, displayName, currentCash) {
   if (currentCash <= 0) {
-    await interaction.channel.send(`🚨 **BÁO ĐỘNG ĐỎ! PHÁ SẢN!** 🚨\nCơ trưởng **${displayName}** vừa bị sòng bài lột sạch sành sanh, chính thức trắng tay (0 Cash)!\n👉 Hãy xách máy bay đi làm vài chuyến hoặc dùng lệnh \`/work\` để cày cuốc kiếm cơm qua ngày đi nhé! 🧹🧽`);
+    await interaction.channel.send(t(interaction, 'STR_6775D79C', { v0: displayName }));
   }
 }
 
@@ -9544,7 +9526,7 @@ async function handleWork(interaction) {
       const remainingTime = cooldown - timeDiff;
       const minutes = Math.floor(remainingTime / (1000 * 60));
       const seconds = Math.floor((remainingTime % (1000 * 60)) / 1000);
-      return interaction.editReply(`❌ Vừa làm xong chưa ráo mồ hôi mà đòi làm tiếp à? Đợi **${minutes} phút ${seconds} giây** nữa nhé!`);
+      return interaction.editReply(t(interaction, 'STR_8AD0C0FF', { v0: minutes, v1: seconds }));
     }
   }
 
@@ -9555,9 +9537,9 @@ async function handleWork(interaction) {
     if (Math.random() < 0.60) {
       const pityMoney = Math.floor(Math.random() * 2000) + 500; 
       await updatePilotBalance(userId, pityMoney, 0, pityMoney);
-      return interaction.editReply(`🥺 Chà chà, thấy sếp khố rách áo ôm, cờ bạc cháy túi, ngân hàng xót thương bèn cấp phát quỹ từ thiện: **${pityMoney.toLocaleString()} Cash**.\nCầm tiền này mà mua vé máy bay làm lại cuộc đời nhé!`);
+      return interaction.editReply(t(interaction, 'STR_CA2FF063', { v0: pityMoney.toLocaleString() }));
     } else {
-      return interaction.editReply(`💀 **CẢNH BÁO BÁO ĐỘNG ĐỎ!**\nCơ trưởng **${balance.displayName}** đã cạn kiệt ngân quỹ (0 Cash)!\nBáo cáo với hãng hàng không đi bay để kiếm thêm tiền, hoặc xin donate từ anh em trong server chứ đỗ nghèo khỉ thế này thì sòng bài không cho vào cửa đâu!`);
+      return interaction.editReply(t(interaction, 'STR_762E78EA', { v0: balance.displayName }));
     }
   }
 
@@ -9566,16 +9548,16 @@ async function handleWork(interaction) {
   if (isSuccess) {
     const earned = Math.floor(Math.random() * 10001); 
     await updatePilotBalance(userId, earned, 0, earned);
-    await interaction.editReply(`💼 **${balance.displayName}** vừa hoàn thành một ca trực vất vả và được trả công **${earned.toLocaleString()} Cash**!`);
+    await interaction.editReply(t(interaction, 'STR_D0B916C6', { v0: balance.displayName, v1: earned.toLocaleString() }));
   } else {
     let penalty = Math.floor(Math.random() * 501); 
     if (balance.currentCash < penalty) penalty = balance.currentCash; 
 
     if (penalty === 0) {
-      await interaction.editReply(`📉 Hôm nay ế khách, cơ trưởng **${balance.displayName}** nằm không cả ngày chả kiếm được đồng nào.`);
+      await interaction.editReply(t(interaction, 'STR_347CCF76', { v0: balance.displayName }));
     } else {
       const updateRes = await updatePilotBalance(userId, -penalty, penalty, 0);
-      await interaction.editReply(`💥 Xui xẻo! **${balance.displayName}** làm hỏng đồ nghề của công ty và bị trừ lương **${penalty.toLocaleString()} Cash**!`);
+      await interaction.editReply(t(interaction, 'STR_35C68AD7', { v0: balance.displayName, v1: penalty.toLocaleString() }));
       if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
     }
   }
@@ -9596,17 +9578,17 @@ async function handleBalance(interaction) {
   };
 
   const embed = new EmbedBuilder()
-      .setTitle(`💳 HỒ SƠ TÀI CHÍNH`)
-      .setDescription(`Kính chào cơ trưởng **${balanceData.displayName}**! Dưới đây là thông số tích lũy:`)
+      .setTitle(t(interaction, 'STR_7600B9EB'))
+      .setDescription(t(interaction, 'STR_4D1488DD', { v0: balanceData.displayName }))
       .setColor('#10b981') 
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
       .addFields(
-          { name: '👤 Tên App', value: `\`${balanceData.username}\``, inline: false },
-          { name: '💰 Số Dư Khả Dụng', value: `**${safeNum(balanceData.currentCash).toLocaleString()}** Cash`, inline: true },
-          { name: '📈 Tổng Tích Lũy', value: `${safeNum(balanceData.totalEarned).toLocaleString()} Cash`, inline: true },
-          { name: '💸 Đã Tiêu Xài', value: `${safeNum(balanceData.usedCash).toLocaleString()} Cash`, inline: true },
-          { name: '✈️ Số Chuyến Bay', value: `**${safeNum(balanceData.completedFlights)}** chuyến`, inline: true },
-          { name: '⏱️ Thời Gian Bay', value: `**${safeNum(balanceData.totalHours).toFixed(1)}** giờ`, inline: true }
+          { name: '👤 Tên App', value : t(interaction, 'STR_271F3F4C', { v0: balanceData.username }), inline: false },
+          { name: '💰 Số Dư Khả Dụng', value : t(interaction, 'STR_4B5CDCD6', { v0: safeNum(balanceData.currentCash).toLocaleString() }), inline: true },
+          { name: '📈 Tổng Tích Lũy', value : t(interaction, 'STR_BD84778D', { v0: safeNum(balanceData.totalEarned).toLocaleString() }), inline: true },
+          { name: '💸 Đã Tiêu Xài', value : t(interaction, 'STR_BD84778D', { v0: safeNum(balanceData.usedCash).toLocaleString() }), inline: true },
+          { name: '✈️ Số Chuyến Bay', value : t(interaction, 'STR_AABEB377', { v0: safeNum(balanceData.completedFlights) }), inline: true },
+          { name: '⏱️ Thời Gian Bay', value : t(interaction, 'STR_C4DC5BD8', { v0: safeNum(balanceData.totalHours).toFixed(1) }), inline: true }
       );
 
   await interaction.editReply({ embeds: [embed] });
@@ -9621,8 +9603,8 @@ async function handleCoinflip(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của bạn không đủ! Bạn chỉ có **${balance.currentCash.toLocaleString()} Cash**.`);
+  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
+  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_F8E542BF', { v0: balance.currentCash.toLocaleString() }));
 
   const userId = interaction.user.id;
   let userDb = await db.getGamblingData(userId);
@@ -9640,18 +9622,18 @@ async function handleCoinflip(interaction) {
   }
 
   let isWin = Math.random() < winChance;
-  await interaction.editReply({ content: `🪙 **${balance.displayName}** đang tung đồng xu với **${amount.toLocaleString()} Cash**...` });
+  await interaction.editReply({ content : t(interaction, 'STR_9BC3E8E2', { v0: balance.displayName, v1: amount.toLocaleString() }) });
 
   setTimeout(async () => {
     if (isWin) {
       userDb.coinflipWins += 1; userDb.coinflipLosses = 0;
       // FIX TÍCH LŨY: Lãi ròng = amount | Đã tiêu = amount | Tổng nhận = amount * 2
       await updatePilotBalance(userId, amount, amount, amount * 2);
-      await interaction.editReply(`🎉 **THẮNG RỒI!** Đồng xu ngửa! **${balance.displayName}** húp lãi **${amount.toLocaleString()} Cash**!`);
+      await interaction.editReply(t(interaction, 'STR_99850A82', { v0: balance.displayName, v1: amount.toLocaleString() }));
     } else {
       userDb.coinflipLosses += 1; userDb.coinflipWins = 0;
       const updateRes = await updatePilotBalance(userId, -amount, amount, 0);
-      await interaction.editReply(`💀 **THUA TRẮNG!** Đồng xu sấp! **${balance.displayName}** mất trắng **${amount.toLocaleString()} Cash**.`);
+      await interaction.editReply(t(interaction, 'STR_099FD991', { v0: balance.displayName, v1: amount.toLocaleString() }));
       if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
     }
     await userDb.save();
@@ -9667,8 +9649,8 @@ async function handleSlot(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của bạn không đủ để quay!`);
+  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
+  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_BB4C92D6'));
 
   const userId = interaction.user.id;
   let userDb = await db.getGamblingData(userId);
@@ -9702,11 +9684,11 @@ async function handleSlot(interaction) {
   }
 
   await userDb.save(); 
-  await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> ➖ | ➖ | ➖ < \nCược: **${amount.toLocaleString()} Cash**...`);
+  await interaction.editReply(t(interaction, 'STR_34E2F45F', { v0: amount.toLocaleString() }));
 
   for (let i = 0; i < 3; i++) {
     await new Promise(res => setTimeout(res, 800));
-    await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> ${emojis[Math.floor(Math.random()*6)]} | ${emojis[Math.floor(Math.random()*6)]} | ${emojis[Math.floor(Math.random()*6)]} < \n*Đang cuộn...*`);
+    await interaction.editReply(t(interaction, 'STR_48262F04', { v0: emojis[Math.floor(Math.random()*6)], v1: emojis[Math.floor(Math.random()*6)], v2: emojis[Math.floor(Math.random()*6)] }));
   }
   await new Promise(res => setTimeout(res, 800));
 
@@ -9714,11 +9696,11 @@ async function handleSlot(interaction) {
     const grossPayout = amount * 3;
     // FIX TÍCH LŨY
     await updatePilotBalance(userId, grossPayout - amount, amount, grossPayout);
-    await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> **${e1} | ${e2} | ${e3}** < \n🎉 **JACKPOT!** Nổ hũ x3! Lụm về **${grossPayout.toLocaleString()} Cash**!`);
+    await interaction.editReply(t(interaction, 'STR_625CCDD1', { v0: e1, v1: e2, v2: e3, v3: grossPayout.toLocaleString() }));
   } else {
     const updateRes = await updatePilotBalance(userId, -amount, amount, 0); 
     const mockText = (e1 === e2 || e2 === e3 || e1 === e3) ? "Trời ơi suýt nữa thì nổ hũ!!" : "Lệch nhịp rồi!";
-    await interaction.editReply(`🎰 **SLOT MACHINE** 🎰\n> **${e1} | ${e2} | ${e3}** < \n💥 ${mockText} Nhà cái luộc **${amount.toLocaleString()} Cash**.`);
+    await interaction.editReply(t(interaction, 'STR_6C90FBEE', { v0: e1, v1: e2, v2: e3, v3: mockText, v4: amount.toLocaleString() }));
     if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
   }
 }
@@ -9731,16 +9713,16 @@ async function handleTaiSiu(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của bạn không đủ!`);
+  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
+  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_2142336D'));
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('ts_xiu').setLabel('XỈU (4-10)').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('ts_tai').setLabel('TÀI (11-17)').setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId('ts_xiu').setLabel(t(interaction, 'STR_CCC4CBBD')).setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('ts_tai').setLabel(t(interaction, 'STR_A6B2615D')).setStyle(ButtonStyle.Danger)
   );
 
   const msg = await interaction.editReply({ 
-    content: `🎲 Cơ trưởng **${balance.displayName}** cược **${amount.toLocaleString()} Cash**.\n👇 **BẤM NÚT CHỌN CỬA:**`, components: [row] 
+    content : t(interaction, 'STR_80828F30', { v0: balance.displayName, v1: amount.toLocaleString() }), components: [row] 
   });
 
   const filter = i => i.user.id === interaction.user.id;
@@ -9752,7 +9734,7 @@ async function handleTaiSiu(interaction) {
       const choice = i.customId === 'ts_tai' ? 'tai' : 'xiu';
       
       // Hiện hũ lắc ban đầu
-      await interaction.editReply({ content: `🎲 Đã chốt cửa **${choice.toUpperCase()}**.\n*Đang xóc...* 🥣 | 🥣 | 🥣`, components: [] });
+      await interaction.editReply({ content : t(interaction, 'STR_1335686D', { v0: choice.toUpperCase() }), components: [] });
 
       // Tính toán kết quả trước trong nền
       let d1, d2, d3;
@@ -9770,20 +9752,20 @@ async function handleTaiSiu(interaction) {
 
       // Tạo hiệu ứng Delay lật từng xí ngầu
       setTimeout(async () => {
-          await interaction.editReply({ content: `🎲 Đã chốt cửa **${choice.toUpperCase()}**.\n*Đang xóc...* 🎲 **${d1}** | 🥣 | 🥣`, components: [] });
+          await interaction.editReply({ content : t(interaction, 'STR_BDA9E7AC', { v0: choice.toUpperCase(), v1: d1 }), components: [] });
           
           setTimeout(async () => {
-              await interaction.editReply({ content: `🎲 Đã chốt cửa **${choice.toUpperCase()}**.\n*Đang xóc...* 🎲 **${d1}** | 🎲 **${d2}** | 🥣`, components: [] });
+              await interaction.editReply({ content : t(interaction, 'STR_CEB3A7F7', { v0: choice.toUpperCase(), v1: d1, v2: d2 }), components: [] });
               
               setTimeout(async () => {
                   // KẾT QUẢ CUỐI CÙNG
                   if (resultType === choice) {
                       await updatePilotBalance(interaction.user.id, amount, amount, amount * 2);
-                      await interaction.editReply(`🎲 **TÀI XỈU** 🎲\n> 🎲 **${d1}** | 🎲 **${d2}** | 🎲 **${d3}** (${total})\n👉 KQ: **${resultText}**\n🎉 Thắng đậm **${amount.toLocaleString()} Cash** lãi!`);
+                      await interaction.editReply(t(interaction, 'STR_68EE68F1', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: amount.toLocaleString() }));
                   } else {
                       const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-                      let loseMsg = `🎲 **TÀI XỈU** 🎲\n> 🎲 **${d1}** | 🎲 **${d2}** | 🎲 **${d3}** (${total})\n👉 KQ: **${resultText}**\n💀 Bay mất **${amount.toLocaleString()} Cash**!`;
-                      if (resultType === 'bao') loseMsg = `🎲 **TÀI XỈU** 🎲\n> 🎲 **${d1}** | 🎲 **${d2}** | 🎲 **${d3}**\n🚨 **XỔ BÃO!!! NHÀ CÁI ĂN TẤT!!!** 🚨\n💀 Mất **${amount.toLocaleString()} Cash**!`;
+                      let loseMsg = t(interaction, 'STR_EA9C9831', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: amount.toLocaleString() });
+                      if (resultType === 'bao') loseMsg = t(interaction, 'STR_1D4B6783', { v0: d1, v1: d2, v2: d3, v3: amount.toLocaleString() });
                       await interaction.editReply(loseMsg);
                       if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
                   }
@@ -9800,22 +9782,22 @@ async function handleBauCua(interaction) {
     const balance = await checkAndRegisterUser(interaction);
     if (!balance) return;
     const amount = parseBetAmount(amountInput, balance.currentCash);
-    if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
-    if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư không đủ!`);
+    if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
+    if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
 
     let choices = [];
     const nameMap = { 'bc_bau': 'Bầu', 'bc_cua': 'Cua', 'bc_tom': 'Tôm', 'bc_ca': 'Cá', 'bc_ga': 'Gà', 'bc_nai': 'Nai' };
 
     const buildRows = () => [
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('bc_bau').setEmoji('🎃').setLabel('Bầu').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('bc_cua').setEmoji('🦀').setLabel('Cua').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('bc_tom').setEmoji('🦞').setLabel('Tôm').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('bc_bau').setEmoji('🎃').setLabel(t(interaction, 'STR_15858B54')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('bc_cua').setEmoji('🦀').setLabel(t(interaction, 'STR_A0F3A7F0')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('bc_tom').setEmoji('🦞').setLabel(t(interaction, 'STR_DDF8B51B')).setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('bc_ca').setEmoji('🐟').setLabel('Cá').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('bc_ga').setEmoji('🐔').setLabel('Gà').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('bc_nai').setEmoji('🦌').setLabel('Nai').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('bc_ca').setEmoji('🐟').setLabel(t(interaction, 'STR_BE391ADD')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('bc_ga').setEmoji('🐔').setLabel(t(interaction, 'STR_3EA545F7')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('bc_nai').setEmoji('🦌').setLabel(t(interaction, 'STR_D99DAF4A')).setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('bc_chot')
@@ -9826,7 +9808,7 @@ async function handleBauCua(interaction) {
     ];
 
     const msg = await interaction.editReply({ 
-        content: `🏺 Sếp cược tổng: **${amount.toLocaleString()} Cash**.\n👇 **BẤM NÚT CHỌN LINH VẬT (TỐI ĐA 3 LẦN):**\nĐã chọn: \`Chưa có\``, 
+        content : t(interaction, 'STR_8832F3EF', { v0: amount.toLocaleString() }), 
         components: buildRows() 
     });
 
@@ -9845,7 +9827,7 @@ async function handleBauCua(interaction) {
         }
 
         await i.update({ 
-            content: `🏺 Sếp cược tổng: **${amount.toLocaleString()} Cash**.\n👇 **BẤM NÚT CHỌN LINH VẬT (TỐI ĐA 3 LẦN):**\nĐã chọn: **${choices.join(' - ')}**`, 
+            content : t(interaction, 'STR_D345C10F', { v0: amount.toLocaleString(), v1: choices.join(' - ') }), 
             components: buildRows() 
         });
     });
@@ -9855,7 +9837,7 @@ async function handleBauCua(interaction) {
             return interaction.editReply({ content: '⏳ Đã hết thời gian chọn cửa! Tiền cược được hoàn lại.', components: [] });
         }
 
-        await interaction.editReply({ content: `🏺 Đã chốt giỏ cược: **${choices.join(' - ')}**.\n*Đang xóc đĩa...* 🤫`, components: [] });
+        await interaction.editReply({ content : t(interaction, 'STR_1D32233B', { v0: choices.join(' - ') }), components: [] });
 
         setTimeout(async () => {
             let riggedMascots = Object.values(nameMap);
@@ -9876,16 +9858,16 @@ async function handleBauCua(interaction) {
                 }
             }
 
-            let resultStr = `🏺 **BẦU CUA TÔM CÁ** 🏺\n> **${results[0]}** | **${results[1]}** | **${results[2]}**\n\nLựa chọn của sếp: **${choices.join(' - ')}**\n`;
+            let resultStr = t(interaction, 'STR_9AA1A3BE', { v0: results[0], v1: results[1], v2: results[2], v3: choices.join(' - ') });
 
             if (matchCount > 0) {
                 const profit = amount * matchCount;
                 const grossPayout = amount + profit;
                await updatePilotBalance(interaction.user.id, profit, amount, grossPayout); 
-                resultStr += `🎉 **THẮNG RỒI!** Trúng ${matchCount} mục. Ăn tiền nhân ${matchCount}! Thu về **${profit.toLocaleString()} Cash** tiền lãi!`;
+                resultStr += t(interaction, 'STR_950C1F98', { v0: matchCount, v1: matchCount, v2: profit.toLocaleString() });
             } else {
                 const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-                resultStr += `💀 **THUA SẠCH!** Trật lất hết!\nMất trắng **${amount.toLocaleString()} Cash**!`;
+                resultStr += t(interaction, 'STR_C293A01C', { v0: amount.toLocaleString() });
                 if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
             }
 
@@ -9941,14 +9923,14 @@ async function handleBlackjack(interaction) {
     
     // --- LƯU Ý: Sếp tự điều chỉnh lại cách lấy Balance và lấy Tiền của sếp ở đây nha ---
     const balance = await getPilotBalance(interaction.user.id);
-    if (!balance) return interaction.editReply('❌ Sếp chưa có tài khoản, hãy gõ `/daily` hoặc `/work` để mở ví!');
+    if (!balance) return interaction.editReply(t(interaction, 'STR_47223628'));
     
     let amount = parseInt(amountInput);
     if (amountInput === 'all') amount = balance.currentCash;
     else if (amountInput === 'half') amount = Math.floor(balance.currentCash / 2);
     
-    if (isNaN(amount) || amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
-    if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư không đủ!`);
+    if (isNaN(amount) || amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
+    if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
     // -------------------------------------------------------------------------------------
 
     let deck = getDeck();
@@ -9964,26 +9946,26 @@ async function handleBlackjack(interaction) {
     if (pXiBang) {
         // Xì Bàng: Nhân 3 tiền lãi
         await updatePilotBalance(interaction.user.id, amount * 3, amount, amount * 4);
-        return interaction.editReply(`🃏 **XÌ DÁCH VIỆT NAM** 🃏\n> Bài của sếp: ${formatHand(playerHand)} \n💥 **XÌ BÀNG!** (Nhân 3 tiền). Sếp húp **${(amount * 3).toLocaleString()} Cash** lãi!`);
+        return interaction.editReply(t(interaction, 'STR_A5919250', { v0: formatHand(playerHand), v1: (amount * 3).toLocaleString() }));
     }
     
     if (pXiDach) {
         // Xì Dách: Nhân 2 tiền lãi
         await updatePilotBalance(interaction.user.id, amount * 2, amount, amount * 3);
-        return interaction.editReply(`🃏 **XÌ DÁCH VIỆT NAM** 🃏\n> Bài của sếp: ${formatHand(playerHand)} \n🔥 **XÌ DÁCH!** (Nhân 2 tiền). Sếp húp **${(amount * 2).toLocaleString()} Cash** lãi!`);
+        return interaction.editReply(t(interaction, 'STR_F5175DF1', { v0: formatHand(playerHand), v1: (amount * 2).toLocaleString() }));
     }
 
     const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('bj_hit').setLabel('Rút bài (Hit)').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('bj_stand').setLabel('Dằn bài (Stand)').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId('bj_hit').setLabel(t(interaction, 'STR_CC612F8C')).setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('bj_stand').setLabel(t(interaction, 'STR_823CC1AD')).setStyle(ButtonStyle.Secondary)
     );
 
     const embed = new EmbedBuilder()
         .setTitle('🃏 XÌ DÁCH VIỆT NAM 🃏')
         .setColor(0x2ecc71)
         .addFields(
-            { name: `Bài của bạn (Điểm: ${getScore(playerHand)})`, value: formatHand(playerHand), inline: true },
-            { name: `Bài Nhà Cái`, value: `**?** | ${formatHand([dealerHand[1]])}`, inline: true }
+            { name : t(interaction, 'STR_21DA3C88', { v0: getScore(playerHand) }), value: formatHand(playerHand), inline: true },
+            { name : t(interaction, 'STR_B3A0E1AA'), value : t(interaction, 'STR_411DCA6A', { v0: formatHand([dealerHand[1]]) }), inline: true }
         )
         .setFooter({ text: `Cược: ${amount.toLocaleString()} Cash | Ngũ Linh, Xì Dách x2 | Xì Bàng x3` });
 
@@ -10011,8 +9993,8 @@ async function handleBlackjack(interaction) {
             row.components[0].setDisabled(playerHand.length >= 5);
 
             embed.setFields(
-                { name: `Bài của bạn (Điểm: ${pScore})`, value: formatHand(playerHand), inline: true },
-                { name: `Bài Nhà Cái`, value: `**?** | ${formatHand([dealerHand[1]])}`, inline: true }
+                { name : t(interaction, 'STR_21DA3C88', { v0: pScore }), value: formatHand(playerHand), inline: true },
+                { name : t(interaction, 'STR_B3A0E1AA'), value : t(interaction, 'STR_411DCA6A', { v0: formatHand([dealerHand[1]]) }), inline: true }
             );
             await i.update({ embeds: [embed], components: [row] });
         } else {
@@ -10032,19 +10014,19 @@ async function handleBlackjack(interaction) {
             await updatePilotBalance(interaction.user.id, amount * 2, amount, amount * 3);
             finalEmbed.setColor(0xf1c40f).setTitle('🌟 NGŨ LINH 🌟')
                 .setFields(
-                    { name: `Bài của bạn (Ngũ Linh)`, value: formatHand(playerHand), inline: false },
-                    { name: `Bài Nhà Cái`, value: formatHand(dealerHand), inline: false }
+                    { name : t(interaction, 'STR_E51E897B'), value: formatHand(playerHand), inline: false },
+                    { name : t(interaction, 'STR_B3A0E1AA'), value: formatHand(dealerHand), inline: false }
                 );
-            return interaction.editReply({ content: `🎉 Sếp bốc 5 lá không quắc! **NGŨ LINH ĂN x2** húp **${(amount * 2).toLocaleString()} Cash** lãi!`, embeds: [finalEmbed], components: [] });
+            return interaction.editReply({ content : t(interaction, 'STR_A2CA1FD1', { v0: (amount * 2).toLocaleString() }), embeds: [finalEmbed], components: [] });
         }
 
         if (reason === 'bust') {
             await updatePilotBalance(interaction.user.id, -amount, amount, 0);
             finalEmbed.setFields(
-                { name: `Bài của bạn (QUẮC - ${pScore})`, value: formatHand(playerHand), inline: false },
-                { name: `Bài Nhà Cái`, value: formatHand(dealerHand), inline: false }
+                { name : t(interaction, 'STR_C2E60604', { v0: pScore }), value: formatHand(playerHand), inline: false },
+                { name : t(interaction, 'STR_B3A0E1AA'), value: formatHand(dealerHand), inline: false }
             );
-            return interaction.editReply({ content: `💀 Sếp đã Quắc (Bust)! Mất trắng **${amount.toLocaleString()} Cash**.`, embeds: [finalEmbed], components: [] });
+            return interaction.editReply({ content : t(interaction, 'STR_969DA6F4', { v0: amount.toLocaleString() }), embeds: [finalEmbed], components: [] });
         }
 
         // Tới lượt Nhà Cái (Bắt buộc dằn khi >= 16)
@@ -10063,27 +10045,27 @@ async function handleBlackjack(interaction) {
         let gross = 0;
 
         if (dXiBang) {
-            profit = -amount; gross = 0; resultMsg = `💀 Nhà cái lật bài **XÌ BÀNG**! Sếp nộp mạng **${amount.toLocaleString()} Cash**.`;
+            profit = -amount; gross = 0; resultMsg = t(interaction, 'STR_3E16452B', { v0: amount.toLocaleString() });
         } else if (dXiDach) {
-            profit = -amount; gross = 0; resultMsg = `💀 Nhà cái lật bài **XÌ DÁCH**! Sếp nộp mạng **${amount.toLocaleString()} Cash**.`;
+            profit = -amount; gross = 0; resultMsg = t(interaction, 'STR_065B43DA', { v0: amount.toLocaleString() });
         } else if (dNgulinh) {
-            profit = -amount; gross = 0; resultMsg = `💀 Nhà cái chẻ **Ngũ Linh**! Sếp nộp mạng **${amount.toLocaleString()} Cash**.`;
+            profit = -amount; gross = 0; resultMsg = t(interaction, 'STR_1AC66018', { v0: amount.toLocaleString() });
         } else if (dScore > 21 || pScore > dScore) {
-            profit = amount; gross = amount * 2; resultMsg = `🎉 Nhà cái tuổi tôm! Sếp ăn **${amount.toLocaleString()} Cash**!`;
+            profit = amount; gross = amount * 2; resultMsg = t(interaction, 'STR_0A284949', { v0: amount.toLocaleString() });
             finalEmbed.setColor(0x2ecc71);
-            if (dScore > 21) resultMsg = `🎉 Nhà cái bị Quắc! Sếp ăn **${amount.toLocaleString()} Cash**!`;
+            if (dScore > 21) resultMsg = t(interaction, 'STR_9AB3DC11', { v0: amount.toLocaleString() });
         } else if (pScore === dScore) {
-            profit = 0; gross = amount; resultMsg = `🤝 Hòa kèo! Sếp được hoàn lại tiền cược.`;
+            profit = 0; gross = amount; resultMsg = t(interaction, 'STR_33625979');
             finalEmbed.setColor(0x3498db);
         } else {
-            profit = -amount; gross = 0; resultMsg = `💀 Nhà cái điểm cao hơn! Sếp mất **${amount.toLocaleString()} Cash**.`;
+            profit = -amount; gross = 0; resultMsg = t(interaction, 'STR_CB8BB554', { v0: amount.toLocaleString() });
         }
 
         await updatePilotBalance(interaction.user.id, profit, amount, gross);
         
         finalEmbed.setFields(
-            { name: `Bài của bạn (Điểm: ${pScore})`, value: formatHand(playerHand), inline: false },
-            { name: `Bài Nhà Cái (Điểm: ${dScore})`, value: formatHand(dealerHand), inline: false }
+            { name : t(interaction, 'STR_21DA3C88', { v0: pScore }), value: formatHand(playerHand), inline: false },
+            { name : t(interaction, 'STR_237D7AFB', { v0: dScore }), value: formatHand(dealerHand), inline: false }
         );
 
         await interaction.editReply({ content: resultMsg, embeds: [finalEmbed], components: [] });
@@ -10141,8 +10123,8 @@ async function handlePoker(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư không đủ!`);
+  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
+  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
 
   const userId = interaction.user.id;
   let deck = createDeck();
@@ -10153,7 +10135,7 @@ async function handlePoker(interaction) {
       while(result.mult >= 9) { deck = createDeck(); hand = [deck.pop(), deck.pop(), deck.pop(), deck.pop(), deck.pop()]; result = evaluatePokerHand(hand); }
   }
 
-  await interaction.editReply({ content: `🃏 Cược **${amount.toLocaleString()} Cash** vào bàn Poker...\n*Đang chia bài...* 🤫` });
+  await interaction.editReply({ content : t(interaction, 'STR_E9FA2B3C', { v0: amount.toLocaleString() }) });
 
   setTimeout(async () => {
     let result = evaluatePokerHand(hand);
@@ -10164,10 +10146,10 @@ async function handlePoker(interaction) {
       let actualProfit = grossPayout - amount; 
       // FIX TÍCH LŨY
       await updatePilotBalance(userId, actualProfit, amount, grossPayout);
-      finalStr = `🎉 **XỔ BÀI!** Mẫu bài: **${result.name}**!\nTổng thu về: **${grossPayout.toLocaleString()} Cash**!`;
+      finalStr = t(interaction, 'STR_A1618F24', { v0: result.name, v1: grossPayout.toLocaleString() });
     } else {
       didLose = true;
-      finalStr = `💀 **THUA TRẮNG!** Toàn bài **${result.name}**.\nNhà cái lụm sạch **${amount.toLocaleString()} Cash**!`;
+      finalStr = t(interaction, 'STR_0E36D7FE', { v0: result.name, v1: amount.toLocaleString() });
     }
 
     await interaction.editReply({ content: null, embeds: [new EmbedBuilder().setTitle('🃏 VIDEO POKER').setColor(result.mult > 0 ? 0x2ecc71 : 0xe74c3c).setDescription(finalStr).addFields({ name: '🃏 5 Lá Bài', value: formatHand(hand), inline: false })] });
@@ -10188,8 +10170,8 @@ async function handleRoulette(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Cược không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư không đủ!`);
+  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_98CE929D'));
+  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
 
   let isWin = false;
   let resultColor = '';
@@ -10203,19 +10185,19 @@ async function handleRoulette(interaction) {
   }
 
   const colorNames = { 'red': 'Đỏ 🔴', 'black': 'Đen ⚫', 'green': 'Xanh Lá 🟢' };
-  await interaction.editReply(`🎡 Đã cược **${amount.toLocaleString()} Cash** vào **${colorNames[choice]}**.\n*Vòng quay đang xoay...* 🌪️`);
+  await interaction.editReply(t(interaction, 'STR_63B88DC6', { v0: amount.toLocaleString(), v1: colorNames[choice] }));
 
   setTimeout(async () => {
-    let finalStr = `🎡 **CÒ QUAY ROULETTE** 🎡\n> 🎯 Kết quả: **${colorNames[resultColor]}**\n\n`;
+    let finalStr = t(interaction, 'STR_4FA4A290', { v0: colorNames[resultColor] });
     if (isWin) {
       let grossPayout = choice === 'green' ? amount * 14 : amount * 2; 
       let profit = grossPayout - amount;
       // FIX TÍCH LŨY
       await updatePilotBalance(interaction.user.id, profit, amount, grossPayout);
-      finalStr += `${choice === 'green' ? '🎰 **NỔ HŨ X14!**' : '🎉 **HÚP TIỀN!**'} Thu về **${grossPayout.toLocaleString()} Cash**!`;
+      finalStr += t(interaction, 'STR_87C6425F', { v0: choice === 'green' ? '🎰 **NỔ HŨ X14!**' : '🎉 **HÚP TIỀN!**', v1: grossPayout.toLocaleString() });
     } else {
       const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-      finalStr += `💀 **TRƯỢT RỒI!** Nhà cái hốt **${amount.toLocaleString()} Cash** của sếp.`;
+      finalStr += t(interaction, 'STR_BDD045C2', { v0: amount.toLocaleString() });
       if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
     }
     await interaction.editReply({ content: null, embeds: [new EmbedBuilder().setColor(resultColor === 'red' ? 0xe74c3c : (resultColor === 'black' ? 0x2b2d31 : 0x2ecc71)).setDescription(finalStr)] });
@@ -10230,39 +10212,39 @@ async function handleOanTuTi(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Cược không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư không đủ!`);
+  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_98CE929D'));
+  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
 
-  const msg = await interaction.editReply(`👊 Cược **${amount.toLocaleString()} Cash**.\n👇 **THẢ CẢM XÚC:**`);
+  const msg = await interaction.editReply(t(interaction, 'STR_B7D946EE', { v0: amount.toLocaleString() }));
   const emojis = ['✌️', '✊', '✋'];
   for (const e of emojis) await msg.react(e);
 
   msg.awaitReactions({ filter: (r, u) => emojis.includes(r.emoji.name) && u.id === interaction.user.id, max: 1, time: 30000, errors: ['time'] }).then(async coll => {
     const userChoice = coll.first().emoji.name;
     try { await msg.reactions.removeAll(); } catch (e) {}
-    await interaction.editReply({ content: `👊 Sếp ra: **${userChoice}**.\n*Nhà cái đang ra chiêu...* 🫣` });
+    await interaction.editReply({ content : t(interaction, 'STR_C9F6F460', { v0: userChoice }) });
 
     setTimeout(async () => {
       const winning = { '✌️': '✊', '✊': '✋', '✋': '✌️' }, tie = { '✌️': '✌️', '✊': '✊', '✋': '✋' }, losing = { '✌️': '✋', '✊': '✌️', '✋': '✊' };
       let botChoice = Math.random() < (amount >= 1500 ? 0.50 : 0.30) ? (Math.random() < 0.8 ? winning[userChoice] : tie[userChoice]) : emojis[Math.floor(Math.random() * 3)];
-      let resultStr = `👊 **OẲN TÙ TÌ** 👊\n> 🙋 Sếp: **${userChoice}** 🆚 **${botChoice}** :Nhà cái 🤖\n\n`;
+      let resultStr = t(interaction, 'STR_B53D8FE3', { v0: userChoice, v1: botChoice });
 
       if (botChoice === losing[userChoice]) {
         // FIX TÍCH LŨY (Lãi x2)
         await updatePilotBalance(interaction.user.id, amount, amount, amount * 2);
-        resultStr += `🎉 **THẮNG RỒI!** Sếp đấm gục nhà cái, thu về **${(amount * 2).toLocaleString()} Cash**!`;
+        resultStr += t(interaction, 'STR_04E5ADE7', { v0: (amount * 2).toLocaleString() });
       } else if (botChoice === winning[userChoice]) {
         const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-        resultStr += `💀 **THUA TRẮNG!** Bị bắt bài, sếp mất **${amount.toLocaleString()} Cash**!`;
+        resultStr += t(interaction, 'STR_FC62733A', { v0: amount.toLocaleString() });
         if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
       } else {
         // FIX TÍCH LŨY (Hòa)
         await updatePilotBalance(interaction.user.id, 0, amount, amount);
-        resultStr += `🤝 **HÒA NHAU!** Tiền cược được bảo toàn.`;
+        resultStr += t(interaction, 'STR_CF6C2395');
       }
       await interaction.editReply(resultStr);
     }, 2500);
-  }).catch(() => { interaction.editReply('⏳ Sếp lưỡng lự quá lâu, đã hủy phiên cược!'); });
+  }).catch(() => { interaction.editReply(t(interaction, 'STR_3C6EFE08')); });
 }
 
 // ===================== LỆNH GIVE CASH =====================
@@ -10271,7 +10253,7 @@ async function handleGiveCash(interaction) {
   const amountInput = interaction.options.getString('amount');
   const senderId = interaction.user.id;
 
-  if (targetUser.bot || targetUser.id === senderId) return replyBilingual(interaction,{ content: '❌ Không thể gửi cho chính mình hoặc Bot!', ephemeral: true });
+  if (targetUser.bot || targetUser.id === senderId) return interaction.reply({ content: '❌ Không thể gửi cho chính mình hoặc Bot!', ephemeral: true });
 
   await interaction.deferReply({ ephemeral: true });
   
@@ -10279,29 +10261,29 @@ async function handleGiveCash(interaction) {
   if (!balance) return;
 
   const amount = parseBetAmount(amountInput, balance.currentCash);
-  if (amount <= 0) return interaction.editReply('❌ Số tiền gửi không hợp lệ!');
-  if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư của bạn không đủ!`);
+  if (amount <= 0) return interaction.editReply(t(interaction, 'STR_68E18DE4'));
+  if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_2142336D'));
 
   // Người gửi bị trừ tiền hiện tại và GHI NHẬN LÀ ĐÃ TIÊU, không cộng Total Earned
   const deduc = await updatePilotBalance(senderId, -amount, amount, 0);
-  if (!deduc.success) return interaction.editReply(`❌ Lỗi trừ tiền: ${deduc.msg}`);
+  if (!deduc.success) return interaction.editReply(t(interaction, 'STR_30C6B297', { v0: deduc.msg }));
 
   // FIX TÍCH LŨY CHO NGƯỜI NHẬN: Được cộng tiền hiện tại và CỘNG TOTAL EARNED
   const add = await updatePilotBalance(targetUser.id, amount, 0, amount);
   if (!add.success) {
     // Nếu lỗi, Hoàn tiền cho người gửi (Cộng lại tiền, Trừ lượng đã tiêu ra, Không cộng Total Earned)
     await updatePilotBalance(senderId, amount, -amount, 0); 
-    return interaction.editReply(`❌ Giao dịch bị hủy do người nhận chưa có hồ sơ Database.\n✅ Đã hoàn lại **${amount.toLocaleString()} Cash**.`);
+    return interaction.editReply(t(interaction, 'STR_37CF5FE0', { v0: amount.toLocaleString() }));
   }
 
-  await interaction.editReply(`💸 **CHUYỂN KHOẢN THÀNH CÔNG!**\nBạn đã chuyển **${amount.toLocaleString()} Cash** cho <@${targetUser.id}>.`);
+  await interaction.editReply(t(interaction, 'STR_67792F60', { v0: amount.toLocaleString(), v1: targetUser.id }));
   await checkBankruptcy(interaction, balance.displayName, deduc.currentCash);
 
   try {
     const dmEmbed = new EmbedBuilder()
       .setTitle('💸 BẠN VỪA NHẬN ĐƯỢC TIỀN!')
       .setColor(0x10b981)
-      .setDescription(`Cơ trưởng **${balance.displayName}** (<@${senderId}>) vừa chuyển cho bạn **${amount.toLocaleString()} Cash** vào tài khoản **tk.chill**!`)
+      .setDescription(t(interaction, 'STR_7BBE17ED', { v0: balance.displayName, v1: senderId, v2: amount.toLocaleString() }))
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/3135/3135706.png')
       .setTimestamp()
       .setFooter({ text: 'Hệ thống ngân hàng trung ương tk.chill' });
@@ -10400,11 +10382,11 @@ async function handleVietlott(interaction) {
   if (!balance) return;
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('btn_mua_ve_loto').setLabel('🎫 Mua Vé Lô Tô (25 số)').setStyle(ButtonStyle.Primary).setEmoji('🎪')
+    new ButtonBuilder().setCustomId('btn_mua_ve_loto').setLabel(t(interaction, 'STR_5414F647')).setStyle(ButtonStyle.Primary).setEmoji('🎪')
   );
 
   const msg = await interaction.editReply({
-    content: `🎪 **GÁNH HÁT LÔ TÔ TK.CHILL** 🎪\nCơ trưởng **${balance.displayName}** đã sẵn sàng dò số chưa?\n*(Tài khoản hiện có: **${balance.currentCash.toLocaleString()} Cash**)*\n👇 **BẤM NÚT ĐỂ MUA VÉ VÀ ĐIỀN SỐ:**`,
+    content : t(interaction, 'STR_C9B1278B', { v0: balance.displayName, v1: balance.currentCash.toLocaleString() }),
     components: [row]
   });
 
@@ -10416,14 +10398,14 @@ async function handleVietlott(interaction) {
 
     const numInput = new TextInputBuilder()
       .setCustomId('numbers')
-      .setLabel('Nhập 25 số (1-90). Gõ AUTO để máy tự chọn')
+      .setLabel(t(interaction, 'STR_FA0A617F'))
       .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder('Ví dụ: 5 12 45 88 ... (Khoảng cách bằng dấu cách) HOẶC gõ chữ AUTO')
+      .setPlaceholder(t(interaction, 'STR_65298322'))
       .setRequired(true);
 
     const amtInput = new TextInputBuilder()
       .setCustomId('amount')
-      .setLabel('Số tiền mua vé (Nhập số, all hoặc half)')
+      .setLabel(t(interaction, 'STR_0EB860AD'))
       .setStyle(TextInputStyle.Short)
       .setRequired(true);
 
@@ -10441,7 +10423,7 @@ async function handleVietlott(interaction) {
       const amount = parseBetAmount(amountStr, currentBal.currentCash);
 
       if (amount <= 0) return interaction.editReply({ content: '❌ Số tiền cược không hợp lệ!', components: [] });
-      if (currentBal.currentCash < amount) return interaction.editReply({ content: `❌ Tiền đâu mà đòi mua vé sếp ơi! Hiện có: **${currentBal.currentCash.toLocaleString()} Cash**.`, components: [] });
+      if (currentBal.currentCash < amount) return interaction.editReply({ content : t(interaction, 'STR_558836FF', { v0: currentBal.currentCash.toLocaleString() }), components: [] });
 
       let boardNumbers = [];
       if (numberStr === 'AUTO') {
@@ -10454,14 +10436,14 @@ async function handleVietlott(interaction) {
       } else {
           boardNumbers = numberStr.split(/[\s,]+/).map(n => parseInt(n)).filter(n => !isNaN(n));
           if (boardNumbers.length !== 25) {
-              return interaction.editReply({ content: `❌ **Lỗi:** Bạn đã nhập ${boardNumbers.length} số. Vé Lô Tô yêu cầu CHÍNH XÁC **25 số**!`, components: [] });
+              return interaction.editReply({ content : t(interaction, 'STR_874A051F', { v0: boardNumbers.length }), components: [] });
           }
           let unique = new Set(boardNumbers);
           if (unique.size !== 25) {
-              return interaction.editReply({ content: `❌ **Lỗi:** Có số bị trùng lặp trong vé của bạn! Phải là 25 số khác nhau hoàn toàn.`, components: [] });
+              return interaction.editReply({ content : t(interaction, 'STR_8C6B2106'), components: [] });
           }
           if (!boardNumbers.every(n => n >= 1 && n <= 90)) {
-              return interaction.editReply({ content: `❌ **Lỗi:** Các số phải nằm trong khoảng từ **1 đến 90**!`, components: [] });
+              return interaction.editReply({ content : t(interaction, 'STR_8FEE1DAD'), components: [] });
           }
       }
 
@@ -10469,7 +10451,7 @@ async function handleVietlott(interaction) {
 
       // Vừa mua vé xong, cho 1 cái tin nhắn thông báo quay lồng cầu sương sương (3 giây)
       await interaction.editReply({
-          content: `🎤 **ĐOÀN LÔ TÔ BẮT ĐẦU KÊU SỐ!**\nSếp **${balance.displayName}** mua vé với **${amount.toLocaleString()} Cash**.\n*Đang nhào lộn lồng cầu...* 🌪️`,
+          content : t(interaction, 'STR_D4F69450', { v0: balance.displayName, v1: amount.toLocaleString() }),
           components: []
       });
 
@@ -10493,7 +10475,7 @@ async function handleVietlott(interaction) {
 
       // Xổ kết quả thẳng ra sau 3 giây (Khỏi gọi lắt nhắt làm nghẽn Discord API)
       setTimeout(async () => {
-          let finalStr = `🎤 **KẾT QUẢ ĐÊM NHẠC LÔ TÔ** 🎤\n> 🎯 Đã gọi ra **${drawnSet.size}** con số.\n${renderLotoBoard(boardNumbers, drawnSet)}\n`;
+          let finalStr = t(interaction, 'STR_F99623EB', { v0: drawnSet.size, v1: renderLotoBoard(boardNumbers, drawnSet) });
 
           if (bingoAt !== -1) {
               let mult = 0;
@@ -10507,16 +10489,16 @@ async function handleVietlott(interaction) {
               if (mult > 1) {
                   // SẾP ĐÃ SỬA CÁI TÍCH LŨY DƯỚI ĐÂY RỒI NHÉ (Cộng lãi vào tiền hiện tại, Cộng vốn vào tiền tiêu xài, Cộng nguyên cục lời vào tích lũy)
                   await updatePilotBalance(interaction.user.id, profit - amount, amount, profit);
-                  finalStr += `🎉 **KINH RỒI!!!** Sếp đã trúng đủ 5 số thẳng hàng ở lượt gọi thứ **${bingoAt}**!\n💰 Gánh hát trả thưởng: **${profit.toLocaleString()} Cash** (Hệ số x${mult})!`;
+                  finalStr += t(interaction, 'STR_611AE6E1', { v0: bingoAt, v1: profit.toLocaleString(), v2: mult });
               } else {
                   // Hòa vốn
                   await updatePilotBalance(interaction.user.id, 0, amount, amount);
-                  finalStr += `🤝 **KINH MUỘN!** Sếp trúng ở lượt thứ **${bingoAt}**, được hoàn lại **${amount.toLocaleString()} Cash** tiền vốn (Hệ số x1).`;
+                  finalStr += t(interaction, 'STR_9B90338E', { v0: bingoAt, v1: amount.toLocaleString() });
               }
           } else {
               // Thu tiền nếu tạch
               const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-              finalStr += `💀 **ĐỨT GÁNH!** Gánh hát gọi khô máu 50 số mà vé của sếp vẫn lủng lỗ chỗ.\n💸 Thu dọn bàn ghế, sếp mất trắng **${amount.toLocaleString()} Cash**.`;
+              finalStr += t(interaction, 'STR_E1041854', { v0: amount.toLocaleString() });
 
               if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
           }
@@ -10562,14 +10544,14 @@ async function handleAddCash(interaction) {
     const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
 
     if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
-        return replyBilingual(interaction,{ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền dùng máy in tiền!', ephemeral: true });
+        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền dùng máy in tiền!', ephemeral: true });
     }
 
     const targetMentionable = interaction.options.getMentionable('target');
     const amount = interaction.options.getInteger('amount');
 
     if (amount <= 0) {
-        return replyBilingual(interaction,{ content: '❌ Số tiền bơm phải lớn hơn 0!', ephemeral: true });
+        return interaction.reply({ content: '❌ Số tiền bơm phải lớn hơn 0!', ephemeral: true });
     }
 
     await interaction.deferReply();
@@ -10581,7 +10563,7 @@ async function handleAddCash(interaction) {
     const updateRes = await updatePilotBalance(targetId, amount, 0, amount);
 
     if (updateRes && updateRes.success) {
-        await interaction.editReply(`✅ Đã điều lệnh bơm nóng **${amount.toLocaleString()} Cash** cho <@${targetId}> thành công!`);
+        await interaction.editReply(t(interaction, 'STR_76F32D1A', { v0: amount.toLocaleString(), v1: targetId }));
 
         // =====================================
         // 🚨 BÁO CÁO MẬT VÀO KÊNH ADMIN BOT
@@ -10592,9 +10574,9 @@ async function handleAddCash(interaction) {
                 .setTitle('💸 PHÁT HIỆN GIAO DỊCH BƠM TIỀN')
                 .setColor(0xf1c40f)
                 .addFields(
-                    { name: '👮 Người thực hiện (Staff)', value: `<@${interaction.user.id}>`, inline: true },
-                    { name: '🎯 Người thụ hưởng', value: `<@${targetId}>`, inline: true },
-                    { name: '💰 Số tiền in thêm', value: `**+${amount.toLocaleString()} Cash**`, inline: false }
+                    { name: '👮 Người thực hiện (Staff)', value : t(interaction, 'STR_8CDE7BE9', { v0: interaction.user.id }), inline: true },
+                    { name: '🎯 Người thụ hưởng', value : t(interaction, 'STR_8CDE7BE9', { v0: targetId }), inline: true },
+                    { name: '💰 Số tiền in thêm', value : t(interaction, 'STR_6B439400', { v0: amount.toLocaleString() }), inline: false }
                 )
                 .setThumbnail(interaction.user.displayAvatarURL())
                 .setFooter({ text: 'Hệ thống Camera giám sát chống lạm phát kinh tế' })
@@ -10603,7 +10585,7 @@ async function handleAddCash(interaction) {
             await adminChannel.send({ embeds: [logEmbed] }).catch(() => {});
         }
     } else {
-        await interaction.editReply('❌ Lỗi khi móc nối cơ sở dữ liệu để cộng tiền. Vui lòng kiểm tra lại!');
+        await interaction.editReply(t(interaction, 'STR_D83B2B7E'));
         
         // Lỗi thì hoàn lại cái định mức cho thằng lạm quyền
         if (interaction.user.id === SUSPECT_ADMIN_ID) {
@@ -10687,8 +10669,8 @@ async function handleBaiCao(interaction) {
     const balance = await checkAndRegisterUser(interaction); // Thay bằng hàm check user của sếp
     if (!balance) return;
     const amount = parseBetAmount(amountInput, balance.currentCash); // Thay bằng hàm parse tiền của sếp
-    if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
-    if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư không đủ!`);
+    if (amount <= 0) return interaction.editReply(t(interaction, 'STR_4CC856D7'));
+    if (balance.currentCash < amount) return interaction.editReply(t(interaction, 'STR_03D53DF6'));
 
     // Dùng chung hàm bốc bài của Blackjack
     let deck = getDeck(); 
@@ -10718,22 +10700,22 @@ async function handleBaiCao(interaction) {
     let color = 0x2b2d31;
 
     // Hiệu ứng nặn bài
-    await interaction.editReply('🃏 Đang chia bài... Xòe bài từ từ nào 🤲');
+    await interaction.editReply(t(interaction, 'STR_E05856B6'));
 
     setTimeout(async () => {
         if (pData.score > dData.score) {
             profit = amount;
             color = 0x2ecc71;
-            resultMsg = `🎉 **Sếp húp!** Bài sếp lớn hơn nhà cái. Hốt **${amount.toLocaleString()} Cash**!`;
+            resultMsg = t(interaction, 'STR_8E8A69D4', { v0: amount.toLocaleString() });
         } else if (pData.score < dData.score) {
             profit = -amount;
             color = 0xe74c3c;
-            resultMsg = `💀 **Nhà cái lủm!** Đen thôi đỏ quên đi. Mất **${amount.toLocaleString()} Cash**!`;
+            resultMsg = t(interaction, 'STR_D83DA7FC', { v0: amount.toLocaleString() });
         } else {
             // Cào rùa bằng nút thì cái ăn (luật làm cái) hoặc hòa. Cho hòa cho sếp đỡ chửi
             profit = 0;
             color = 0x3498db;
-            resultMsg = `🤝 **Hòa tiền!** Cùng nút, tiền ai nấy giữ.`;
+            resultMsg = t(interaction, 'STR_0D4898B6');
         }
 
         await updatePilotBalance(interaction.user.id, profit, amount, profit > 0 ? amount * 2 : 0);
@@ -10742,8 +10724,8 @@ async function handleBaiCao(interaction) {
             .setTitle('🎴 BÀI CÀO 3 LÁ 🎴')
             .setColor(color)
             .addFields(
-                { name: `🙋 Bài của Sếp: ${pData.text}`, value: formatHand(playerHand), inline: false },
-                { name: `🤖 Bài Nhà Cái: ${dData.text}`, value: formatHand(dealerHand), inline: false }
+                { name : t(interaction, 'STR_BC44D618', { v0: pData.text }), value: formatHand(playerHand), inline: false },
+                { name : t(interaction, 'STR_2CA837A8', { v0: dData.text }), value: formatHand(dealerHand), inline: false }
             )
             .setFooter({ text: `Tiền cược: ${amount.toLocaleString()} Cash` });
 
@@ -10759,7 +10741,7 @@ async function handleCheckBalance(interaction) {
     const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
 
     if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
-        return replyBilingual(interaction,{ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền soi ví người khác!', ephemeral: true });
+        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền soi ví người khác!', ephemeral: true });
     }
 
     const targetUser = interaction.options.getUser('target');
@@ -10768,16 +10750,16 @@ async function handleCheckBalance(interaction) {
     // Kéo dữ liệu từ Sheet/Database
     const balance = await getPilotBalance(targetUser.id);
     if (!balance) {
-        return interaction.editReply(`❌ Không tìm thấy hồ sơ tài khoản của <@${targetUser.id}> trong hệ thống!`);
+        return interaction.editReply(t(interaction, 'STR_D5A2A95D', { v0: targetUser.id }));
     }
 
     const embed = new EmbedBuilder()
-        .setTitle(`💳 KÉT SẮT CỦA ${targetUser.username.toUpperCase()}`)
+        .setTitle(t(interaction, 'STR_218A82C1', { v0: targetUser.username.toUpperCase() }))
         .setColor(0x2ecc71)
         .addFields(
-            { name: '💰 Số dư hiện tại', value: `**${parseFloat(balance.currentCash).toLocaleString()} Cash**`, inline: false },
-            { name: '📥 Tổng tiền đã kiếm', value: `${parseFloat(balance.totalEarned).toLocaleString()} Cash`, inline: true },
-            { name: '📤 Tổng tiền đã tiêu', value: `${parseFloat(balance.usedCash).toLocaleString()} Cash`, inline: true }
+            { name: '💰 Số dư hiện tại', value : t(interaction, 'STR_CE3EC3F7', { v0: parseFloat(balance.currentCash).toLocaleString() }), inline: false },
+            { name: '📥 Tổng tiền đã kiếm', value : t(interaction, 'STR_BD84778D', { v0: parseFloat(balance.totalEarned).toLocaleString() }), inline: true },
+            { name: '📤 Tổng tiền đã tiêu', value : t(interaction, 'STR_BD84778D', { v0: parseFloat(balance.usedCash).toLocaleString() }), inline: true }
         )
         .setThumbnail(targetUser.displayAvatarURL())
         .setTimestamp();
@@ -10793,7 +10775,7 @@ async function handleClearBalance(interaction) {
     const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
 
     if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
-        return replyBilingual(interaction,{ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền tịch thu tài sản!', ephemeral: true });
+        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền tịch thu tài sản!', ephemeral: true });
     }
 
     const targetUser = interaction.options.getUser('target');
@@ -10802,12 +10784,12 @@ async function handleClearBalance(interaction) {
     // Lấy số dư hiện tại
     const balance = await getPilotBalance(targetUser.id);
     if (!balance) {
-        return interaction.editReply(`❌ Không tìm thấy hồ sơ tài khoản của <@${targetUser.id}> trong hệ thống!`);
+        return interaction.editReply(t(interaction, 'STR_D5A2A95D', { v0: targetUser.id }));
     }
 
     const currentCash = parseFloat(balance.currentCash);
     if (currentCash <= 0) {
-        return interaction.editReply(`⚠️ Khố rách áo ôm! Tài khoản của <@${targetUser.id}> vốn dĩ đã có **0 Cash** rồi, không thể lột thêm được nữa!`);
+        return interaction.editReply(t(interaction, 'STR_98C970A4', { v0: targetUser.id }));
     }
 
     // 2. Trừ đi toàn bộ số dư hiện tại để nó về 0
@@ -10815,7 +10797,7 @@ async function handleClearBalance(interaction) {
     const updateRes = await updatePilotBalance(targetUser.id, -currentCash, 0, 0);
 
     if (updateRes && updateRes.success) {
-        await interaction.editReply(`✅ **Đã thi hành án!** Tịch thu sạch sẽ **${currentCash.toLocaleString()} Cash** của <@${targetUser.id}> đưa về 0.`);
+        await interaction.editReply(t(interaction, 'STR_DB28B325', { v0: currentCash.toLocaleString(), v1: targetUser.id }));
 
         // 3. 🚨 BÁO CÁO MẬT VÀO KÊNH ADMIN BOT
         const adminChannel = interaction.client.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
@@ -10824,9 +10806,9 @@ async function handleClearBalance(interaction) {
                 .setTitle('🚨 LỆNH TỊCH THU TÀI SẢN (CLEAR BALANCE)')
                 .setColor(0xe74c3c) // Đỏ báo động
                 .addFields(
-                    { name: '👮 Người thi hành án (Staff)', value: `<@${interaction.user.id}>`, inline: true },
-                    { name: '🎯 Nạn nhân', value: `<@${targetUser.id}>`, inline: true },
-                    { name: '💸 Số tiền vừa bị bay màu', value: `**-${currentCash.toLocaleString()} Cash**`, inline: false }
+                    { name: '👮 Người thi hành án (Staff)', value : t(interaction, 'STR_8CDE7BE9', { v0: interaction.user.id }), inline: true },
+                    { name: '🎯 Nạn nhân', value : t(interaction, 'STR_8CDE7BE9', { v0: targetUser.id }), inline: true },
+                    { name: '💸 Số tiền vừa bị bay màu', value : t(interaction, 'STR_95776D45', { v0: currentCash.toLocaleString() }), inline: false }
                 )
                 .setThumbnail(targetUser.displayAvatarURL())
                 .setFooter({ text: 'Biên bản xử lý vi phạm kinh tế' })
@@ -10835,7 +10817,7 @@ async function handleClearBalance(interaction) {
             await adminChannel.send({ embeds: [logEmbed] }).catch(() => {});
         }
     } else {
-        await interaction.editReply('❌ Có lỗi xảy ra khi thao tác với Database. Vui lòng thử lại sau!');
+        await interaction.editReply(t(interaction, 'STR_22A8AF71'));
     }
 }
 
