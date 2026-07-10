@@ -3296,7 +3296,7 @@ client.once('ready', async () => {
     new SlashCommandBuilder()
       .setName('add_cash')
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A1691D2D'))
-      .addMentionableOption(opt => opt.setName('target').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_86F4383A')).setRequired(true))
+      .addMentionableOption(opt => opt.setName('target').setDescription('Tag người dùng hoặc Role để rải tiền').setRequired(true))
       .addIntegerOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE2607')).setRequired(true))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
     new SlashCommandBuilder()
@@ -10477,11 +10477,9 @@ async function handleVietlott(interaction) {
 
 // ===================== LỆNH BƠM TIỀN TỪ HỆ THỐNG (ADD CASH) =====================
 async function handleAddCash(interaction) {
-    // 1. Kiểm tra quyền hạn (Dev, Admin)
+    // 1. Kiểm tra quyền hạn (Dev, Admin, Staff)
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
-    
-    // Nếu sếp có role Staff riêng thì thay ID role vào đây
     const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
 
     if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
@@ -10495,45 +10493,81 @@ async function handleAddCash(interaction) {
         return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_14EADE22'), ephemeral: true });
     }
 
-    await interaction.deferReply();
+    // Xác định xem đang tag Role hay User
+    const isRole = targetMentionable.members !== undefined;
 
-    // 2. Tiến hành bơm tiền
-    let targetId = targetMentionable.id || targetMentionable.user?.id;
-    
-    // Gọi hàm cộng tiền của sếp (Cộng thẳng vào ví hiện tại và tiền kiếm được)
-    const updateRes = await updatePilotBalance(targetId, amount, 0, amount);
+    // Bơm User thì ẩn danh (ephemeral: true), bơm Role thì công khai (ephemeral: false)
+    await interaction.deferReply({ ephemeral: !isRole });
 
-    if (updateRes && updateRes.success) {
-        await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_76F32D1A', { v0: amount.toLocaleString(), v1: targetId }));
+    let targetUsers = [];
+    let targetLogName = '';
 
-        // =====================================
-        // 🚨 BÁO CÁO MẬT VÀO KÊNH ADMIN BOT
-        // =====================================
-        const adminChannel = interaction.client.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
-        if (adminChannel) {
-            const logEmbed = new EmbedBuilder()
-                .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_04FB8B5A'))
-                .setColor(0xf1c40f)
-                .addFields(
-                    { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4DC67485'), value: `<@${interaction.user.id}>`, inline: true },
-                    { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3755E4BB'), value: `<@${targetId}>`, inline: true },
-                    { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A108F5E8'), value: `**+${amount.toLocaleString()} Cash**`, inline: false }
-                )
-                .setThumbnail(interaction.user.displayAvatarURL())
-                .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_58B348BE') })
-                .setTimestamp();
-
-            await adminChannel.send({ embeds: [logEmbed] }).catch(() => {});
-        }
-    } else {
-        await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D83B2B7E'));
+    // 2. Phân loại xem sếp đang tag ROLE hay USER
+    if (isRole) {
+        // Ép bot tải lại danh sách member để không bị sót
+        await interaction.guild.members.fetch();
         
-        // Lỗi thì hoàn lại cái định mức cho thằng lạm quyền
-        if (interaction.user.id === SUSPECT_ADMIN_ID) {
-            let tracker = badAdminTracker.get(SUSPECT_ADMIN_ID);
-            tracker.totalAdded -= amount;
-            badAdminTracker.set(SUSPECT_ADMIN_ID, tracker);
+        // Lọc tất cả những người có Role này, bỏ qua bot
+        targetUsers = targetMentionable.members.filter(m => !m.user.bot).map(m => m.user.id);
+        targetLogName = `Role <@&${targetMentionable.id}>`;
+    } else {
+        // Nó là một User cụ thể
+        const targetId = targetMentionable.id || targetMentionable.user?.id;
+        if (targetMentionable.user?.bot || targetMentionable.bot) {
+            return interaction.editReply('❌ Không thể bơm tiền cho Bot!');
         }
+        targetUsers = [targetId];
+        targetLogName = `User <@${targetId}>`;
+    }
+
+    if (targetUsers.length === 0) {
+        return interaction.editReply(`❌ Role này hiện không có thành viên nào (hoặc toàn là Bot).`);
+    }
+
+    // 3. Tiến hành cày cuốc bơm tiền cho từng người
+    let successCount = 0;
+    for (const userId of targetUsers) {
+        // Cộng thẳng vào ví hiện tại và tiền kiếm được (Tích lũy)
+        const updateRes = await updatePilotBalance(userId, amount, 0, amount);
+        if (updateRes && updateRes.success) {
+            successCount++;
+        }
+    }
+
+    // 4. Thông báo kết quả ra màn hình
+    if (isRole) {
+        // NẾU LÀ ROLE: Thông báo công khai đẹp mắt ra kênh hiện tại
+        const publicEmbed = new EmbedBuilder()
+            .setTitle('💸 Server-wide airdrop!')
+            .setColor(0x2ecc71)
+            .setDescription(`Boss <@${interaction.user.id}> just handed out a windfall of **${amount.toLocaleString()} Cash** to everyone in ${targetLogName}! \n\n*`)
+            .setThumbnail('https://cdn-icons-png.flaticon.com/512/3135/3135706.png')
+            .setTimestamp();
+            
+        await interaction.editReply({ content: '🎉 Congratulations, guys!', embeds: [publicEmbed] });
+    } else {
+        // NẾU LÀ USER: Thông báo ẩn danh (chỉ người dùng lệnh mới nhìn thấy)
+        await interaction.editReply(`✅ Đã bơm thành công **+${amount.toLocaleString()} Cash** cho ${targetLogName}.`);
+    }
+
+    // =====================================
+    // 🚨 BÁO CÁO MẬT VÀO KÊNH ADMIN BOT
+    // =====================================
+    const adminChannel = interaction.client.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
+    if (adminChannel) {
+        const logEmbed = new EmbedBuilder()
+            .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_04FB8B5A'))
+            .setColor(0xf1c40f)
+            .addFields(
+                { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4DC67485'), value: `<@${interaction.user.id}>`, inline: true },
+                { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3755E4BB'), value: `<@${targetId}>`, inline: true },
+                { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A108F5E8'), value: `**+${amount.toLocaleString()} Cash**`, inline: false }
+            )
+            .setThumbnail(interaction.user.displayAvatarURL())
+            .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_58B348BE') })
+            .setTimestamp();
+
+        await adminChannel.send({ embeds: [logEmbed] }).catch(() => {});
     }
 }
 
