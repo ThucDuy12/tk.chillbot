@@ -998,5 +998,8 @@
   "STR_5DC966F2": "❌ LỖI ĐĂNG NHẬP:",
   "STR_C3EAA137": "[Ping Chéo] Đã chọc Bot 2, Status: {v0}",
   "STR_18944063": "[Ping Chéo] Lỗi khi chọc Bot 2:",
-  "STR_139FE964": "⚠️ Chưa cài BOT2_URL, tính năng Ping chéo đang tắt."
+  "STR_139FE964": "⚠️ Chưa cài BOT2_URL, tính năng Ping chéo đang tắt.",
+  "STR_TS_BTN_BAO": "BÃO (3 con giống nhau)",
+  "STR_TS_WIN_BAO": "🎲 **TÀI XỈU** 🎲\n> 🎲 **{v0}** | 🎲 **{v1}** | 🎲 **{v2}** ({v3})\n👉 KQ: **{v4}**\n🔥 **JACKPOT! NỔ BÃO!** Húp trọn **{v5} Cash** (x24)!",
+  "STR_TS_TIMEOUT": "⏳ Sếp suy nghĩ lâu quá bàn cược đóng rồi!"
 }
