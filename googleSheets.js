@@ -206,11 +206,6 @@ async function savePilotLeaderboard(month, year, pilots) {
 
   if (!(await sheetExists(sheetName))) await createPilotSheet(month, year);
 
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A2:J5000`,
-  });
-
   const rows = [];
   for (const [cid, data] of Object.entries(pilots)) {
     rows.push([
@@ -236,7 +231,6 @@ async function savePilotLeaderboard(month, year, pilots) {
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: rows },
     });
-    console.log(`✅ Saved ${rows.length} pilot records to sheet ${sheetName}`);
   } catch (err) {
     console.error('❌ Lỗi khi ghi data Pilot:', err.message);
   }
