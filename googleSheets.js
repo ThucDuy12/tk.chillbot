@@ -157,6 +157,48 @@ async function createPendingUsersSheet() {
   }
 }
 
+// ========== LƯU CONTROLLER ==========
+async function saveControllerLeaderboard(month, year, stats) {
+  const sheetName = getSheetName(CONTROLLER_SHEET_PREFIX, month, year);
+  const sheets = await initGoogleSheets();
+
+  if (!(await sheetExists(sheetName))) await createControllerSheet(month, year);
+
+  // An toàn tuyệt đối: Dùng values.clear để tẩy trắng thay vì phá hủy cấu trúc hàng
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${sheetName}!A2:H5000`,
+  });
+
+  const rows = [];
+  for (const [category, controllers] of Object.entries(stats)) {
+    for (const [cid, data] of Object.entries(controllers)) {
+      rows.push([
+        category, cid,
+        data.name ? `'${data.name}` : '', 
+        data.callsign ? `'${data.callsign}` : '',
+        data.seconds || 0, data.lastUpdate || 0,
+        data.lastUpdate ? new Date(data.lastUpdate).toISOString() : '',
+        JSON.stringify({ callsignHistory: [data.callsign] }),
+      ]);
+    }
+  }
+
+  if (rows.length === 0) return;
+
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A2`,
+      valueInputOption: 'USER_ENTERED', // Để GG Sheets tự cắt dấu nháy đơn bảo vệ
+      requestBody: { values: rows },
+    });
+    console.log(`✅ Saved ${rows.length} controller records to sheet ${sheetName}`);
+  } catch (err) {
+    console.error('❌ Lỗi khi ghi data Controller:', err.message);
+  }
+}
+
 // ========== LƯU PILOT ==========
 async function savePilotLeaderboard(month, year, pilots) {
   const sheetName = getSheetName(PILOT_SHEET_PREFIX, month, year);
