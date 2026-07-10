@@ -9776,7 +9776,7 @@ async function handleBauCua(interaction) {
             let riggedMascots = Object.values(nameMap);
             
             // Tỷ lệ gian lận: 30% bot sẽ cố tình random ra các con vật KHÔNG nằm trong danh sách người chơi chọn
-            let isRigged = Math.random() < 0.40;
+            let isRigged = Math.random() < 0.20;
             let availableMascots = isRigged ? riggedMascots.filter(m => !choices.includes(m)) : riggedMascots;
             
             // Tránh lỗi mảng rỗng nếu user chọn hết 6 con (dù logic user chỉ chọn đc 3)
