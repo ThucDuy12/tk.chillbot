@@ -1,5 +1,4 @@
 require('node:dns').setDefaultResultOrder('ipv4first');
-const { t } = require('./i18n');
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -16,6 +15,7 @@ const {
 const { createCanvas, loadImage, GlobalFonts } = require('canvas');
 const fetch = require('node-fetch'); // Thêm nếu chưa có
 const nodeFetch = require('node-fetch');
+const { t } = require('./i18n');
 
 // Thêm vào khu vực khai báo biến ở đầu file
 const temporarySearchResults = new Map();
@@ -24,6 +24,9 @@ const https = require('https');
 const deletedImageCache = new Map();
 
 const db = require('./database');
+
+// Khai báo rỗng, lát bot chạy nó sẽ kéo từ MongoDB về
+let userLangs = {};
 
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
 const play = require('play-dl');
@@ -537,7 +540,7 @@ vatsimWorker.on('message', async (data) => {
 
     // Xây dựng mảng nội dung cho Pilot (Kết hợp ACDM dpark + Định vị tọa độ)
     const pilotLines = pilots.map(p => {
-      const name = p.name ? p.name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_117FC047', { v0: p.cid });
+      const name = p.name ? p.name : `CID: ${p.cid}`;
       const dep = p.flight_plan?.departure || 'N/A';
       const arr = p.flight_plan?.arrival || 'N/A';
       const acft = getShortAircraft(p.flight_plan?.aircraft);
@@ -577,7 +580,7 @@ vatsimWorker.on('message', async (data) => {
 
     // Xử lý chèn ATC vào Embed
     if (ctrlChunks.length === 0) {
-      currentEmbed.addFields({ name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ED1D7132'), value: 'Không có ATC nào online', inline: false });
+      currentEmbed.addFields({ name: `📡 ATC Online (0)`, value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1299C022'), inline: false });
     } else {
       ctrlChunks.forEach((chunk, index) => {
         // Tràn dung lượng 1 Embed -> Tạo Embed mới
@@ -596,7 +599,7 @@ vatsimWorker.on('message', async (data) => {
         currentEmbed = new EmbedBuilder().setColor(0x2ecc71);
         embeds.push(currentEmbed);
       }
-      currentEmbed.addFields({ name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_58AE7B66'), value: 'Không có Pilot nào online', inline: false });
+      currentEmbed.addFields({ name: `🛫 Pilots Online (0)`, value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4192F81A'), inline: false });
     } else {
       pilotChunks.forEach((chunk, index) => {
         // Tràn dung lượng 1 Embed -> Tạo Embed mới
@@ -946,7 +949,7 @@ async function updateControllerLeaderboardEmbed() {
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D346E24D', { v0: utcHourMinute }))
       .setColor(0xFFD700)
       .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
-      .setFooter({ text: 'Tự động cập nhật mỗi giờ | Giờ hiển thị: UTC' })
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B222D8B6') })
       .setTimestamp(roundedNow);
 
     // Add each category
@@ -1009,7 +1012,7 @@ async function updateControllerLeaderboardEmbed() {
       }
 
       embed.addFields({
-        name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_427C805B', { v0: categoryName, v1: Object.keys(members).length }),
+        name: `${categoryName} (${Object.keys(members).length})`,
         value: categoryDescription + '\n' + (fieldValue || 'Không có dữ liệu'),
         inline: false
       });
@@ -1027,7 +1030,7 @@ async function updateControllerLeaderboardEmbed() {
     const totalHours = (totalSeconds / 3600).toFixed(1);
 
     embed.addFields({
-      name: '📊 Thống kê',
+      name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F9050FDB'),
       value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_04080BD8', { v0: totalMembers, v1: totalHours, v2: leaderboardData.month, v3: leaderboardData.year }),
       inline: false
     });
@@ -1053,7 +1056,7 @@ async function updateControllerLeaderboardEmbed() {
     }
 
     embed.addFields({
-      name: '🟢 Đang online',
+      name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CE045727'),
       value: onlineText,
       inline: false
     });
@@ -1256,7 +1259,7 @@ async function updatePilotLeaderboardEmbed() {
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1B722899', { v0: utcHourMinute }))
       .setColor(0x1E90FF)
       .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
-      .setFooter({ text: 'Tự động cập nhật mỗi giờ | Giờ hiển thị: UTC' })
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B222D8B6') })
       .setTimestamp(roundedNow); // <--- NHÉT VÀO ĐÂY
 
     // Get all pilots and sort by time (descending)
@@ -1265,7 +1268,7 @@ async function updatePilotLeaderboardEmbed() {
     if (pilotEntries.length === 0) {
       embed.addFields({
         name: '📊 Top 10 Pilots',
-        value: 'Chưa có dữ liệu pilot trong khu vực VCL (VV/VD/VL)',
+        value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_39EC79BD'),
         inline: false
       });
     } else {
@@ -1309,7 +1312,7 @@ async function updatePilotLeaderboardEmbed() {
     );
 
     embed.addFields({
-      name: '📊 Thống kê',
+      name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F9050FDB'),
       value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3EBD4B27', { v0: totalPilots, v1: totalHours, v2: totalFlights, v3: pilotLeaderboardData.month, v4: pilotLeaderboardData.year }),
       inline: false
     });
@@ -1317,7 +1320,7 @@ async function updatePilotLeaderboardEmbed() {
     // Add online now info
     const onlinePilotCount = onlinePilots.size;
     embed.addFields({
-      name: '🟢 Đang bay trong VCL',
+      name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_02104F26'),
       value: onlinePilotCount > 0 ?
         `${onlinePilotCount} pilot${onlinePilotCount > 1 ? 's' : ''} đang bay trong khu vực VCL` :
         'Không có pilot nào đang bay trong khu vực VCL',
@@ -1447,7 +1450,7 @@ async function ensureLeaderboardMessagesExist() {
     } else {
       const embed = new EmbedBuilder()
         .setTitle('Member Iron Mic Awards Leaderboard')
-        .setDescription('Đang tải dữ liệu...')
+        .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_54033C7F'))
         .setColor(0xFFD700)
         .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
         .setTimestamp();
@@ -1466,7 +1469,7 @@ async function ensureLeaderboardMessagesExist() {
     } else {
       const embed = new EmbedBuilder()
         .setTitle('✈️ VCLvACC Pilot Leaderboard')
-        .setDescription('Đang tải dữ liệu...')
+        .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_54033C7F'))
         .setColor(0x1E90FF)
         .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
         .setTimestamp();
@@ -1614,12 +1617,12 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
 
     // Build Embed với giao diện xịn xò + Ảnh Banner sếp đưa
     const embed = new EmbedBuilder()
-      .setTitle('🌐 BẢNG XẾP HẠNG ATC VATSEA')
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5E3E4A42'))
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C851CEF2', { v0: startStr, v1: endStr, v2: utcHourMinute }))
       .setColor(0x004c8f) // Màu xanh đậm chuẩn VATSIM
       // Sếp dán link ảnh trực tiếp vào đây (Tui lấy tạm link ảnh sếp vừa gửi)
       .setImage('https://i.ibb.co/5yMXWyR/VATSEA-LOGO-1000x310-Photoroom.png')
-      .setFooter({ text: 'Tự động cập nhật mỗi giờ | Nguồn: StatSim API', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EAC1A309'), iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
       .setTimestamp(roundedNow);
 
     for (const category in positionIntervals) {
@@ -1654,7 +1657,7 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
       if (category === 'Ground') catIcon = '🛬';
 
       embed.addFields({
-        name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FA337741', { v0: catIcon, v1: category }),
+        name: `${catIcon} ${category}`,
         value: hasData ? textBlock : 'Không có dữ liệu.\n',
         inline: false
       });
@@ -1700,11 +1703,11 @@ function createMarketplaceEmbed(data, sellerId, images) {
     .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EC1B533B', { v0: data.name }))
     .setColor(0x3498db)
     .addFields(
-      { name: '💰 Giá', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: data.price }), inline: true },
-      { name: '🔢 Thông tin', value: data.info, inline: true },
-      { name: '📝 Mô tả', value: data.description, inline: false },
-      { name: '📞 Liên hệ', value: data.contact, inline: false },
-      { name: '👤 Người bán', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: sellerId }), inline: true }
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_545BE943'), value: `**${data.price}**`, inline: true },
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4481FBE8'), value: data.info, inline: true },
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2B204E49'), value: data.description, inline: false },
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E281954B'), value: data.contact, inline: false },
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A32606D2'), value: `<@${sellerId}>`, inline: true }
     );
 
   if (images && images.length > 0) {
@@ -2508,7 +2511,7 @@ function buildTranscript(messages, maxChars = SUMMARY_MAX_TRANSCRIPT_CHARS) {
         .map((a) => `${a.name || 'file'}: ${a.url}`)
         .join(' | ');
       content = content ? `${content}\n(Attachments: ${attText})` : `(Attachments: ${attText})`;
-      if (msg.attachments.size > 3) content += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4E17B2E2', { v0: msg.attachments.size - 3 });
+      if (msg.attachments.size > 3) content += ` | (+${msg.attachments.size - 3} files)`;
     }
 
     if (content.length > 800) content = content.slice(0, 800) + '…';
@@ -2531,7 +2534,7 @@ async function createDiscordEvent(guild, eventData) {
     const endTime = new Date(eventData.startTime + 3 * 60 * 60 * 1000);
 
     const scheduledEvent = await guild.scheduledEvents.create({
-      name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BBD09545', { v0: eventData.dep, v1: eventData.arr }),
+      name: `✈️ Group Flight: ${eventData.dep} → ${eventData.arr}`,
       description: `**Route:** ${eventData.route}\n\nJoin our group flight event! All pilots are welcome.\n\nCreated by: <@${eventData.creator}>`,
       scheduledStartTime: startTime,
       scheduledEndTime: endTime,
@@ -2570,14 +2573,14 @@ function createEventEmbed(event, startTime) {
     .setColor(0x0099ff)
     .setThumbnail('https://cdn-icons-png.flaticon.com/512/1836/1836986.png')
     .addFields(
-      { name: '🛫 Departure', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: event.dep }), inline: true },
-      { name: '🛬 Arrival', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: event.arr }), inline: true },
-      { name: '🧭 Route', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ECDDADBE', { v0: event.route }), inline: false },
-      { name: '⏰ Start Time', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BFE5F9C1', { v0: formatDateTime(startTime), v1: formatRelativeTime(startTime) }), inline: false },
-      { name: '👤 Created By', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: event.creator }), inline: true },
+      { name: '🛫 Departure', value: `**${event.dep}**`, inline: true },
+      { name: '🛬 Arrival', value: `**${event.arr}**`, inline: true },
+      { name: '🧭 Route', value: `\`\`\`${event.route}\`\`\``, inline: false },
+      { name: '⏰ Start Time', value: `${formatDateTime(startTime)}\n(${formatRelativeTime(startTime)})`, inline: false },
+      { name: '👤 Created By', value: `<@${event.creator}>`, inline: true },
       { name: '👥 Participants', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9D382665', { v0: event.participants.length }), inline: true }
     )
-    .setFooter({ text: 'Chúc mọi người có chuyến bay vui vẻ!', iconURL: 'https://cdn-icons-png.flaticon.com/512/929/929430.png' })
+    .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_79E2DA3C'), iconURL: 'https://cdn-icons-png.flaticon.com/512/929/929430.png' })
     .setTimestamp();
 
   // Thêm thông tin role event
@@ -2601,7 +2604,7 @@ function createEventEmbed(event, startTime) {
   if (event.discordEventId) {
     embed.addFields({
       name: '📅 Discord Event',
-      value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BDE685C7', { v0: GUILD_ID, v1: event.discordEventId }),
+      value: `[Join Discord Event](https://discord.com/events/${GUILD_ID}/${event.discordEventId})`,
       inline: true,
     });
   }
@@ -2777,8 +2780,8 @@ async function updateACDMDashboard() {
         .setColor(0x00A8FF)
         .setThumbnail('https://images-ext-1.discordapp.net/external/0i9rb3rLfQjwZmpw62DgOmN_ns75snmwFGO3HeaSbKg/https/i.ibb.co/DPx8jtzS/logo-tk-chill-1.png?format=webp&quality=lossless&width=960&height=960')
         .setTimestamp()
-        .setFooter({ text: 'Dữ liệu được lấy tự động từ hệ thống ACDM' })
-        .setDescription('Hiện tại không có chuyến bay nào có dữ liệu ACDM tại VVTS và VVNB.');
+        .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_69795E7D') })
+        .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_98EF4F67'));
       embeds.push(embed);
     } else {
       // 1. Tạo các string block cho từng chuyến bay
@@ -2812,7 +2815,7 @@ async function updateACDMDashboard() {
         }
         // Chỉ thêm Footer ở phần cuối cùng
         if (index === flightChunks.length - 1) {
-          embed.setTimestamp().setFooter({ text: 'Dữ liệu được lấy tự động từ hệ thống ACDM' });
+          embed.setTimestamp().setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_69795E7D') });
         }
         embeds.push(embed);
       });
@@ -3087,300 +3090,320 @@ client.once('ready', async () => {
   // Đảm bảo role event tồn tại
   await ensureEventRoleExists();
   
-
+  // Nạp cài đặt ngôn ngữ từ MongoDB
+  try {
+    const savedLangs = await db.getBotConfig('user_langs');
+    if (savedLangs) {
+      userLangs = savedLangs;
+      console.log(`✅ Đã nạp cấu hình ngôn ngữ của ${Object.keys(userLangs).length} users từ MongoDB.`);
+    }
+  } catch (e) {
+    console.error('Lỗi nạp config user_langs:', e);
+  }
 
   // Register slash commands
   const commands = [
     new SlashCommandBuilder().setName('give_role').setDescription('Xin role'),
-    new SlashCommandBuilder().setName('group_flight').setDescription('Tạo group flight'),
+    new SlashCommandBuilder().setName('group_flight').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_40F28A4A')),
     new SlashCommandBuilder()
       .setName('send_announcements')
-      .setDescription('Gửi thông báo')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A9C813F4'))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
-      .addChannelOption((option) => option.setName('channel').setDescription('Kênh gửi').setRequired(true))
-      .addStringOption((option) => option.setName('message').setDescription('Nội dung').setRequired(true))
-      .addStringOption((option) => option.setName('time').setDescription('Hẹn giờ gửi (YYYY-MM-DD HH:MM UTC), bỏ trống = gửi luôn').setRequired(false))
-      .addAttachmentOption((option) => option.setName('image').setDescription('Hình ảnh đính kèm').setRequired(false)),
+      .addChannelOption((option) => option.setName('channel').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EA3506FB')).setRequired(true))
+      .addStringOption((option) => option.setName('message').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EE7CA513')).setRequired(true))
+      .addStringOption((option) => option.setName('time').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1DE0FEA0')).setRequired(false))
+      .addAttachmentOption((option) => option.setName('image').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_79CE56F9')).setRequired(false)),
     new SlashCommandBuilder()
       .setName('setup_atc_noti')
-      .setDescription('Tạo tin nhắn đăng ký nhận role ATC Notification (Admin only)')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F5B74C40'))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
     new SlashCommandBuilder()
       .setName('metar')
-      .setDescription('Xem METAR của sân bay')
-      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (ví dụ: VVTS)').setRequired(true)),
-    new SlashCommandBuilder().setName('submit_profile').setDescription('Submit profile của bạn'),
-    new SlashCommandBuilder().setName('time').setDescription('Xem thời gian hiện tại'),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8AAA1C7F'))
+      .addStringOption((option) => option.setName('icao').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1071C2C8')).setRequired(true)),
+    new SlashCommandBuilder().setName('submit_profile').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A71604A4')),
+    new SlashCommandBuilder().setName('time').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E10A0F2E')),
     new SlashCommandBuilder()
       .setName('summarize')
-      .setDescription('Tóm tắt tin nhắn trong khoảng thời gian bằng Gemini (chỉ bạn thấy)')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_76E118B8'))
       .addSubcommand((sc) =>
         sc
           .setName('everyone')
-          .setDescription('Tóm tắt tin nhắn của mọi người trong khoảng thời gian')
+          .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_08146E2E'))
           .addStringOption((option) =>
             option
               .setName('duration')
-              .setDescription('Ví dụ: 30m | 2h | 1d (hoặc 45 = 45 phút)')
+              .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E0D75FC2'))
               .setRequired(true)
           )
           .addChannelOption((option) =>
-            option.setName('channel').setDescription('Kênh cần tóm tắt (bỏ trống = kênh hiện tại)').setRequired(false)
+            option.setName('channel').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DA259396')).setRequired(false)
           )
       )
       .addSubcommand((sc) =>
         sc
           .setName('user')
-          .setDescription('Tóm tắt tin nhắn của một user trong khoảng thời gian')
-          .addUserOption((option) => option.setName('user').setDescription('Chọn user').setRequired(true))
+          .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_432C28AF'))
+          .addUserOption((option) => option.setName('user').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_645CC9BF')).setRequired(true))
           .addStringOption((option) =>
             option
               .setName('duration')
-              .setDescription('Ví dụ: 30m | 2h | 1d (hoặc 45 = 45 phút)')
+              .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E0D75FC2'))
               .setRequired(true)
           )
           .addChannelOption((option) =>
-            option.setName('channel').setDescription('Kênh cần tóm tắt (bỏ trống = kênh hiện tại)').setRequired(false)
+            option.setName('channel').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DA259396')).setRequired(false)
           )
       ),
     new SlashCommandBuilder()
       .setName('leaderboard')
-      .setDescription('Quản lý leaderboard')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F45C0EEF'))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
       .addSubcommand((sc) =>
-        sc.setName('show').setDescription('Hiển thị leaderboard controller')
+        sc.setName('show').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B942CF15'))
       )
       .addSubcommand((sc) =>
-        sc.setName('update').setDescription('Cập nhật leaderboard ngay lập tức')
+        sc.setName('update').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_76C587C1'))
       )
       .addSubcommand((sc) =>
         sc.setName('reset').setDescription('Reset leaderboard (admin only)')
       ),
     new SlashCommandBuilder()
       .setName('pilot_leaderboard')
-      .setDescription('Quản lý leaderboard cho pilot')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7FB5DE54'))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
       .addSubcommand((sc) =>
-        sc.setName('show').setDescription('Hiển thị top 10 pilot')
+        sc.setName('show').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8B5E62DD'))
       )
       .addSubcommand((sc) =>
-        sc.setName('update').setDescription('Cập nhật pilot leaderboard ngay lập tức')
+        sc.setName('update').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3D86FE26'))
       )
       .addSubcommand((sc) =>
         sc.setName('reset').setDescription('Reset pilot leaderboard (admin only)')
       )
       .addSubcommand((sc) =>
-        sc.setName('full').setDescription('Xem toàn bộ pilot leaderboard (gửi file txt)')
+        sc.setName('full').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BB556C7B'))
       ),
     new SlashCommandBuilder()
       .setName('send_award')
-      .setDescription('Gửi thông báo chúc mừng top 5 ATC/pilot (admin only)')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A3C55179'))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
       .addSubcommand(sub => sub
         .setName('atc')
-        .setDescription('Gửi award cho top 5 ATC')
+        .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C8C6C4CC'))
       )
       .addSubcommand(sub => sub
         .setName('pilot')
-        .setDescription('Gửi award cho top 5 pilot')
+        .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D30F4B7B'))
       )
       .addSubcommand(sub => sub
         .setName('both')
-        .setDescription('Gửi award cho cả ATC và pilot')
+        .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_247D0F89'))
       )
       .addSubcommand(sub => sub
         .setName('reset_status')
-        .setDescription('Reset trạng thái đã gửi award (admin only)')
+        .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_84F23451'))
       ),
     new SlashCommandBuilder()
       .setName('runway')
-      .setDescription('Tính toán đường băng đang sử dụng dựa trên gió METAR')
-      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CFC8F8E5'))
+      .addStringOption((option) => option.setName('icao').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C40BBB52')).setRequired(true)),
 
     new SlashCommandBuilder()
       .setName('taf')
-      .setDescription('Lấy và giải mã dự báo thời tiết TAF')
-      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVNB)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6179165E'))
+      .addStringOption((option) => option.setName('icao').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B6F4A8DD')).setRequired(true)),
 
     new SlashCommandBuilder()
       .setName('stats')
-      .setDescription('Tra cứu thống kê VATSIM qua CID')
-      .addIntegerOption((option) => option.setName('vatsim_id').setDescription('Nhập VATSIM CID').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1E51BEC1'))
+      .addIntegerOption((option) => option.setName('vatsim_id').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E5EB4FC7')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('event')
-      .setDescription('Tra cứu các sự kiện VATSIM sắp diễn ra tại sân bay')
-      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_08455EC3'))
+      .addStringOption((option) => option.setName('icao').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C40BBB52')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('route')
-      .setDescription('Tra cứu gợi ý route bay (Đường bay tiêu chuẩn)')
-      .addStringOption((option) => option.setName('dep').setDescription('Sân bay đi (ICAO, VD: VVTS)').setRequired(true))
-      .addStringOption((option) => option.setName('arr').setDescription('Sân bay đến (ICAO, VD: VVNB)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4074BB4B'))
+      .addStringOption((option) => option.setName('dep').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CAEA5CF1')).setRequired(true))
+      .addStringOption((option) => option.setName('arr').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5C27B4A9')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('edit_announ')
-      .setDescription('Sửa nội dung thông báo (đã gửi hoặc đang chờ lịch)')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2BF6C978'))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
-      .addStringOption(option => option.setName('message_id').setDescription('ID tin nhắn đã gửi hoặc ID lịch trình').setRequired(true))
-      .addChannelOption(option => option.setName('channel').setDescription('Kênh chứa tin nhắn (bắt buộc nếu là tin nhắn đã gửi)').setRequired(false)),
+      .addStringOption(option => option.setName('message_id').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DFC15499')).setRequired(true))
+      .addChannelOption(option => option.setName('channel').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_308D84F6')).setRequired(false)),
     new SlashCommandBuilder()
       .setName('cancel_announ')
-      .setDescription('Hủy bỏ thông báo đã lên lịch (chưa gửi)')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3A047A7D'))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
-      .addStringOption(option => option.setName('id').setDescription('ID lịch trình (lấy lúc tạo lệnh)').setRequired(true)),
+      .addStringOption(option => option.setName('id').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_951D2B30')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('vatsea_rank')
-      .setDescription('Bảng xếp hạng ATC VATSEA')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7537FC8B'))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
       .addStringOption(option =>
         option.setName('start')
-          .setDescription('Thời gian bắt đầu (ISO UTC VD: 2023-10-01T00:00:00Z). Bỏ trống = Đầu tháng')
+          .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_08E97F6C'))
           .setRequired(false)
       )
       .addStringOption(option =>
         option.setName('end')
-          .setDescription('Thời gian kết thúc (ISO UTC). Bỏ trống = Hiện tại')
+          .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_14548D7A'))
           .setRequired(false)
       ),
     new SlashCommandBuilder()
       .setName('sell')
-      .setDescription('*Chỉ dành cho thành viên tham gia từ 2 tháng trở lên/ Đăng bán sản phẩm')
-      .addAttachmentOption(option => option.setName('anh1').setDescription('Ảnh chính').setRequired(true))
-      .addAttachmentOption(option => option.setName('anh2').setDescription('Ảnh phụ 1').setRequired(false))
-      .addAttachmentOption(option => option.setName('anh3').setDescription('Ảnh phụ 2').setRequired(false))
-      .addAttachmentOption(option => option.setName('anh4').setDescription('Ảnh phụ 3').setRequired(false)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD0C1C06'))
+      .addAttachmentOption(option => option.setName('anh1').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_30C1A934')).setRequired(true))
+      .addAttachmentOption(option => option.setName('anh2').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F4ABE4B4')).setRequired(false))
+      .addAttachmentOption(option => option.setName('anh3').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1E1472F0')).setRequired(false))
+      .addAttachmentOption(option => option.setName('anh4').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0ACC964F')).setRequired(false)),
     new SlashCommandBuilder()
       .setName('notam')
-      .setDescription('Tra cứu thông báo hàng không (NOTAM) của sân bay')
-      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E8E4FE4B'))
+      .addStringOption((option) => option.setName('icao').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C40BBB52')).setRequired(true)),
 
     new SlashCommandBuilder()
       .setName('simbrief')
-      .setDescription('Tóm tắt kế hoạch bay (OFP)')
-      .addStringOption((option) => option.setName('username').setDescription('Tên tài khoản SimBrief (chỉ cần nhập lần đầu)').setRequired(false)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5AEFF3C8'))
+      .addStringOption((option) => option.setName('username').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2526CE98')).setRequired(false)),
     new SlashCommandBuilder()
       .setName('online_atc')
-      .setDescription('Tra cứu danh sách ATC đang online tại một sân bay')
-      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_32B1ABD4'))
+      .addStringOption((option) => option.setName('icao').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C40BBB52')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('play')
-      .setDescription('🎧 Phát nhạc với tk.chill DJ')
-      .addStringOption(option => option.setName('query').setDescription('Tên bài hát hoặc Link YouTube').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7E6EB50F'))
+      .addStringOption(option => option.setName('query').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7C4644A0')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('queue')
-      .setDescription('📜 Xem danh sách nhạc đang chờ phát'),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_19021F7D')),
     new SlashCommandBuilder()
       .setName('clear')
-      .setDescription('🧹 Xóa toàn bộ bài hát đang chờ (giữ lại bài đang phát)'),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1C6F7A10')),
     new SlashCommandBuilder()
       .setName('setup_vatsim_verify')
-      .setDescription('Tạo bảng xác thực CID nhận role VATSIM (Admin only)')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CD6E92BC'))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
     new SlashCommandBuilder()
       .setName('atc_profile')
-      .setDescription('Tra cứu thông tin Controller đang online trên VATSIM')
-      .addStringOption(option => option.setName('station').setDescription('Callsign trạm (VD: VVTS_APP, VVTS_TWR)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2C332905'))
+      .addStringOption(option => option.setName('station').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EBC97496')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('atis_vatsim')
-      .setDescription('Đọc ATIS trực tiếp từ mạng bay VATSIM')
-      .addStringOption(option => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS, WSSS)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B4890CF0'))
+      .addStringOption(option => option.setName('icao').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_101417B2')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('ivao_atc')
-      .setDescription('Tra cứu thông tin Controller đang online trên mạng bay IVAO')
-      .addStringOption(option => option.setName('station').setDescription('Callsign trạm (VD: VVTS_APP, WSSS_TWR)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2D8236EC'))
+      .addStringOption(option => option.setName('station').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A050F5A6')).setRequired(true)),
 
     new SlashCommandBuilder()
       .setName('ivao_atis')
-      .setDescription('Đọc ATIS trực tiếp từ mạng bay IVAO')
-      .addStringOption(option => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS, VVNB)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0184CB3A'))
+      .addStringOption(option => option.setName('icao').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D9757EA2')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('real_flight')
-      .setDescription('Tra cứu các chuyến bay cất/hạ cánh ngoài đời thực tại sân bay')
-      .addStringOption((option) => option.setName('icao').setDescription('Mã ICAO sân bay (VD: VVTS)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B126713C'))
+      .addStringOption((option) => option.setName('icao').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C40BBB52')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('balance')
-      .setDescription('💳 Tra cứu hồ sơ tk.chill Cash và thống kê chuyến bay của bạn.'),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_37BCF263')),
     new SlashCommandBuilder()
     .setName('coinflip')
-    .setDescription('Tung đồng xu cá cược')
-    .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền, "all" (Tất tay) hoặc "half" (Nửa vốn)').setRequired(true)),
+    .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8DCD0ECF'))
+    .addStringOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E4779915')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('jackpot')
-      .setDescription('Quay Jackpot Machine chủ đề hàng không')
-      .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền, "all" (Tất tay) hoặc "half" (Nửa vốn)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_197616C8'))
+      .addStringOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E4779915')).setRequired(true)),
 
     new SlashCommandBuilder()
       .setName('daily')
-      .setDescription('Nhận lương phi công mỗi ngày'),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DA36FF79')),
 
     new SlashCommandBuilder()
       .setName('give_cash')
-      .setDescription('Chuyển tiền cho người khác')
-      .addUserOption(opt => opt.setName('user').setDescription('Người nhận').setRequired(true))
-      .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền, "all" (Tất tay) hoặc "half" (Nửa vốn)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_72152F17'))
+      .addUserOption(opt => opt.setName('user').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6D8B1E4A')).setRequired(true))
+      .addStringOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E4779915')).setRequired(true)),
 
     new SlashCommandBuilder()
       .setName('add_cash')
-      .setDescription('Bơm tiền cho user hoặc toàn bộ role (Chỉ Dev/Admin)')
-      .addMentionableOption(opt => opt.setName('target').setDescription('Người hoặc Role nhận tiền').setRequired(true))
-      .addIntegerOption(opt => opt.setName('amount').setDescription('Số tiền').setRequired(true))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A1691D2D'))
+      .addMentionableOption(opt => opt.setName('target').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_86F4383A')).setRequired(true))
+      .addIntegerOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE2607')).setRequired(true))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
     new SlashCommandBuilder()
       .setName('taisiu')
-      .setDescription('Lắc Tài Xỉu')
-      .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền, "all" (Tất tay) hoặc "half" (Nửa vốn)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_880EED44'))
+      .addStringOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E4779915')).setRequired(true)),
     
     new SlashCommandBuilder()
       .setName('baucua')
-      .setDescription('Lắc Bầu Cua Tôm Cá')
-      .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền, "all" (Tất tay) hoặc "half" (Nửa vốn)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_935AE3DE'))
+      .addStringOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E4779915')).setRequired(true)),
       
     new SlashCommandBuilder()
       .setName('blackjack')
-      .setDescription('Chơi Blackjack')
-      .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền, "all" (Tất tay) hoặc "half" (Nửa vốn)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_090F910A'))
+      .addStringOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E4779915')).setRequired(true)),
 
     new SlashCommandBuilder()
       .setName('poker')
-      .setDescription('Chơi Video Poker 5 lá')
-      .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền, "all" (Tất tay) hoặc "half" (Nửa vốn)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_63602FB0'))
+      .addStringOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E4779915')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('work')
-      .setDescription('Làm nhiệm vụ để kiếm tiền'),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EA6D22E0')),
     new SlashCommandBuilder()
       .setName('roulette')
-      .setDescription('Cò quay Roulette (Đỏ/Đen x2, Xanh x14)')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_26F54265'))
       .addStringOption(opt => opt.setName('choice')
-        .setDescription('Chọn màu muốn cược')
+        .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BBD4C793'))
         .setRequired(true)
         .addChoices(
-          { name: 'Đỏ 🔴 (Tỉ lệ x2)', value: 'red' },
-          { name: 'Đen ⚫ (Tỉ lệ x2)', value: 'black' },
-          { name: 'Xanh Lá 🟢 (Tỉ lệ x14)', value: 'green' }
+          { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FF3C42AD'), value: 'red' },
+          { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8A78FBE2'), value: 'black' },
+          { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F239319B'), value: 'green' }
         ))
-      .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền, "all" (Tất tay) hoặc "half" (Nửa vốn)').setRequired(true)),
+      .addStringOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E4779915')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('oantuti')
-      .setDescription('Chơi Oẳn Tù Tì với nhà cái')
-      .addStringOption(opt => opt.setName('amount').setDescription('Số tiền cược (hoặc all/half)').setRequired(true)),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E5E00439'))
+      .addStringOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7F3EFF43')).setRequired(true)),
 
     new SlashCommandBuilder()
       .setName('vietlott')
-      .setDescription('Gánh hát Lô Tô'),
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FC1CDEB3')),
     new SlashCommandBuilder()
     .setName('baicao')
-    .setDescription('Chơi Bài Cào 3 lá với nhà cái')
-    .addStringOption(opt => opt.setName('amount').setDescription('Nhập số tiền cược (hoặc all/half)').setRequired(true)),
+    .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B624DCF0'))
+    .addStringOption(opt => opt.setName('amount').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_71BF11CC')).setRequired(true)),
     new SlashCommandBuilder()
       .setName('check_balance')
-      .setDescription('Kiểm tra số dư của một người dùng')
-      .addUserOption(opt => opt.setName('target').setDescription('Người muốn kiểm tra').setRequired(true))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7A6A0158'))
+      .addUserOption(opt => opt.setName('target').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5AA5D5E0')).setRequired(true))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
     new SlashCommandBuilder()
       .setName('clear_balance')
-      .setDescription('Tịch thu sạch tiền của một người dùng về 0')
-      .addUserOption(opt => opt.setName('target').setDescription('Người muốn reset tiền').setRequired(true))
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7A2879D8'))
+      .addUserOption(opt => opt.setName('target').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C46A1FE2')).setRequired(true))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
     ];
+    new SlashCommandBuilder()
+      .setName('set_lang')
+      .setDescription('Change bot language / Đổi ngôn ngữ bot')
+      .addStringOption(opt => opt.setName('lang')
+        .setDescription('Select language / Chọn ngôn ngữ')
+        .setRequired(true)
+        .addChoices(
+          { name: 'English', value: 'en' },
+          { name: 'Tiếng Việt', value: 'vi' }
+        )
+      ),
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
 
@@ -3708,11 +3731,11 @@ client.on('interactionCreate', async (interaction) => {
     const [searchId, index] = interaction.values[0].split('_');
     const songs = temporarySearchResults.get(searchId);
 
-    if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
+    if (!songs) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3D5FB26C'), ephemeral: true });
 
     const selectedSong = songs[index];
     let queue = musicQueues.get(interaction.guild.id);
-    if (!queue) return interaction.reply({ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
+    if (!queue) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0267D31B'), ephemeral: true });
 
     // Bơm bài hát đã chọn vào hàng chờ
     queue.songs.push(selectedSong);
@@ -3733,10 +3756,10 @@ client.on('interactionCreate', async (interaction) => {
     const searchId = interaction.customId.split('_')[2];
     const songs = temporarySearchResults.get(searchId);
 
-    if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
+    if (!songs) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3D5FB26C'), ephemeral: true });
 
     let queue = musicQueues.get(interaction.guild.id);
-    if (!queue) return interaction.reply({ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
+    if (!queue) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0267D31B'), ephemeral: true });
 
     // Bơm CÙNG LÚC TOÀN BỘ 100 BÀI HÁT vào hàng chờ
     queue.songs.push(...songs);
@@ -3945,6 +3968,25 @@ client.on('interactionCreate', async (interaction) => {
         case 'clear_balance':
           await handleClearBalance(interaction);
           break;
+        case 'set_lang': {
+          const chosenLang = interaction.options.getString('lang');
+          
+          // Cập nhật bộ nhớ RAM
+          userLangs[interaction.user.id] = chosenLang;
+          
+          // Lưu thẳng lên MongoDB cho bất tử
+          await db.saveBotConfig('user_langs', userLangs);
+
+          // Gắn ngay ngôn ngữ mới
+          interaction.userLang = chosenLang;
+
+          if (chosenLang === 'vi') {
+            await interaction.reply({ content: '✅ Đã đổi ngôn ngữ giao diện bot sang **Tiếng Việt**!', ephemeral: true });
+          } else {
+            await interaction.reply({ content: '✅ Bot interface language has been changed to **English**!', ephemeral: true });
+          }
+          break;
+        }
         case 'sell': {
           const anh1 = interaction.options.getAttachment('anh1');
           const anh2 = interaction.options.getAttachment('anh2');
@@ -3954,15 +3996,15 @@ client.on('interactionCreate', async (interaction) => {
           const attachments = [anh1, anh2, anh3, anh4].filter(a => a && a.contentType?.startsWith('image')).map(a => a.url);
 
           if (attachments.length === 0) {
-            return interaction.reply({ content: '❌ Bạn phải gửi ít nhất 1 ảnh (định dạng hình ảnh)!', ephemeral: true });
+            return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D7B038BA'), ephemeral: true });
           }
 
           const saleId = Date.now().toString();
           userSellImages.set(saleId, attachments);
 
-          const sellModal = new ModalBuilder().setCustomId(`sell_modal_${saleId}`).setTitle('Thông tin sản phẩm đăng bán');
+          const sellModal = new ModalBuilder().setCustomId(`sell_modal_${saleId}`).setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8280A2ED'));
           sellModal.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DB91BB37')).setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_697C39D0')).setStyle(TextInputStyle.Short).setRequired(true)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DB91BB37')).setPlaceholder('Ex: Livery A321...').setStyle(TextInputStyle.Short).setRequired(true)),
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ADFCBD3F')).setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DE88C35A')).setStyle(TextInputStyle.Short).setRequired(true)),
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('price').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6430156F')).setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_48D3C539')).setStyle(TextInputStyle.Short).setRequired(true)),
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('description').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_168E3133')).setStyle(TextInputStyle.Paragraph).setRequired(true)),
@@ -3979,11 +4021,11 @@ client.on('interactionCreate', async (interaction) => {
       if (customId.startsWith('music_')) {
         const queue = musicQueues.get(interaction.guild.id);
         if (!queue) {
-          return interaction.reply({ content: '❌ Nhạc đang tắt, bạn không thể bấm nút này.', ephemeral: true }).catch(() => { });
+          return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_45CC5CD1'), ephemeral: true }).catch(() => { });
         }
 
         if (interaction.member.voice.channel?.id !== queue.voiceChannel.id) {
-          return interaction.reply({ content: '❌ Bạn phải vào chung phòng Voice với bot mới điều khiển được!', ephemeral: true }).catch(() => { });
+          return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0B2897A3'), ephemeral: true }).catch(() => { });
         }
 
         try {
@@ -4032,11 +4074,11 @@ client.on('interactionCreate', async (interaction) => {
       if (interaction.customId.startsWith('ann_editai_')) {
         const reqId = interaction.customId.replace('ann_editai_', '');
         const data = pendingAnnouncements.get(reqId);
-        if (!data) return interaction.reply({ content: '❌ Phiên đã hết hạn.', ephemeral: true });
+        if (!data) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BE994442'), ephemeral: true });
 
         const modal = new ModalBuilder()
           .setCustomId(`modalai_${reqId}`)
-          .setTitle('Sửa nội dung AI');
+          .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E5D59016'));
 
         const textInput = new TextInputBuilder()
           .setCustomId('ai_text')
@@ -4060,7 +4102,7 @@ client.on('interactionCreate', async (interaction) => {
         if (action === 'edit' || action === 'approve' || action === 'reject') {
           const hasAdmin = interaction.member.roles.cache.some(r => r.name === 'Admin') || interaction.member.roles.cache.has(roles.adminRoleId);
           if (!hasAdmin && interaction.user.id !== OWNER_ID) {
-            return interaction.reply({ content: '❌ Chỉ Admin mới được thực hiện thao tác này!', ephemeral: true });
+            return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D6065AAA'), ephemeral: true });
           }
         }
 
@@ -4069,7 +4111,7 @@ client.on('interactionCreate', async (interaction) => {
 
         if (action === 'edit') {
           const saleId = parts[2];
-          const editModal = new ModalBuilder().setCustomId(`market_edit_modal_${saleId}`).setTitle('Chỉnh sửa thông tin sản phẩm');
+          const editModal = new ModalBuilder().setCustomId(`market_edit_modal_${saleId}`).setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5E7FCD03'));
           editModal.addComponents(
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('name').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DB91BB37')).setDefaultValue(parsedData.name).setStyle(TextInputStyle.Short).setRequired(true)),
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('info').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ADFCBD3F')).setDefaultValue(parsedData.info).setStyle(TextInputStyle.Short).setRequired(true)),
@@ -4083,7 +4125,7 @@ client.on('interactionCreate', async (interaction) => {
 
         if (action === 'reject') {
           const saleId = parts[2];
-          const rejectModal = new ModalBuilder().setCustomId(`market_reject_modal_${saleId}`).setTitle('Lý do từ chối sản phẩm');
+          const rejectModal = new ModalBuilder().setCustomId(`market_reject_modal_${saleId}`).setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_44CBABA3'));
           rejectModal.addComponents(
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7AB1EC02')).setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FF829A05')).setStyle(TextInputStyle.Paragraph).setRequired(true))
           );
@@ -4093,19 +4135,19 @@ client.on('interactionCreate', async (interaction) => {
 
         if (action === 'approve') {
           const marketChannel = interaction.guild.channels.cache.get(MARKETPLACE_CHANNEL_ID);
-          if (!marketChannel) return interaction.reply({ content: '❌ Không tìm thấy kênh Marketplace!', ephemeral: true });
+          if (!marketChannel) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1843E4D2'), ephemeral: true });
 
           const publicEmbed = EmbedBuilder.from(oldEmbed)
-            .setFooter({ text: `Ngày đăng: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}` });
+            .setFooter({ text : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CAC6488B') });
 
           const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8473213A')).setStyle(ButtonStyle.Link).setURL(`https://discord.com/users/${parsedData.sellerId}`).setEmoji('💬'),
             new ButtonBuilder().setCustomId(`market_soldout_${parsedData.sellerId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6B7B0658')).setStyle(ButtonStyle.Danger).setEmoji('✖️')
           );
 
-          await marketChannel.send({ content: '📢 **CÓ SẢN PHẨM MỚI!**', embeds: [publicEmbed], components: [row] });
+          await marketChannel.send({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_07FE602F'), embeds: [publicEmbed], components: [row] });
           await interaction.message.edit({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0477D27A', { v0: interaction.user.mention }), components: [], embeds: [] });
-          await interaction.reply({ content: '✅ Đã đăng bài thành công ra kênh Marketplace!', ephemeral: true });
+          await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8AA2AD05'), ephemeral: true });
           return;
         }
 
@@ -4115,7 +4157,7 @@ client.on('interactionCreate', async (interaction) => {
           const isSeller = interaction.user.id === sellerId;
 
           if (!isSeller && !hasAdmin && interaction.user.id !== OWNER_ID) {
-            return interaction.reply({ content: '❌ Chỉ người bán hoặc Admin mới được đóng bài!', ephemeral: true });
+            return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0040C555'), ephemeral: true });
           }
 
           const soldEmbed = EmbedBuilder.from(oldEmbed)
@@ -4127,7 +4169,7 @@ client.on('interactionCreate', async (interaction) => {
           );
 
           await interaction.message.edit({ embeds: [soldEmbed], components: [row] });
-          await interaction.reply({ content: '✅ Đã đóng bài đăng bán thành công.', ephemeral: true });
+          await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_51A22422'), ephemeral: true });
           return;
         }
       }
@@ -4161,7 +4203,7 @@ client.on('interactionCreate', async (interaction) => {
         if (adminChannel) {
           await adminChannel.send({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C8E22486', { v0: interaction.user.id }), embeds: [embed], components: [row] });
         }
-        await interaction.reply({ content: '✅ Đã gửi đơn đăng bán cho Admin duyệt!', ephemeral: true });
+        await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C1427E98'), ephemeral: true });
         return;
       }
 
@@ -4194,9 +4236,9 @@ client.on('interactionCreate', async (interaction) => {
           const channel = await interaction.client.channels.fetch(channelId);
           const msg = await channel.messages.fetch(messageId);
           await msg.edit(newText);
-          await interaction.reply({ content: '✅ Đã cập nhật thành công thông báo cũ!', ephemeral: true });
+          await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DAF554E4'), ephemeral: true });
         } catch (err) {
-          await interaction.reply({ content: '❌ Lỗi không sửa được tin nhắn (Có thể khác tác giả).', ephemeral: true });
+          await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5B5BA0F6'), ephemeral: true });
         }
       }
 
@@ -4206,7 +4248,7 @@ client.on('interactionCreate', async (interaction) => {
         const newText = interaction.fields.getTextInputValue('ai_text');
         const data = pendingAnnouncements.get(reqId);
 
-        if (!data) return interaction.reply({ content: '❌ Phiên đã hết hạn.', ephemeral: true });
+        if (!data) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BE994442'), ephemeral: true });
 
         // Lưu lại nội dung người dùng vừa sửa vào bộ nhớ tạm
         data.aiMessage = newText;
@@ -4217,11 +4259,11 @@ client.on('interactionCreate', async (interaction) => {
         const previewAi = newText.length > 900 ? newText.substring(0, 900) + '...\n[...]' : newText;
 
         const embed = EmbedBuilder.from(interaction.message.embeds[0])
-          .setDescription('✨ **Bạn đã tự chỉnh sửa lại bản AI.** Bạn chốt gửi đi chưa?')
+          .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8AB526FF'))
           .setFields(
-            { name: '📝 Bản gốc của bạn', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: previewRaw }) },
-            { name: '🤖 Bản do AI nâng cấp (ĐÃ SỬA)', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: previewAi }) },
-            { name: '⏰ Lịch trình', value: data.targetTime ? `<t:${Math.floor(data.targetTime / 1000)}:F>` : 'Gửi ngay lập tức' }
+            { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_01999984'), value: `\`\`\`\n${previewRaw}\n\`\`\`` },
+            { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A600AE69'), value: `\`\`\`\n${previewAi}\n\`\`\`` },
+            { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_58F8317B'), value: data.targetTime ? `<t:${Math.floor(data.targetTime / 1000)}:F>` : 'Gửi ngay lập tức' }
           )
           .setColor(0xf1c40f); // Đổi sang màu vàng cho biết là đã edit
 
@@ -4236,9 +4278,9 @@ client.on('interactionCreate', async (interaction) => {
         if (scheduledIndex !== -1) {
           scheduledAnnouncements[scheduledIndex].content = newText;
           await db.saveAnnouncements(scheduledAnnouncements);
-          await interaction.reply({ content: '✅ Đã cập nhật nội dung cho thông báo hẹn giờ thành công!', ephemeral: true });
+          await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_84BE8790'), ephemeral: true });
         } else {
-          await interaction.reply({ content: '❌ Lịch trình này không còn tồn tại hoặc đã được gửi đi.', ephemeral: true });
+          await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8E892BA2'), ephemeral: true });
         }
       }
       // Nộp form từ chối bài bán
@@ -4251,13 +4293,13 @@ client.on('interactionCreate', async (interaction) => {
         try {
           const seller = await client.users.fetch(parsedData.sellerId);
           const dmEmbed = new EmbedBuilder()
-            .setTitle('❌ SẢN PHẨM BỊ TỪ CHỐI')
+            .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_87C8DEC8'))
             .setColor(0xff0000)
             .addFields(
-              { name: 'Sản phẩm', value: parsedData.name, inline: false },
-              { name: 'Lý do từ chối', value: reason, inline: false }
+              { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1D1AA192'), value: parsedData.name, inline: false },
+              { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7AB1EC02'), value: reason, inline: false }
             )
-            .setFooter({ text: 'Vui lòng chỉnh sửa và gửi lại yêu cầu nếu cần thiết.' });
+            .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2FC599F8') });
           await seller.send({ embeds: [dmEmbed] });
           dmStatus = `\n✅ Đã gửi lý do từ chối cho <@${parsedData.sellerId}>.`;
         } catch (e) {
@@ -4279,9 +4321,9 @@ client.on('interactionCreate', async (interaction) => {
     console.error('interactionCreate error:', err);
     try {
       if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content: '❌ Đã có lỗi nội bộ.', ephemeral: true });
+        await interaction.followUp({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3F7DC6FB'), ephemeral: true });
       } else {
-        await interaction.reply({ content: '❌ Đã có lỗi nội bộ.', ephemeral: true });
+        await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3F7DC6FB'), ephemeral: true });
       }
     } catch (_) { }
   }
@@ -4583,14 +4625,14 @@ client.on('messageCreate', async (message) => {
     const pilotEntries = Object.entries(pilotLeaderboardData.pilots || {});
 
     if (pilotEntries.length === 0) {
-      embed.addFields({ name: 'Pilots', value: 'Không có dữ liệu', inline: false });
+      embed.addFields({ name: 'Pilots', value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_89903BA3'), inline: false });
     } else {
       let fieldValue = '';
       pilotEntries.slice(0, 10).forEach(([id, data]) => {
         const hours = (data.seconds / 3600).toFixed(2);
         fieldValue += `${data.name} (${id}) - ${data.seconds}s (${hours}h) - ${data.flights || 1} chuyến\n`;
       });
-      embed.addFields({ name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F04399DE', { v0: pilotEntries.length }), value: fieldValue || 'Không có', inline: false });
+      embed.addFields({ name: `Pilots (${pilotEntries.length})`, value: fieldValue || 'Không có', inline: false });
     }
     await message.channel.send({ embeds: [embed] });
   }
@@ -4601,23 +4643,23 @@ async function handleTimeCommand(interaction) {
   const timeInfo = getCurrentTimeInfo();
 
   const embed = new EmbedBuilder()
-    .setTitle('🕐 Thời Gian Hiện Tại')
+    .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_73F07C44'))
     .setColor(0x00ff00)
     .addFields(
-      { name: '⏰ Giờ địa phương (Việt Nam)', value: timeInfo.local, inline: false },
-      { name: '🌐 Giờ UTC', value: timeInfo.utc, inline: false },
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FDB3F67D'), value: timeInfo.local, inline: false },
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_635F9AE7'), value: timeInfo.utc, inline: false },
       { name: '📅 ISO 8601', value: timeInfo.iso, inline: false },
       { name: '🔢 Unix Timestamp', value: timeInfo.unix.toString(), inline: true },
       { name: '💬 Discord Format', value: timeInfo.discord, inline: false },
       {
-        name: '📋 Chi tiết',
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_415A5B1C'),
         value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_992D2BC1', { v0: timeInfo.detailed.dayOfWeek, v1: timeInfo.detailed.day, v2: timeInfo.detailed.monthName, v3: timeInfo.detailed.year, v4: timeInfo.detailed.hours
           .toString()
           .padStart(2, '0'), v5: timeInfo.detailed.minutes.toString().padStart(2, '0'), v6: timeInfo.detailed.seconds.toString().padStart(2, '0') }),
         inline: false,
       }
     )
-    .setFooter({ text: 'Bot được cung cấp thông tin thời gian thực', iconURL: 'https://cdn-icons-png.flaticon.com/512/3114/3114840.png' })
+    .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8F56BFB1'), iconURL: 'https://cdn-icons-png.flaticon.com/512/3114/3114840.png' })
     .setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
@@ -4724,7 +4766,7 @@ async function sendATCAward(interaction = null) {
     const monthName = monthNames[currentMonth - 1];
 
     const embed = new EmbedBuilder()
-      .setTitle('🏆 **THÔNG BÁO CHÚC MỪNG TOP 5 ATC** 🏆')
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7C3A82AC'))
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FF12B5C2', { v0: monthName, v1: currentYear }))
       .setColor(0xFFD700)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/2107/2107845.png')
@@ -4733,8 +4775,8 @@ async function sendATCAward(interaction = null) {
 
     if (top5.length === 0) {
       embed.addFields({
-        name: '📊 Kết quả',
-        value: 'Không có dữ liệu ATC trong tháng này.',
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_73EC6EF8'),
+        value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_18A977FB'),
         inline: false
       });
     } else {
@@ -4747,7 +4789,7 @@ async function sendATCAward(interaction = null) {
         const categories = atc.categories.join(', ');
 
         embed.addFields({
-          name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DCEE5CC3', { v0: rank, v1: atc.name, v2: atc.cid }),
+          name: `${rank} ${atc.name} (${atc.cid})`,
           value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4C7C8A73', { v0: timeFormatted, v1: categories, v2: atc.callsign || 'N/A' }),
           inline: false
         });
@@ -4756,7 +4798,7 @@ async function sendATCAward(interaction = null) {
       // Thêm thông điệp chúc mừng
       const winnerNames = top5.map(a => a.name).join(', ');
       embed.addFields({
-        name: '🎊 Chúc mừng!',
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A0740F55'),
         value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DACD4359', { v0: winnerNames }),
         inline: false
       });
@@ -4799,7 +4841,7 @@ async function sendATCAward(interaction = null) {
     console.error('Error sending ATC award:', err);
     if (interaction) {
       await interaction.reply({
-        content: '❌ Đã có lỗi khi gửi thông báo award ATC!',
+        content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EAF317DD'),
         ephemeral: true
       });
     }
@@ -4824,7 +4866,7 @@ async function sendPilotAward(interaction = null) {
     const monthName = monthNames[currentMonth - 1];
 
     const embed = new EmbedBuilder()
-      .setTitle('✈️ **THÔNG BÁO CHÚC MỪNG TOP 5 PILOT** ✈️')
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F8F0B7A0'))
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CF980B83', { v0: monthName, v1: currentYear }))
       .setColor(0x1E90FF)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/824/824100.png')
@@ -4833,8 +4875,8 @@ async function sendPilotAward(interaction = null) {
 
     if (top5.length === 0) {
       embed.addFields({
-        name: '📊 Kết quả',
-        value: 'Không có dữ liệu pilot trong tháng này.',
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_73EC6EF8'),
+        value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7E06D680'),
         inline: false
       });
     } else {
@@ -4846,7 +4888,7 @@ async function sendPilotAward(interaction = null) {
         const timeFormatted = formatAwardTime(pilot.totalSeconds);
 
         embed.addFields({
-          name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DCEE5CC3', { v0: rank, v1: pilot.name, v2: pilot.cid }),
+          name: `${rank} ${pilot.name} (${pilot.cid})`,
           value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CF820668', { v0: timeFormatted, v1: pilot.flights, v2: pilot.callsign || 'N/A' }),
           inline: false
         });
@@ -4855,7 +4897,7 @@ async function sendPilotAward(interaction = null) {
       // Thêm thông điệp chúc mừng
       const winnerNames = top5.map(p => p.name).join(', ');
       embed.addFields({
-        name: '🎊 Chúc mừng!',
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A0740F55'),
         value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C275C90D', { v0: winnerNames }),
         inline: false
       });
@@ -4898,7 +4940,7 @@ async function sendPilotAward(interaction = null) {
     console.error('Error sending pilot award:', err);
     if (interaction) {
       await interaction.reply({
-        content: '❌ Đã có lỗi khi gửi thông báo award pilot!',
+        content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0E7FFC6D'),
         ephemeral: true
       });
     }
@@ -4974,7 +5016,7 @@ async function resetAwardStatus() {
 async function handleSummarize(interaction) {
   try {
     if (!interaction.inGuild()) {
-      return interaction.reply({ content: '❌ Lệnh này chỉ dùng trong server.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_791A1358'), ephemeral: true });
     }
 
     const sub = interaction.options.getSubcommand();
@@ -4983,19 +5025,19 @@ async function handleSummarize(interaction) {
 
     if (!durationMs || isNaN(durationMs) || durationMs <= 0) {
       return interaction.reply({
-        content: '❌ Duration không hợp lệ. Ví dụ: `30m`, `2h`, `1d` (hoặc `45` = 45 phút).',
+        content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DEB52FDF'),
         ephemeral: true,
       });
     }
 
     const maxAllowed = 7 * 24 * 60 * 60 * 1000;
     if (durationMs > maxAllowed) {
-      return interaction.reply({ content: '❌ Duration quá dài. Tối đa 7 ngày.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6337E149'), ephemeral: true });
     }
 
     const channel = interaction.options.getChannel('channel') || interaction.channel;
     if (!channel || typeof channel.isTextBased !== 'function' || !channel.isTextBased()) {
-      return interaction.reply({ content: '❌ Kênh này không phải text channel.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0D9B4C3C'), ephemeral: true });
     }
 
     const targetUser = sub === 'user' ? interaction.options.getUser('user', true) : null;
@@ -5087,7 +5129,7 @@ ${transcript}
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6D1095A6'));
       } else {
-        await interaction.reply({ content: '❌ Tóm tắt thất bại do lỗi nội bộ. Admin kiểm tra log giúp nhé.', ephemeral: true });
+        await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6D1095A6'), ephemeral: true });
       }
     } catch (_) { }
   }
@@ -5099,25 +5141,25 @@ async function handleLeaderboardCommand(interaction) {
 
   if (subcommand === 'show') {
     await updateControllerLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
+    await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EF11A2D1'), ephemeral: true });
 
   } else if (subcommand === 'update') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ Bạn không có quyền cập nhật leaderboard.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_09F31E4F'), ephemeral: true });
     }
 
     await updateControllerLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
+    await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EF11A2D1'), ephemeral: true });
 
   } else if (subcommand === 'reset') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ Bạn không có quyền reset leaderboard.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6CC7B78C'), ephemeral: true });
     }
 
     const now = new Date();
@@ -5130,7 +5172,7 @@ async function handleLeaderboardCommand(interaction) {
     };
     await saveControllerLeaderboard(currentMonth, currentYear, leaderboardData.stats);
     await updateControllerLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Controller Leaderboard đã được reset!', ephemeral: true });
+    await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1F808FCC'), ephemeral: true });
   }
 }
 
@@ -5140,25 +5182,25 @@ async function handlePilotLeaderboardCommand(interaction) {
 
   if (subcommand === 'show') {
     await updatePilotLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
+    await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DD89C50C'), ephemeral: true });
 
   } else if (subcommand === 'update') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ Bạn không có quyền cập nhật pilot leaderboard.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3A94FECD'), ephemeral: true });
     }
 
     await updatePilotLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
+    await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DD89C50C'), ephemeral: true });
 
   } else if (subcommand === 'reset') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ Bạn không có quyền reset pilot leaderboard.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C26E8C86'), ephemeral: true });
     }
 
     const now = new Date();
@@ -5171,7 +5213,7 @@ async function handlePilotLeaderboardCommand(interaction) {
     };
     await savePilotLeaderboard(currentMonth, currentYear, pilotLeaderboardData.pilots);
     await updatePilotLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Pilot Leaderboard đã được reset!', ephemeral: true });
+    await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2FDD1933'), ephemeral: true });
 
   } else if (subcommand === 'full') {
     await interaction.deferReply();
@@ -5180,18 +5222,18 @@ async function handlePilotLeaderboardCommand(interaction) {
       const txtContent = await generateFullPilotLeaderboardTxt();
 
       if (!txtContent) {
-        return await interaction.editReply({ content: '❌ Không có dữ liệu pilot leaderboard.' });
+        return await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5CE1A703') });
       }
 
       // Create a txt file attachment
       const buffer = Buffer.from(txtContent, 'utf8');
-      const attachment = new AttachmentBuilder(buffer, { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3D889985', { v0: pilotLeaderboardData.month, v1: pilotLeaderboardData.year }) });
+      const attachment = new AttachmentBuilder(buffer, { name: `pilot_leaderboard_${pilotLeaderboardData.month}_${pilotLeaderboardData.year}.txt` });
 
       const embed = new EmbedBuilder()
         .setTitle('📊 Full Pilot Leaderboard')
         .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3F207FF2', { v0: pilotLeaderboardData.month, v1: pilotLeaderboardData.year }))
         .setColor(0x1E90FF)
-        .setFooter({ text: 'Tải file .txt để xem chi tiết' })
+        .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5906B97B') })
         .setTimestamp();
 
       await interaction.editReply({
@@ -5202,7 +5244,7 @@ async function handlePilotLeaderboardCommand(interaction) {
 
     } catch (err) {
       console.error('Error generating full pilot leaderboard:', err);
-      await interaction.editReply({ content: '❌ Đã có lỗi khi tạo file leaderboard.' });
+      await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CE26CEB0') });
     }
   }
 }
@@ -5213,7 +5255,7 @@ async function handleRequestRole(interaction) {
   const userId = member.id;
 
   if ((bans.users[userId] && bans.users[userId].endTime > Date.now()) || (member.roles && member.roles.cache.has(roles.banRoleId))) {
-    return interaction.reply({ content: 'Bạn đang bị ban, không thể xin role.', ephemeral: true });
+    return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9FF75716'), ephemeral: true });
   }
 
   const hasDev = member.roles.cache.has(roles.devRoleId);
@@ -5224,7 +5266,7 @@ async function handleRequestRole(interaction) {
     const filteredRoles = (roles.otherRoles || []).filter(
       (r) => r.id !== roles.devRoleId && r.id !== roles.adminRoleId && r.id !== roles.verifiedMemberRoleId
     );
-    if (filteredRoles.length === 0) return interaction.reply({ content: 'Không có role nào có thể xin.', ephemeral: true });
+    if (filteredRoles.length === 0) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FD09B64D'), ephemeral: true });
 
     const row = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
@@ -5232,12 +5274,12 @@ async function handleRequestRole(interaction) {
         .setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F4935F43'))
         .addOptions(filteredRoles.map((r) => ({ label: r.name, value: r.id })))
     );
-    await interaction.reply({ content: 'Chọn role bạn muốn xin:', components: [row], ephemeral: true });
+    await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_775F30AB'), components: [row], ephemeral: true });
   } else {
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('request_member').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_628B65DA')).setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId('request_member').setLabel('Xin Role Member').setStyle(ButtonStyle.Primary)
     );
-    await interaction.reply({ content: 'Bạn cần có role Member trước. Bấm để xin:', components: [row], ephemeral: true });
+    await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A87BB537'), components: [row], ephemeral: true });
   }
 }
 
@@ -5245,10 +5287,10 @@ async function handleSelect(interaction) {
   if (interaction.customId === 'select_role') {
     const roleId = interaction.values[0];
     if (roleId === roles.devRoleId || roleId === roles.adminRoleId || roleId === roles.verifiedMemberRoleId) {
-      return interaction.update({ content: 'Không thể xin role DEV, Admin hoặc Verified Member.', components: [] });
+      return interaction.update({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5DED5BF4'), components: [] });
     }
 
-    const modal = new ModalBuilder().setCustomId(`role_info_modal_${roleId}`).setTitle('Thông tin xin role');
+    const modal = new ModalBuilder().setCustomId(`role_info_modal_${roleId}`).setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DD463CCF'));
     modal.addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder().setCustomId('name').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2AA8EFE4')).setStyle(TextInputStyle.Short).setRequired(true)
@@ -5265,7 +5307,7 @@ async function handleButton(interaction) {
   const customId = interaction.customId;
 
   if (customId === 'request_member') {
-    const modal = new ModalBuilder().setCustomId(`role_info_modal_${roles.basicMemberRoleId}`).setTitle('Thông tin xin role Member');
+    const modal = new ModalBuilder().setCustomId(`role_info_modal_${roles.basicMemberRoleId}`).setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A73E80A8'));
     modal.addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder().setCustomId('name').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2AA8EFE4')).setStyle(TextInputStyle.Short).setRequired(true)
@@ -5288,7 +5330,7 @@ async function handleButton(interaction) {
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasVerified && !hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ Bạn không có quyền duyệt request này.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EC5BF007'), ephemeral: true });
     }
 
     const action = customId.split('_')[0];
@@ -5296,7 +5338,7 @@ async function handleButton(interaction) {
     const request = pendingRequests.get(requestId);
 
     if (!request) {
-      return interaction.reply({ content: '❌ Yêu cầu này đã hết hạn hoặc đã được xử lý.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_47B2215F'), ephemeral: true });
     }
 
     pendingRequests.delete(requestId);
@@ -5307,7 +5349,7 @@ async function handleButton(interaction) {
       const newEmbed = EmbedBuilder.from(oldEmbed)
         .addFields({
           name: action === 'approve' ? '✅ Đã duyệt bởi' : '❌ Đã từ chối bởi',
-          value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: interaction.user.id }),
+          value: `<@${interaction.user.id}>`,
           inline: true
         })
         .setTimestamp();
@@ -5319,7 +5361,7 @@ async function handleButton(interaction) {
 
     // 2. Xử lý logic TỪ CHỐI
     if (action === 'deny') {
-      await interaction.followUp({ content: '❌ Đã từ chối yêu cầu cấp role.', ephemeral: true });
+      await interaction.followUp({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_60F28F28'), ephemeral: true });
       try {
         const user = await client.users.fetch(request.userId);
         await user.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_44221952'));
@@ -5405,7 +5447,7 @@ async function handleButton(interaction) {
 
         } catch (err) {
           console.error('Error approving role:', err);
-          await interaction.followUp({ content: '⚠️ Đã duyệt, nhưng bot bị chặn không thể cấp role (Vui lòng kéo Role của Bot lên cao hơn Role cần cấp trong Server Settings).', ephemeral: true });
+          await interaction.followUp({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_48B855CC'), ephemeral: true });
         }
         return;
   }
@@ -5413,7 +5455,7 @@ async function handleButton(interaction) {
     const eventId = customId.split('_')[2];
     const event = events.get(eventId);
     if (!event || event.creator !== interaction.user.id) {
-      return interaction.reply({ content: 'Không tìm thấy sự kiện hoặc bạn không phải người tạo.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A275B022'), ephemeral: true });
     }
 
     const guild = await client.guilds.fetch(GUILD_ID);
@@ -5424,7 +5466,7 @@ async function handleButton(interaction) {
     const embed = createEventEmbed(event, startTime);
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`group_join_${eventId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F52119B2')).setStyle(ButtonStyle.Primary).setEmoji('✈️'),
+      new ButtonBuilder().setCustomId(`group_join_${eventId}`).setLabel('✈️ Tham gia').setStyle(ButtonStyle.Primary).setEmoji('✈️'),
       new ButtonBuilder().setCustomId(`group_canceljoin_${eventId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B1BF3D4D')).setStyle(ButtonStyle.Secondary).setEmoji('❌')
     );
 
@@ -5452,7 +5494,7 @@ async function handleButton(interaction) {
     const startTimeDiff = event.startTime - now;
     if (startTimeDiff > 0) event.timeoutStart = setTimeout(() => startEvent(eventId), startTimeDiff);
 
-    await interaction.update({ content: '✅ Sự kiện đã được công bố thành công và đã tạo sự kiện Discord!', components: [] });
+    await interaction.update({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9A49C23B'), components: [] });
     return;
   }
   // Xử lý nút bấm Đồng ý / Từ chối thông báo AI
@@ -5465,18 +5507,18 @@ async function handleButton(interaction) {
 
     const pendingData = pendingAnnouncements.get(reqId);
     if (!pendingData) {
-      return interaction.followUp({ content: '❌ Yêu cầu đã hết hạn hoặc đã được xử lý. Vui lòng tạo thông báo mới!', ephemeral: true });
+      return interaction.followUp({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_200BC7DD'), ephemeral: true });
     }
 
     // 🛡️ CHỐNG BẤM ĐÚP
     if (pendingData.isProcessing) {
-        return interaction.followUp({ content: '⏳ Bot đang gửi, đừng bấm vội nhé...', ephemeral: true });
+        return interaction.followUp({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_544E88A6'), ephemeral: true });
     }
     pendingData.isProcessing = true;
 
     if (action === 'reject') {
       pendingAnnouncements.delete(reqId);
-      return interaction.editReply({ content: '❌ Đã hủy gửi thông báo.', embeds: [], components: [] });
+      return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_412BEDDE'), embeds: [], components: [] });
     }
 
     let finalMessage = action === 'okay' ? pendingData.aiMessage : pendingData.rawMessage;
@@ -5540,11 +5582,11 @@ async function handleButton(interaction) {
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('request_member')
-          .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_628B65DA'))
+          .setLabel('Xin Role Member')
           .setStyle(ButtonStyle.Primary)
       );
       return interaction.reply({ 
-        content: '❌ Chầm chậm đã! Bạn cần có role **Member** để chính thức tham gia server trước khi liên kết tài khoản VATSIM. Bấm nút dưới đây để xin role nha:', 
+        content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E81279D8'), 
         components: [row], 
         ephemeral: true 
       });
@@ -5586,7 +5628,7 @@ async function handleButton(interaction) {
 
       // 2. Nếu tìm thấy CID, check thẳng API VATSIM luôn khỏi bắt gửi ảnh
       if (existingCid) {
-        await interaction.editReply({ content: '⏳ Đang kiểm tra dữ liệu cập nhật trên máy chủ VATSIM...' });
+        await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0493804F') });
         const stats = await fetchVatsimStatsById(existingCid);
 
         if (!stats) {
@@ -5662,7 +5704,7 @@ async function handleButton(interaction) {
         0x2ecc71
       ));
 
-      return interaction.editReply({ content: '✅ Bot đã nhắn tin riêng (DM) cho bạn để xác thực. Vui lòng kiểm tra mục tin nhắn trực tiếp!' });
+      return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2EA17351') });
     } catch (err) {
       pendingVerifyDMs.delete(interaction.user.id);
 
@@ -5673,7 +5715,7 @@ async function handleButton(interaction) {
         0xe74c3c
       ));
 
-      return interaction.editReply({ content: '❌ Bot không thể nhắn tin DM cho bạn. **Vui lòng vào Cài đặt Quyền riêng tư của Server và Bật "Cho phép tin nhắn trực tiếp"**, sau đó thử lại!' });
+      return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C12D1B99') });
     }
   }
 
@@ -5682,7 +5724,7 @@ async function handleButton(interaction) {
     const action = parts[1];
     const eventId = parts.slice(2).join('_');
     const event = events.get(eventId);
-    if (!event) return interaction.reply({ content: 'Không tìm thấy sự kiện.', ephemeral: true });
+    if (!event) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C4D4444E'), ephemeral: true });
 
     if (action === 'join') {
       if (!event.participants.includes(interaction.user.id)) {
@@ -5692,7 +5734,7 @@ async function handleButton(interaction) {
         // Thêm user vào event tracking
         await addUserToEvent(interaction.user.id, eventId);
       }
-      await interaction.reply({ content: '✅ Đã tham gia sự kiện!', ephemeral: true });
+      await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_37ED97D9'), ephemeral: true });
       return;
     }
 
@@ -5703,7 +5745,7 @@ async function handleButton(interaction) {
       // Xóa user khỏi event tracking
       await removeUserFromEvent(interaction.user.id, eventId);
 
-      await interaction.reply({ content: '❌ Đã hủy tham gia sự kiện!', ephemeral: true });
+      await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BA1D4A4E'), ephemeral: true });
       return;
     }
 
@@ -5732,25 +5774,25 @@ async function handleButton(interaction) {
         } catch (_) { }
 
         events.delete(eventId);
-        await interaction.reply({ content: '🚫 Sự kiện đã bị hủy!', ephemeral: true });
+        await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_88EEE97D'), ephemeral: true });
       } else {
-        await interaction.reply({ content: 'Bạn không có quyền hủy sự kiện.', ephemeral: true });
+        await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6547424E'), ephemeral: true });
       }
     }
   }
 }
 
 async function handleGroupFlight(interaction) {
-  const modal = new ModalBuilder().setCustomId('group_modal').setTitle('Tạo Group Flight');
+  const modal = new ModalBuilder().setCustomId('group_modal').setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AE7F4A28'));
   modal.addComponents(
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('dep').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FB1E74CA')).setStyle(TextInputStyle.Short).setRequired(true)
+      new TextInputBuilder().setCustomId('dep').setLabel('Departure (ICAO)').setStyle(TextInputStyle.Short).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('arr').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1DC53808')).setStyle(TextInputStyle.Short).setRequired(true)
+      new TextInputBuilder().setCustomId('arr').setLabel('Arrival (ICAO)').setStyle(TextInputStyle.Short).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('route').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9405C3AF')).setStyle(TextInputStyle.Paragraph).setRequired(true)
+      new TextInputBuilder().setCustomId('route').setLabel('Route').setStyle(TextInputStyle.Paragraph).setRequired(true)
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('time').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_07447312')).setStyle(TextInputStyle.Short).setRequired(true)
@@ -5767,7 +5809,7 @@ async function handleSendAward(interaction) {
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
       return interaction.reply({
-        content: '❌ Chỉ admin và dev mới có thể sử dụng lệnh này!',
+        content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9FC21886'),
         ephemeral: true
       });
     }
@@ -5787,21 +5829,21 @@ async function handleSendAward(interaction) {
       await new Promise(resolve => setTimeout(resolve, 1000)); // Delay 1 giây
       await sendPilotAward(interaction);
       await interaction.followUp({
-        content: '✅ Đã gửi award cho cả ATC và pilot!',
+        content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5FBA5216'),
         ephemeral: true
       });
 
     } else if (subcommand === 'reset_status') {
       await resetAwardStatus();
       await interaction.editReply({
-        content: '✅ Đã reset trạng thái award! Có thể gửi lại award cho tháng này.'
+        content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0971AF36')
       });
     }
   } catch (err) {
     console.error('Error in handleSendAward:', err);
     try {
       await interaction.editReply({
-        content: '❌ Đã có lỗi khi thực hiện lệnh!'
+        content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_25CB69C7')
       });
     } catch (_) { }
   }
@@ -5815,7 +5857,7 @@ async function handleModal(interaction) {
     const cid = parseInt(cidStr);
 
     if (isNaN(cid)) {
-      return interaction.reply({ content: '❌ CID không hợp lệ. Vui lòng nhập số.', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0C2B9599'), ephemeral: true });
     }
 
     await interaction.deferReply({ ephemeral: true }); // Chờ API VATSIM phản hồi
@@ -5874,8 +5916,8 @@ async function handleModal(interaction) {
     const timeStr = interaction.fields.getTextInputValue('time');
     const startTime = parseUTCDateTime(timeStr);
 
-    if (isNaN(startTime)) return interaction.reply({ content: 'Giờ không hợp lệ. Vui lòng dùng định dạng YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
-    if (startTime <= Date.now()) return interaction.reply({ content: 'Thời gian bắt đầu phải ở tương lai.', ephemeral: true });
+    if (isNaN(startTime)) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FDA133A4'), ephemeral: true });
+    if (startTime <= Date.now()) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D7FCD599'), ephemeral: true });
 
     const eventId = Date.now().toString();
     events.set(eventId, {
@@ -5916,10 +5958,10 @@ async function handleModal(interaction) {
       // Cập nhật luôn vào RAM để AI đọc được ngay lập tức
       profiles[interaction.user.id] = { name, age, bio };
 
-      await interaction.reply({ content: '✅ Profile của bạn đã được lưu vĩnh viễn lên MongoDB!', ephemeral: true });
+      await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_50E715F4'), ephemeral: true });
     } catch (err) {
       console.error(err);
-      await interaction.reply({ content: '⚠️ Lỗi lưu Database.', ephemeral: true });
+      await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C3C5CE60'), ephemeral: true });
     }
     return;
   }
@@ -5978,7 +6020,7 @@ async function handleModal(interaction) {
              }
           }
 
-          if (alertMsg) embedDesc += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1E1AD719', { v0: alertMsg });
+          if (alertMsg) embedDesc += `\n${alertMsg}`;
 
           const embed = new EmbedBuilder()
             .setTitle('Role Request')
@@ -5988,8 +6030,8 @@ async function handleModal(interaction) {
           const mentionText = `<@&${roles.adminRoleId}> <@&${roles.devRoleId}> <@&${roles.verifiedMemberRoleId}>`;
 
           const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6F735165')).setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId(`deny_${requestId}`).setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3682D166')).setStyle(ButtonStyle.Danger)
+            new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel('Approve').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`deny_${requestId}`).setLabel('Deny').setStyle(ButtonStyle.Danger)
           );
 
           const sentMessage = await channel.send({
@@ -6019,7 +6061,7 @@ async function remindParticipants(eventId) {
 
     const embed = EmbedBuilder.from(message.embeds[0])
       .setColor(0xffa500)
-      .setFooter({ text: 'Sự kiện sắp bắt đầu!', iconURL: 'https://cdn-icons-png.flaticon.com/512/1828/1828884.png' });
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A3E30BCC'), iconURL: 'https://cdn-icons-png.flaticon.com/512/1828/1828884.png' });
 
     await message.edit({
       content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3BDDC1F1', { v0: roles.basicMemberRoleId }),
@@ -6050,10 +6092,10 @@ async function startEvent(eventId) {
     const message = await channel.messages.fetch(event.messageId);
 
     const embed = EmbedBuilder.from(message.embeds[0])
-      .setTitle('🚀 Group Flight Đang Diễn Ra!')
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_548BD2B2'))
       .setColor(0x00ff00)
-      .setDescription('🎯 **Sự kiện đang diễn ra!** Chúc mọi người có chuyến bay vui vẻ! ✈️')
-      .setFooter({ text: 'Sự kiện đang diễn ra', iconURL: 'https://cdn-icons-png.flaticon.com/512/929/929430.png' });
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_13DEC66D'))
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3FD89422'), iconURL: 'https://cdn-icons-png.flaticon.com/512/929/929430.png' });
 
     await message.edit({
       content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3BE66820', { v0: roles.basicMemberRoleId }),
@@ -6114,7 +6156,7 @@ async function handleSubmitProfile(interaction) {
   // 3. Tạo ô nhập Bio
   const bioInput = new TextInputBuilder()
     .setCustomId('bio')
-    .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_713A01AB'))
+    .setLabel('Bio')
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(false);
   // Chỉ điền sẵn nếu có bio cũ
@@ -6134,7 +6176,7 @@ async function handleSubmitProfile(interaction) {
 async function handleAnnouncement(interaction) {
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
-  if (!hasDev && !hasAdmin) return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+  if (!hasDev && !hasAdmin) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6A40FC87'), ephemeral: true });
 
   const channel = interaction.options.getChannel('channel');
   const rawMessage = interaction.options.getString('message');
@@ -6145,7 +6187,7 @@ async function handleAnnouncement(interaction) {
   if (timeStr) {
     targetTime = parseUTCDateTime(timeStr);
     if (isNaN(targetTime) || targetTime <= Date.now()) {
-      return interaction.reply({ content: '❌ Giờ không hợp lệ hoặc đã qua. Định dạng đúng: YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A0131CF2'), ephemeral: true });
     }
   }
 
@@ -6234,12 +6276,12 @@ async function handleAnnouncement(interaction) {
     : aiMessage;
 
   const embed = new EmbedBuilder()
-    .setTitle('✨ Gợi ý từ Gemini')
-    .setDescription('Mình đã viết lại nội dung của bạn cho chuyên nghiệp hơn. Bạn muốn dùng bản nào để gửi đi?\n\n⚠️ *Lưu ý: Bảng preview bên dưới có thể bị ẩn bớt nếu quá dài, nhưng khi bạn bấm nút gửi thì nội dung sẽ đăng lên ĐẦY ĐỦ 100%.*')
+    .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68813418'))
+    .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_38F69A67'))
     .addFields(
-      { name: '📝 Bản gốc của bạn', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: previewRaw }) },
-      { name: '🤖 Bản do AI nâng cấp', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: previewAi }) },
-      { name: '⏰ Lịch trình', value: targetTime ? `<t:${Math.floor(targetTime / 1000)}:F>` : 'Gửi ngay lập tức' }
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_01999984'), value: `\`\`\`\n${previewRaw}\n\`\`\`` },
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_75E8BAD6'), value: `\`\`\`\n${previewAi}\n\`\`\`` },
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_58F8317B'), value: targetTime ? `<t:${Math.floor(targetTime / 1000)}:F>` : 'Gửi ngay lập tức' }
     )
     .setColor(0x3498db);
 
@@ -6257,14 +6299,14 @@ async function handleAnnouncement(interaction) {
 async function handleSetupAtcNoti(interaction) {
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   if (!hasAdmin && interaction.user.id !== OWNER_ID) {
-    return interaction.reply({ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
+    return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AD719A18'), ephemeral: true });
   }
 
   const embed = new EmbedBuilder()
-    .setTitle('📡 Đăng ký nhận thông báo BOT')
-    .setDescription('Hãy **React với emoji 🤖 ở tin nhắn này** để tự động nhận role <@&' + ATC_NOTI_ROLE_ID + '>. Bạn sẽ được thông báo khi BOT có thông báo mới')
+    .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_067287F3'))
+    .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_99CE10D2'))
     .setColor(0x3498db)
-    .setFooter({ text: 'Bỏ react để hủy đăng ký nhận thông báo' });
+    .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F5A7BE3A') });
 
   const msg = await interaction.channel.send({ embeds: [embed] });
   await msg.react('🤖');
@@ -6275,7 +6317,7 @@ async function handleSetupAtcNoti(interaction) {
   fs.writeFileSync(REACTION_ROLES_FILE, JSON.stringify(reactionRoleData, null, 2));
   // ------------------------------------
 
-  await interaction.reply({ content: '✅ Đã khởi tạo tin nhắn lấy role và lưu vào cơ sở dữ liệu thành công!', ephemeral: true });
+  await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E923688D'), ephemeral: true });
 }
 
 async function ensureVatsimMessageExists() {
@@ -6349,7 +6391,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     .map(r => `<@&${r.id}>`)
     .join(', ') || 'Không có role nào';
 
-  description += `\n\n**📋 Role hiện tại:**\n${currentRoles}`;
+  description += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6FF7F5D1', { v0: currentRoles });
 
   const embed = createLogEmbed('👥 Member Roles Updated', description, 0xf39c12);
 
@@ -6438,7 +6480,7 @@ client.on('messageDelete', async (message) => {
       }
 
       const attachmentsText = attachmentLinks.join('\n');
-      embed.addFields({ name: '📎 Tệp đính kèm', value: attachmentsText.substring(0, 1024), inline: false });
+      embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F6B4115C'), value: attachmentsText.substring(0, 1024), inline: false });
 
       // Bonus: Treo thẳng cái ảnh bị xóa bự chà bá lên Log cho Admin dễ soi
       if (firstPermanentImg) {
@@ -6536,9 +6578,9 @@ client.on('threadCreate', async (thread) => {
     const fetchedLogs = await thread.guild.fetchAuditLogs({ type: 110, limit: 5 });
     const log = fetchedLogs.entries.find(e => e.target.id === thread.id && Math.abs(e.createdTimestamp - Date.now()) < 5000);
     if (log?.executor) embed.addFields({ name: '🛠️ Created by', value: getUserIdentifier(log.executor), inline: false });
-    else if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: thread.ownerId }), inline: false });
+    else if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value: `<@${thread.ownerId}>`, inline: false });
   } catch (err) {
-    if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: thread.ownerId }), inline: false });
+    if (thread.ownerId) embed.addFields({ name: '🛠️ Created by', value: `<@${thread.ownerId}>`, inline: false });
   }
 
   await sendLog(embed);
@@ -6854,7 +6896,7 @@ async function handleMetar(interaction) {
 
     // 3. Xử lý hiển thị METAR
     if (metarText) {
-      replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8A0CB816', { v0: icao, v1: metarText });
+      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`${metarText}\`\`\``;
     } else {
       replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_185E275D', { v0: icao });
     }
@@ -6930,18 +6972,18 @@ async function handleMetar(interaction) {
       // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr
       if (atisData.arrival && atisData.departure && atisData.arrival === atisData.departure) {
         const formatted = formatATISText(atisData.arrival);
-        replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DD31CDE2', { v0: icao, v1: formatted });
+        replyContent += `\n📻 **D-ATIS(${icao}):**\n\`\`\`${formatted}\`\`\``;
       }
       // Trường hợp 2: Tách biệt rõ ràng
       else {
         if (atisData.arrival) {
           const formattedArr = formatATISText(atisData.arrival);
-          replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CF8E06B3', { v0: icao, v1: formattedArr });
+          replyContent += `\n🛬 **Arrival ATIS (${icao}):**\n\`\`\`${formattedArr}\`\`\``;
         }
 
         if (atisData.departure) {
           const formattedDep = formatATISText(atisData.departure);
-          replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0561B3B6', { v0: icao, v1: formattedDep });
+          replyContent += `\n🛫 **Departure ATIS (${icao}):**\n\`\`\`${formattedDep}\`\`\``;
         }
       }
     } else {
@@ -6952,7 +6994,7 @@ async function handleMetar(interaction) {
 
   } catch (err) {
     console.error('METAR/ATIS error:', err);
-    await interaction.editReply({ content: '❌ Đã có lỗi khi lấy dữ liệu METAR/ATIS. Bạn thử lại sau nhé!' });
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4DCD3C4A') });
   }
 }
 
@@ -6986,20 +7028,20 @@ async function handleRunway(interaction) {
     const windSpeed = parseInt(windMatch[2], 10);
 
     let embed = new EmbedBuilder()
-      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_798F2F7B', { v0: icao }))
+      .setTitle(`🛫 Active Runway Indicator - ${icao}`)
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_75BAEF5B', { v0: metar }))
       .setColor(0x3498db)
       .setTimestamp();
 
     // Nếu gió đổi hướng liên tục (VRB) hoặc quá nhẹ (<3 KT)
     if (windDirStr === 'VRB' || windSpeed < 3) {
-      embed.addFields({ name: '🌬️ Gió', value: 'Gió nhẹ hoặc đổi hướng liên tục (Calm/Variable).', inline: false });
-      embed.addFields({ name: '✅ Đề xuất', value: 'Có thể sử dụng đường băng tùy ý hoặc theo quy trình tiêu chuẩn của ATC/Sân bay.', inline: false });
+      embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C3EBA294'), value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_16B5BA8B'), inline: false });
+      embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_78E65E15'), value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BABF75C7'), inline: false });
       return await interaction.editReply({ embeds: [embed] });
     }
 
     const windDir = parseInt(windDirStr, 10);
-    embed.addFields({ name: '🌬️ Gió hiện tại', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9618842C', { v0: windDir, v1: windSpeed }), inline: false });
+    embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F8499809'), value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9618842C', { v0: windDir, v1: windSpeed }), inline: false });
 
     // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỪ OPENAIP (ĐÃ FIX CƠ CHẾ TÌM KIẾM)
     let runways = [];
@@ -7158,7 +7200,7 @@ async function handleRunway(interaction) {
     // ==========================================
     if (runways.length === 0) {
       embed.addFields({
-        name: '⚠️ Lưu ý',
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_74DBA104'),
         value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C0D1B8C0', { v0: icao, v1: windDir })
       });
     } else {
@@ -7182,22 +7224,22 @@ async function handleRunway(interaction) {
       const crosswind = Math.abs(Math.round(Math.sin(angleRad) * windSpeed));
 
       embed.addFields({
-        name: '🎯 Đường băng thuận lợi nhất',
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C9AA3383'),
         value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_63D760BB', { v0: bestRunway.id, v1: minDiff }),
         inline: false
       });
       embed.addFields({
-        name: '✈️ Phân tích thành phần gió',
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4EB912FB'),
         value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0B521CDE', { v0: headwind, v1: crosswind }),
         inline: false
       });
-      embed.setFooter({ text: `Dữ liệu đường băng: ${dataSource} • Lưu ý: Luôn tuân theo huấn lệnh của ATC.` });
+      embed.setFooter({ text : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DE1C1C88', { v0: dataSource }) });
     }
 
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     console.error('Runway calc error:', error);
-    await interaction.editReply({ content: '❌ Có lỗi xảy ra khi tính toán đường băng.' });
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BAC15F9A') });
   }
 }
 
@@ -7207,7 +7249,7 @@ async function handleTaf(interaction) {
   await interaction.deferReply();
 
   if (!CHECKWX_API_KEY) {
-    return interaction.editReply({ content: '❌ Thiếu cấu hình CHECKWX_API_KEY trong biến môi trường. Admin cần kiểm tra lại!' });
+    return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DE7C91E7') });
   }
 
   try {
@@ -7234,12 +7276,12 @@ async function handleTaf(interaction) {
     const validTo = tafData.timestamp?.to ? `Đến ${tafData.timestamp.to}` : '';
 
     const embed = new EmbedBuilder()
-      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AF48574B', { v0: icao }))
+      .setTitle(`🌦️ TAF Decoder - ${icao}`)
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FC64E637', { v0: validFrom, v1: validTo, v2: tafData.raw_text }))
       .setColor(0x00A8FF) // Màu xanh dương chuyên nghiệp
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/1163/1163624.png')
       .setTimestamp()
-      .setFooter({ text: 'Dữ liệu được bóc tách từ CheckWX Aviation API' });
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FB5BC9F5') });
 
     if (tafData.forecast && tafData.forecast.length > 0) {
       const MAX_FORECASTS = 6; // Hiển thị chi tiết 6 mốc thay đổi thời tiết
@@ -7303,7 +7345,7 @@ async function handleTaf(interaction) {
         let niceIndicator = indicatorMap[indicatorCode] || `🔹 ${indicatorCode}`;
 
         embed.addFields({
-          name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2F343072', { v0: niceIndicator, v1: timeStr }),
+          name: `${niceIndicator} [${timeStr}]`,
           value: details.length > 0 ? details.join('\n') : '> Thời tiết không có hiện tượng cản trở.',
           inline: false
         });
@@ -7322,7 +7364,7 @@ async function handleTaf(interaction) {
 
   } catch (error) {
     console.error('TAF fetch error:', error);
-    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi gọi CheckWX API để giải mã TAF. Vui lòng thử lại sau!' });
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1338128D') });
   }
 }
 
@@ -7454,11 +7496,11 @@ async function handleStats(interaction) {
 
   // Xây dựng Giao Diện (Embed)
   const embed = new EmbedBuilder()
-    .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5280B75C', { v0: stats.id }))
+    .setTitle(`🔍 ${stats.id} - MEMBER INFO`)
     .setColor(0x2b2d31) // Màu nền tối giống trong ảnh
     .addFields(
       // Hàng 1
-      { name: '📡 PID', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_10533D7D', { v0: stats.id }), inline: true },
+      { name: '📡 PID', value: `${stats.id}`, inline: true },
       { name: '🗓️ REGISTER DATE', value: formatVatsimDate(stats.reg_date), inline: true },
       { name: '\u200b', value: '\u200b', inline: true }, // Cột tàng hình để ép xuống dòng
 
@@ -7491,7 +7533,7 @@ async function handleStats(interaction) {
     for (const [pos, hours] of Object.entries(stats.atc_breakdown)) {
       if (hours > 0) {
         breakdownFields.push({
-          name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_69AEDD5C', { v0: pos.toUpperCase() }),
+          name: `🔵 ${pos.toUpperCase()}`,
           value: hours.toFixed(2),
           inline: true
         });
@@ -7529,7 +7571,7 @@ async function ensureACDMMessageExists() {
   // Nếu không tìm thấy thì mới tạo mới
   try {
     const channel = await client.channels.fetch(ACDM_CHANNEL_ID);
-    const embed = new EmbedBuilder().setTitle('🛫 VCLvACC ACDM Dashboard').setDescription('Đang thiết lập kết nối API...').setTimestamp();
+    const embed = new EmbedBuilder().setTitle('🛫 VCLvACC ACDM Dashboard').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CBE6BAEE')).setTimestamp();
     const sent = await channel.send({ embeds: [embed] });
 
     acdmMessageStore = { messageIds: [sent.id], channelId: channel.id };
@@ -7550,7 +7592,7 @@ async function handleEvent(interaction) {
     const response = await fetch('https://my.vatsim.net/api/v1/events/all');
 
     if (!response.ok) {
-      return await interaction.editReply({ content: '❌ Không thể kết nối đến hệ thống sự kiện của VATSIM.' });
+      return await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9DA31529') });
     }
 
     const data = await response.json();
@@ -7582,10 +7624,10 @@ async function handleEvent(interaction) {
       const endTime = new Date(ev.end_time);
 
       const embed = new EmbedBuilder()
-        .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E5CEB46C', { v0: ev.name }))
+        .setTitle(`📌 ${ev.name}`)
         .setColor(0x9b59b6)
         .addFields({
-          name: '⏰ Thời gian',
+          name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0ED49B2C'),
           value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F9D5BAA1', { v0: Math.floor(startTime.getTime() / 1000), v1: Math.floor(endTime.getTime() / 1000) }),
           inline: false
         });
@@ -7629,7 +7671,7 @@ async function handleEvent(interaction) {
 
   } catch (error) {
     console.error('Lỗi khi fetch sự kiện VATSIM:', error);
-    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi tra cứu sự kiện.' });
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CB9C2763') });
   }
 }
 // ===================== HELPER: CÀO ROUTE TỪ WEB =====================
@@ -7707,7 +7749,7 @@ async function handleRoute(interaction) {
     // ================= BẮT ĐẦU CHỈNH SỬA GIAO DIỆN =================
     const embed = new EmbedBuilder()
       .setColor(0x3B3F45) // Đổi màu sắc cho giống viền nền của hình ảnh (tùy chọn)
-      .setAuthor({ name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_60DD2187', { v0: dep, v1: arr }) }) // Thay cho title để format đẹp như hình
+      .setAuthor({ name: `🛰️ Route Info - ${dep} > ${arr}` }) // Thay cho title để format đẹp như hình
       .addFields(
         { name: '🛫 Departure', value: dep, inline: true },
         { name: '🛬 Arrival', value: arr, inline: true }
@@ -7718,14 +7760,14 @@ async function handleRoute(interaction) {
       routesList.forEach((rt, index) => {
         embed.addFields({
           name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_231C991F', { v0: index + 1 }),
-          value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: rt }),
+          value: `\`\`\`\n${rt}\n\`\`\``,
           inline: false
         });
       });
     } else {
       embed.addFields({
         name: '🗺️ Flight Route',
-        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: routesList }),
+        value: `\`\`\`\n${routesList}\n\`\`\``,
         inline: false
       });
     }
@@ -7752,12 +7794,12 @@ async function handleRoute(interaction) {
     // Tạo hàng chứa các nút bấm
     const actionRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6D3F8F7C'))
+        .setLabel('Import to SimBrief')
         .setStyle(ButtonStyle.Link)
         .setURL(simbriefUrl)
         .setEmoji('📝'),
       new ButtonBuilder()
-        .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E0F1D436'))
+        .setLabel('Import to VATSIM')
         .setStyle(ButtonStyle.Link)
         .setURL(vatsimUrl)
         .setEmoji('🌐')
@@ -7767,7 +7809,7 @@ async function handleRoute(interaction) {
     await interaction.editReply({ embeds: [embed], components: [actionRow] });
   } catch (error) {
     console.error('Lỗi lệnh route:', error);
-    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi đọc/tải dữ liệu route.' });
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0A4F71A1') });
   }
 }
 
@@ -7777,7 +7819,7 @@ async function handleEditAnnoun(interaction) {
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-    return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+    return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6A40FC87'), ephemeral: true });
   }
 
   const channel = interaction.options.getChannel('channel');
@@ -7788,7 +7830,7 @@ async function handleEditAnnoun(interaction) {
   if (scheduledIndex !== -1) {
     const modal = new ModalBuilder()
       .setCustomId(`edit_sched_${messageId}`)
-      .setTitle('Sửa thông báo chờ lịch');
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_024D8122'));
 
     const textInput = new TextInputBuilder()
       .setCustomId('new_content')
@@ -7803,17 +7845,17 @@ async function handleEditAnnoun(interaction) {
 
   // 2. Nếu KHÔNG PHẢI lịch trình hẹn giờ, bắt buộc phải có Channel để móc tin nhắn cũ
   if (!channel) {
-    return interaction.reply({ content: '❌ Đây không phải ID lịch trình. Nếu bạn muốn sửa tin nhắn đã gửi, vui lòng chọn thêm mục `channel` (kênh chứa tin nhắn đó) nhé!', ephemeral: true });
+    return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A5D37186'), ephemeral: true });
   }
 
   try {
     const targetMsg = await channel.messages.fetch(messageId);
-    if (!targetMsg) return interaction.reply({ content: '❌ Không tìm thấy tin nhắn với ID này.', ephemeral: true });
+    if (!targetMsg) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A73CF240'), ephemeral: true });
 
     // Tạo bảng nhập (Modal) cho tin nhắn đã gửi
     const modal = new ModalBuilder()
       .setCustomId(`editannoun_${channel.id}_${messageId}`)
-      .setTitle('Sửa thông báo');
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_807392E6'));
 
     const textInput = new TextInputBuilder()
       .setCustomId('new_content')
@@ -7829,7 +7871,7 @@ async function handleEditAnnoun(interaction) {
 
   } catch (error) {
     console.error('Lỗi lấy tin nhắn cũ:', error);
-    await interaction.reply({ content: '❌ Có lỗi xảy ra, đảm bảo ID đúng và bot có quyền xem kênh đó.', ephemeral: true });
+    await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C00CD945'), ephemeral: true });
   }
 }
 
@@ -7837,7 +7879,7 @@ async function handleCancelAnnoun(interaction) {
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-    return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+    return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6A40FC87'), ephemeral: true });
   }
 
   const id = interaction.options.getString('id');
@@ -7866,24 +7908,24 @@ async function handleVatseaRankCommand(interaction) {
   if (startStr) {
     startTime = new Date(startStr);
     if (isNaN(startTime.getTime())) {
-      return interaction.editReply({ content: '❌ Lỗi: Thời gian bắt đầu sai định dạng (Vui lòng dùng chuẩn ISO như `2023-10-01T00:00:00Z`).' });
+      return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_72DB4980') });
     }
   }
 
   if (endStr) {
     endTime = new Date(endStr);
     if (isNaN(endTime.getTime())) {
-      return interaction.editReply({ content: '❌ Lỗi: Thời gian kết thúc sai định dạng.' });
+      return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FC3B838A') });
     }
   }
 
   if (endTime < startTime) {
-    return interaction.editReply({ content: '❌ Thời gian kết thúc không thể đứng trước thời gian bắt đầu.' });
+    return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_00C04628') });
   }
 
   try {
     const embed = await updateVatseaLeaderboardEmbed(startTime, endTime);
-    await interaction.editReply({ content: '✅ Đã cập nhật thành công bảng xếp hạng VATSEA!', embeds: [embed] });
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7472948C'), embeds: [embed] });
   } catch (error) {
     await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_54F7E5F7', { v0: error.message }) });
   }
@@ -7895,7 +7937,7 @@ async function handleNotam(interaction) {
   await interaction.deferReply();
 
   if (!CHECKWX_API_KEY) {
-    return interaction.editReply({ content: '❌ Thiếu cấu hình CHECKWX_API_KEY trong biến môi trường. Admin cần kiểm tra lại!' });
+    return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DE7C91E7') });
   }
 
   try {
@@ -7931,8 +7973,8 @@ async function handleNotam(interaction) {
       const safeText = notamText.length > 1000 ? notamText.slice(0, 1000) + '...' : notamText;
 
       embed.addFields({
-        name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3C87EFAC', { v0: i + 1 }),
-        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: safeText }),
+        name: `📌 NOTAM #${i + 1}`,
+        value: `\`\`\`\n${safeText}\n\`\`\``,
         inline: false
       });
     }
@@ -7949,7 +7991,7 @@ async function handleNotam(interaction) {
 
   } catch (error) {
     console.error('NOTAM fetch error:', error);
-    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu NOTAM. Vui lòng thử lại sau!' });
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C98B9048') });
   }
 }
 
@@ -7966,7 +8008,7 @@ async function handleSimbrief(interaction) {
       username = simbriefUsersData[discordId];
     } else {
       return await interaction.editReply({
-        content: '❌ Bạn chưa nhập username SimBrief. Lần đầu tiên sử dụng lệnh, vui lòng gõ tên username để bot ghi nhớ lại nhé!'
+        content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CD67F09A')
       });
     }
   } else {
@@ -7987,7 +8029,7 @@ async function handleSimbrief(interaction) {
     const response = await fetch(`https://www.simbrief.com/api/xml.fetcher.php?username=${encodeURIComponent(username)}&json=1`);
 
     if (!response.ok) {
-      return await interaction.editReply({ content: '❌ Không thể kết nối đến máy chủ SimBrief.' });
+      return await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B0D414F8') });
     }
 
     const data = await response.json();
@@ -8020,24 +8062,24 @@ async function handleSimbrief(interaction) {
 
     const embed = new EmbedBuilder()
       .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_90A16B58', { v0: username }))
-      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CE5B5755', { v0: dep, v1: arr, v2: callsign || 'N/A' }))
+      .setDescription(`**${dep} ➔ ${arr}** | Callsign: **${callsign || 'N/A'}**`)
       .setColor(0x3498db)
       .addFields(
-        { name: '🛩️ Aircraft', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: acft }), inline: true },
-        { name: '🛫 Cruise Alt', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: crzAlt }), inline: true },
-        { name: '📈 Cost Index', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: ci }), inline: true },
-        { name: '⚖️ ZFW', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C71AD253', { v0: zfw }), inline: true },
-        { name: '⛽ Block Fuel', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C71AD253', { v0: blockFuel }), inline: true },
-        { name: '🧭 Route', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68A1141F', { v0: route }), inline: false }
+        { name: '🛩️ Aircraft', value: `**${acft}**`, inline: true },
+        { name: '🛫 Cruise Alt', value: `**${crzAlt}**`, inline: true },
+        { name: '📈 Cost Index', value: `**${ci}**`, inline: true },
+        { name: '⚖️ ZFW', value: `**${zfw}** kgs`, inline: true },
+        { name: '⛽ Block Fuel', value: `**${blockFuel}** kgs`, inline: true },
+        { name: '🧭 Route', value: `\`\`\`\n${route}\n\`\`\``, inline: false }
       )
-      .setFooter({ text: 'Dữ liệu trực tiếp từ SimBrief', iconURL: 'https://www.simbrief.com/logo/simbrief_logo_icon.png' })
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8184AE5B'), iconURL: 'https://www.simbrief.com/logo/simbrief_logo_icon.png' })
       .setTimestamp();
 
     await interaction.editReply({ embeds: [embed] });
 
   } catch (error) {
     console.error('SimBrief fetch error:', error);
-    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra. Username không tồn tại hoặc API SimBrief bị sập.' });
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_334EBC71') });
   }
 }
 
@@ -8055,7 +8097,7 @@ async function handleOnlineAtc(interaction) {
     const response = await fetch('https://data.vatsim.net/v3/vatsim-data.json');
 
     if (!response.ok) {
-      return await interaction.editReply({ content: '❌ Không thể kết nối đến máy chủ VATSIM lúc này.' });
+      return await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D18703EA') });
     }
 
     const data = await response.json();
@@ -8083,7 +8125,7 @@ async function handleOnlineAtc(interaction) {
       .setColor(0x2ecc71)
       .setThumbnail('https://cdn-icons-png.freepik.com/512/6938/6938996.png')
       .setTimestamp()
-      .setFooter({ text: 'Dữ liệu trực tiếp từ VATSIM' });
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AEC54889') });
 
     // Bộ dịch Rating
     const vatsimRatings = {
@@ -8101,7 +8143,7 @@ async function handleOnlineAtc(interaction) {
         : 'Đang thiết lập...';
 
       embed.addFields({
-        name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_805EE57A', { v0: c.callsign }),
+        name: `📻 ${c.callsign}`,
         value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7FED98BC', { v0: c.name || 'Ẩn danh', v1: rating, v2: freq, v3: logonUnix }),
         inline: false
       });
@@ -8111,7 +8153,7 @@ async function handleOnlineAtc(interaction) {
 
   } catch (error) {
     console.error('Lỗi khi tra cứu ATC online:', error);
-    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu từ VATSIM.' });
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_42EC7EF2') });
   }
 }
 
@@ -8157,7 +8199,7 @@ function createMusicDashboard(queue) {
         new EmbedBuilder()
           .setColor(0x2b2d31)
           .setAuthor({ name: 'TK.CHILL PLAYER', iconURL: 'https://cdn-icons-png.flaticon.com/512/3844/3844724.png' })
-          .setDescription('💤 **Hàng chờ trống!** Bot đang nằm chờ ở đây. Hãy dùng lệnh `/play` để thêm nhạc tiếp nhé...')
+          .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BECD4A50'))
       ],
       components: []
     };
@@ -8185,7 +8227,7 @@ function createMusicDashboard(queue) {
     .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B6FF535C', { v0: progressBar, v1: elapsedStr, v2: currentSong.durationRaw, v3: currentSong.requester, v4: volPercent, v5: loopText }))
     .setImage(currentSong.thumbnail)
     .setColor(0x2b2d31)
-    .setFooter({ text: `Hàng chờ: ${queue.songs.length - 1} bài • Độc quyền Tk.Chill` });
+    .setFooter({ text : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_62E6654F', { v0: queue.songs.length - 1 }) });
 
   // HÀNG NÚT 1: CHUYỂN BÀI & LẶP (4 nút)
   const row1 = new ActionRowBuilder().addComponents(
@@ -8289,7 +8331,7 @@ async function handlePlayMusic(interaction) {
   const voiceChannel = interaction.member.voice.channel;
 
   if (!voiceChannel) {
-    return interaction.reply({ content: '❌ Bạn phải vào một kênh thoại (Voice Channel) trước mới nghe nhạc được chứ!', ephemeral: true });
+    return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E286BDA6'), ephemeral: true });
   }
 
   await interaction.deferReply();
@@ -8547,7 +8589,7 @@ async function handlePlayMusic(interaction) {
       // Chỉ hiển thị 25 bài đầu tiên lên Menu Dropdown (Giới hạn của Discord)
       const options = songsToAdd.slice(0, 25).map((song, index) => ({
         label: song.title.length > 50 ? song.title.substring(0, 47) + '...' : song.title,
-        value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0E085810', { v0: searchId, v1: index })
+        value: `${searchId}_${index}`
       }));
 
       const menu = new ActionRowBuilder().addComponents(
@@ -8597,7 +8639,7 @@ async function handleQueue(interaction) {
   // Nếu không có nhạc hoặc chỉ có mỗi 1 bài đang hát (hàng chờ = 0)
   if (!queue || queue.songs.length <= 1) {
     return interaction.reply({
-      content: '📭 **Hàng chờ hiện tại đang trống!** Hãy dùng lệnh `/play` để thêm nhạc vào nhé.',
+      content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6654B896'),
       ephemeral: true
     });
   }
@@ -8610,7 +8652,7 @@ async function handleQueue(interaction) {
   const upcomingSongs = queue.songs.slice(1, 11);
 
   const embed = new EmbedBuilder()
-    .setAuthor({ name: '📜 DANH SÁCH HÀNG CHỜ', iconURL: 'https://cdn-icons-png.flaticon.com/512/3281/3281289.png' })
+    .setAuthor({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_911C54AD'), iconURL: 'https://cdn-icons-png.flaticon.com/512/3281/3281289.png' })
     .setColor(0x2b2d31)
     .setThumbnail(currentSong.thumbnail)
     .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_42C4070B', { v0: currentSong.title, v1: currentSong.url, v2: currentSong.requester }));
@@ -8618,17 +8660,17 @@ async function handleQueue(interaction) {
   // Duyệt qua 10 bài tiếp theo và in ra
   upcomingSongs.forEach((song, index) => {
     embed.addFields({
-      name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_47454EDF', { v0: index + 1, v1: song.title }),
-      value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_99DAEC98', { v0: song.durationRaw, v1: song.requester }),
+      name: `\`${index + 1}.\` ${song.title}`,
+      value: `⏱️ \`${song.durationRaw}\` | 👤 <@${song.requester}>`,
       inline: false
     });
   });
 
   // Nếu hàng chờ dài hơn 10 bài, báo cho người dùng biết còn bài bị ẩn
   if (queue.songs.length > 11) {
-    embed.setFooter({ text: `...và ${queue.songs.length - 11} bài hát khác đang chờ được phát.` });
+    embed.setFooter({ text : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8F39B1BF', { v0: queue.songs.length - 11 }) });
   } else {
-    embed.setFooter({ text: `Tổng cộng có ${queue.songs.length - 1} bài trong hàng chờ.` });
+    embed.setFooter({ text : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_64346546', { v0: queue.songs.length - 1 }) });
   }
 
   await interaction.editReply({ embeds: [embed] });
@@ -8641,7 +8683,7 @@ async function handleClearQueue(interaction) {
   // Nếu không có hàng chờ hoặc chỉ có mỗi 1 bài đang hát thì không có gì để xóa
   if (!queue || queue.songs.length <= 1) {
     return interaction.reply({
-      content: '❌ Hàng chờ đang trống sẵn rồi, không có gì để dọn đâu!',
+      content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C4653D5C'),
       ephemeral: true
     });
   }
@@ -8665,21 +8707,21 @@ async function handleSetupVatsimVerify(interaction) {
   const hasAdmin = memberRoles?.cache?.has(roles.adminRoleId) || (Array.isArray(memberRoles) && memberRoles.includes(roles.adminRoleId));
 
   if (!hasAdmin && interaction.user.id !== OWNER_ID) {
-    return interaction.reply({ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
+    return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AD719A18'), ephemeral: true });
   }
 
   const embed = new EmbedBuilder()
-    .setTitle('🔗 LIÊN KẾT TÀI KHOẢN VATSIM')
-    .setDescription('Nhấn vào nút bên dưới và nhập **VATSIM ID (CID)** của bạn để hệ thống kiểm tra dữ liệu bay và tự động cấp Role.\n\n✈️ **VATSIM Pilot:** Yêu cầu bay trên 10 giờ.\n📡 **VATSIM ATC:** Yêu cầu Rating từ S1 trở lên (Không tính OBS).')
+    .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9C2F850C'))
+    .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6CB4F488'))
     .setColor(0x3498db);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('btn_verify_pilot').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EA013000')).setStyle(ButtonStyle.Primary).setEmoji('✈️'),
-    new ButtonBuilder().setCustomId('btn_verify_atc').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DEFA5A50')).setStyle(ButtonStyle.Success).setEmoji('📡')
+    new ButtonBuilder().setCustomId('btn_verify_pilot').setLabel('Xin Role Pilot').setStyle(ButtonStyle.Primary).setEmoji('✈️'),
+    new ButtonBuilder().setCustomId('btn_verify_atc').setLabel('Xin Role ATC').setStyle(ButtonStyle.Success).setEmoji('📡')
   );
 
   await interaction.channel.send({ embeds: [embed], components: [row] });
-  await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
+  await interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F9FFE78E'), ephemeral: true });
 }
 
 // ===================== SIÊU LOGGING: BẮT TRỌN MỌI CHUYỂN ĐỘNG CỦA SERVER =====================
@@ -8777,12 +8819,12 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     action = '🔇 Member Timed Out';
     color = 0xe74c3c; // Đỏ báo động
     // Chuyển timestamp thành định dạng hiển thị giờ giấc của Discord
-    description += `**Thời hạn đến:** <t:${Math.floor(newTime / 1000)}:F>\n**Tự động gỡ sau:** <t:${Math.floor(newTime / 1000)}:R>`;
+    description += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_237272CE', { v0: Math.floor(newTime / 1000), v1: Math.floor(newTime / 1000) });
   } else if (oldTime && (!newTime || newTime <= Date.now())) {
     // Được gỡ Timeout sớm (hoặc tự hết hạn)
     action = '🔊 Member Timeout Removed';
     color = 0x2ecc71; // Xanh an toàn
-    description += `**Trạng thái:** Đã được gỡ Timeout và có thể chat/voice trở lại.`;
+    description += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B76672EC');
   } else {
     return;
   }
@@ -8798,10 +8840,10 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     // Kiểm tra log có phải cập nhật user này trong vòng 5 giây qua không
     if (auditEntry && auditEntry.target.id === newMember.id && Math.abs(auditEntry.createdTimestamp - Date.now()) < 5000) {
       if (auditEntry.executor) {
-        embed.addFields({ name: '👮 Xử lý bởi', value: getUserIdentifier(auditEntry.executor), inline: false });
+        embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_21BFA1B7'), value: getUserIdentifier(auditEntry.executor), inline: false });
       }
       if (auditEntry.reason) {
-        embed.addFields({ name: '📝 Lý do (Theo Audit Log)', value: auditEntry.reason, inline: false });
+        embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_731A3C9C'), value: auditEntry.reason, inline: false });
       }
     }
   } catch (err) {
@@ -8842,7 +8884,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
           if (queue.connection) queue.connection.destroy();
           if (queue.dashboardMsg) {
             queue.dashboardMsg.edit({
-              embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription('💤 Mọi người đã rời đi hết, Tk.Chill cũng dọn dẹp đi ngủ đây. Hẹn gặp lại!')],
+              embeds: [new EmbedBuilder().setColor(0x2b2d31).setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9CCE6AF0'))],
               components: []
             }).catch(() => { });
           }
@@ -8966,14 +9008,14 @@ async function handleAtcProfile(interaction) {
 
     const embed = new EmbedBuilder()
       .setAuthor({ name: 'VATSIM Controller Profile', iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
-      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6F57484F', { v0: atc.callsign }))
+      .setTitle(`📡 Station: ${atc.callsign}`)
       .setColor(0x00A8FF)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/10623/10623991.png')
       .addFields(
-        { name: '👤 Controller', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_137BAD49', { v0: atc.name || atc.cid }), inline: true },
-        { name: '🎖️ Rating', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_271F3F4C', { v0: ratingStr }), inline: true },
-        { name: '📶 Frequency', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_271F3F4C', { v0: freq }), inline: true },
-        { name: '⏱️ Time on duty', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E8816EEB', { v0: timeOnline, v1: logonUnix }), inline: false },
+        { name: '👤 Controller', value: `**${atc.name || atc.cid}**`, inline: true },
+        { name: '🎖️ Rating', value: `\`${ratingStr}\``, inline: true },
+        { name: '📶 Frequency', value: `\`${freq}\``, inline: true },
+        { name: '⏱️ Time on duty', value: `\`${timeOnline}\` (from <t:${logonUnix}:t>)`, inline: false },
         { name: '📝 Remarks', value: textRemarks, inline: false }
       )
       .setFooter({ text: `VATSIM CID: ${atc.cid}` })
@@ -9023,15 +9065,15 @@ async function handleAtisVatsim(interaction) {
 
       const embed = new EmbedBuilder()
         .setAuthor({ name: 'VATSIM ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
-        .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A5C7D5EA', { v0: atis.callsign, v1: atis.frequency }))
+        .setTitle(`📻 Station: ${atis.callsign} (${atis.frequency})`)
         .setColor(0x2ecc71)
         .setThumbnail('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSZTpaHOLCaND817gJ28iYTv1WRWnf4wUQoocDs6VYj_guu8gDc2VFKqCxp&s=10')
         .addFields(
           { name: '🏷️ Identifier', value: atisCode, inline: true },
-          { name: '⏱️ Upadate at', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4B10E5E6', { v0: logonUnix }), inline: true },
-          { name: '📝 Atis', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8BED3981', { v0: textInfo }), inline: false }
+          { name: '⏱️ Upadate at', value: `<t:${logonUnix}:R>`, inline: true },
+          { name: '📝 Atis', value: `\`\`\`yaml\n${textInfo}\n\`\`\``, inline: false }
         )
-        .setFooter({ text: 'Dữ liệu lấy trực tiếp từ mạng bay VATSIM' })
+        .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4D75A14E') })
         .setTimestamp();
 
       embeds.push(embed);
@@ -9107,8 +9149,8 @@ async function handleIvaoAtc(interaction) {
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/10623/10623991.png')
       .addFields(
         { name: '👤 Controller', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9DA523DA', { v0: atc.userId || 'Ẩn danh' }), inline: true },
-        { name: '🎖️ Rating', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_271F3F4C', { v0: ratingStr }), inline: true },
-        { name: '📶 Frequency', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_271F3F4C', { v0: freq }), inline: true },
+        { name: '🎖️ Rating', value: `\`${ratingStr}\``, inline: true },
+        { name: '📶 Frequency', value: `\`${freq}\``, inline: true },
         { name: '⏱️ Time on duty', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_82881C12', { v0: timeOnline, v1: logonUnix }), inline: false },
         { name: '📝 Remarks', value: textRemarks, inline: false }
       )
@@ -9155,15 +9197,15 @@ async function handleIvaoAtis(interaction) {
 
       const embed = new EmbedBuilder()
         .setAuthor({ name: 'IVAO ATIS Broadcast', iconURL: 'https://play-lh.googleusercontent.com/uVJ8CVwOFeAH6JOMcmJoyAzNZPwdeWQx6XXbrXSJq__n6anBeriHznaEF4yJR7rv4ShGRVIJcnmP1BQmY9OKLBI' })
-        .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A5C7D5EA', { v0: atc.callsign, v1: atc.atcSession?.frequency?.toFixed(3) || 'N/A' }))
+        .setTitle(`📻 Station: ${atc.callsign} (${atc.atcSession?.frequency?.toFixed(3) || 'N/A'})`)
         .setColor(0x0A2B5E) // Xanh Navy
         .setThumbnail('https://xe.ivao.aero/wordpress/wp-content/uploads/website/the-division/about/brand_logo_no_text.png')
         .addFields(
           { name: '🏷️ Identifier', value: atisCode, inline: true },
-          { name: '⏱️ Update at', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4B10E5E6', { v0: logonUnix }), inline: true },
-          { name: '📝 Atis', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8BED3981', { v0: textInfo }), inline: false }
+          { name: '⏱️ Update at', value: `<t:${logonUnix}:R>`, inline: true },
+          { name: '📝 Atis', value: `\`\`\`yaml\n${textInfo}\n\`\`\``, inline: false }
         )
-        .setFooter({ text: 'Dữ liệu phát sóng trực tiếp từ mạng IVAO' })
+        .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9DF95C00') })
         .setTimestamp();
 
       embeds.push(embed);
@@ -9225,7 +9267,7 @@ async function handleRealFlight(interaction) {
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DF02291A', { v0: airportData.pluginData?.details?.name || icao }))
       .setColor(0xF1C40F)
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/3180/3180118.png')
-      .setFooter({ text: 'Dữ liệu được cập nhật trực tiếp từ FlightRadar24' })
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_48871BDF') })
       .setTimestamp();
 
     // 📤 Xử lý Cất Cánh (Departures)
@@ -9239,12 +9281,12 @@ async function handleRealFlight(interaction) {
         const status = flight.status?.text || 'Scheduled';
         const std = flight.time?.scheduled?.departure ? `<t:${flight.time.scheduled.departure}:t>` : 'N/A';
 
-        depText += `🛫 **${flightNum}** đi ${arrAirport} | 🛩️ ${acft}\n> ⏰ ${std} - 📌 ${status}\n`;
+        depText += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_83966C65', { v0: flightNum, v1: arrAirport, v2: acft, v3: std, v4: status });
       });
     } else {
       depText = '> *Không có chuyến bay cất cánh nào sắp tới.*';
     }
-    embed.addFields({ name: '📤 CHUẨN BỊ CẤT CÁNH (DEPARTURES)', value: depText, inline: false });
+    embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_84318F1B'), value: depText, inline: false });
 
     // 📥 Xử lý Hạ Cánh (Arrivals)
     let arrText = '';
@@ -9257,17 +9299,17 @@ async function handleRealFlight(interaction) {
         const status = flight.status?.text || 'Scheduled';
         const sta = flight.time?.scheduled?.arrival ? `<t:${flight.time.scheduled.arrival}:t>` : 'N/A';
 
-        arrText += `🛬 **${flightNum}** từ ${depAirport} | 🛩️ ${acft}\n> ⏰ ${sta} - 📌 ${status}\n`;
+        arrText += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_84022392', { v0: flightNum, v1: depAirport, v2: acft, v3: sta, v4: status });
       });
     } else {
       arrText = '> *Không có chuyến bay hạ cánh nào sắp tới.*';
     }
-    embed.addFields({ name: '📥 CHUẨN BỊ HẠ CÁNH (ARRIVALS)', value: arrText, inline: false });
+    embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_378E45AF'), value: arrText, inline: false });
 
     await interaction.editReply({ embeds: [embed] });
   } catch (err) {
     console.error('Lỗi lấy real flight:', err);
-    await interaction.editReply({ content: '❌ Đã có lỗi xảy ra khi kéo dữ liệu chuyến bay thực tế.' });
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8203C526') });
   }
 }
 
@@ -9370,14 +9412,14 @@ async function handleDaily(interaction) {
   await userDb.save(); // Lưu lại vào MONGODB
 
   const embed = new EmbedBuilder()
-    .setTitle('📅 ĐIỂM DANH HÀNG NGÀY')
+    .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7A6FA0C3'))
     .setColor(0x2ecc71)
     .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B8C4F460', { v0: balance.displayName, v1: reward.toLocaleString() }))
     .addFields(
-      { name: '🔥 Chuỗi liên tiếp', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DCE461FA', { v0: userDb.dailyStreak }), inline: true },
-      { name: '💰 Tổng số dư', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD84778D', { v0: updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash.toLocaleString() }), inline: true }
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_94A24B24'), value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DCE461FA', { v0: userDb.dailyStreak }), inline: true },
+      { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6A71057F'), value: `${updateRes.success ? updateRes.currentCash.toLocaleString() : balance.currentCash.toLocaleString()} Cash`, inline: true }
     )
-    .setFooter({ text: 'Lượt điểm danh mới sẽ mở vào 00:00 (Giờ VN) mỗi ngày' });
+    .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_761F5BB0') });
 
   await interaction.editReply({ embeds: [embed] });
 }
@@ -9551,12 +9593,12 @@ async function handleBalance(interaction) {
       .setColor('#10b981') 
       .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
       .addFields(
-          { name: '👤 Tên App', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_271F3F4C', { v0: balanceData.username }), inline: false },
-          { name: '💰 Số Dư Khả Dụng', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4B5CDCD6', { v0: safeNum(balanceData.currentCash).toLocaleString() }), inline: true },
-          { name: '📈 Tổng Tích Lũy', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD84778D', { v0: safeNum(balanceData.totalEarned).toLocaleString() }), inline: true },
-          { name: '💸 Đã Tiêu Xài', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD84778D', { v0: safeNum(balanceData.usedCash).toLocaleString() }), inline: true },
-          { name: '✈️ Số Chuyến Bay', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AABEB377', { v0: safeNum(balanceData.completedFlights) }), inline: true },
-          { name: '⏱️ Thời Gian Bay', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C4DC5BD8', { v0: safeNum(balanceData.totalHours).toFixed(1) }), inline: true }
+          { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5FEF6BFD'), value: `\`${balanceData.username}\``, inline: false },
+          { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DAE2FB07'), value: `**${safeNum(balanceData.currentCash).toLocaleString()}** Cash`, inline: true },
+          { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_704CEE3A'), value: `${safeNum(balanceData.totalEarned).toLocaleString()} Cash`, inline: true },
+          { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_15D666DC'), value: `${safeNum(balanceData.usedCash).toLocaleString()} Cash`, inline: true },
+          { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_79001744'), value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AABEB377', { v0: safeNum(balanceData.completedFlights) }), inline: true },
+          { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BDC08E3E'), value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C4DC5BD8', { v0: safeNum(balanceData.totalHours).toFixed(1) }), inline: true }
       );
 
   await interaction.editReply({ embeds: [embed] });
@@ -9759,13 +9801,13 @@ async function handleBauCua(interaction) {
     const buildRows = () => [
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('bc_bau').setEmoji('🎃').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_15858B54')).setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('bc_cua').setEmoji('🦀').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A0F3A7F0')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('bc_cua').setEmoji('🦀').setLabel('Cua').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('bc_tom').setEmoji('🦞').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DDF8B51B')).setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('bc_ca').setEmoji('🐟').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BE391ADD')).setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('bc_ga').setEmoji('🐔').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3EA545F7')).setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('bc_nai').setEmoji('🦌').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D99DAF4A')).setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('bc_nai').setEmoji('🦌').setLabel('Nai').setStyle(ButtonStyle.Secondary)
         ),
         new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('bc_chot')
@@ -9802,7 +9844,7 @@ async function handleBauCua(interaction) {
 
     collector.on('end', async (collected, reason) => {
         if (reason !== 'chot') {
-            return interaction.editReply({ content: '⏳ Đã hết thời gian chọn cửa! Tiền cược được hoàn lại.', components: [] });
+            return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7866595A'), components: [] });
         }
 
         await interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1D32233B', { v0: choices.join(' - ') }), components: [] });
@@ -9929,13 +9971,13 @@ async function handleBlackjack(interaction) {
     );
 
     const embed = new EmbedBuilder()
-        .setTitle('🃏 XÌ DÁCH VIỆT NAM 🃏')
+        .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_97192556'))
         .setColor(0x2ecc71)
         .addFields(
             { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_21DA3C88', { v0: getScore(playerHand) }), value: formatHand(playerHand), inline: true },
-            { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B3A0E1AA'), value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_411DCA6A', { v0: formatHand([dealerHand[1]]) }), inline: true }
+            { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B3A0E1AA'), value: `**?** | ${formatHand([dealerHand[1]])}`, inline: true }
         )
-        .setFooter({ text: `Cược: ${amount.toLocaleString()} Cash | Ngũ Linh, Xì Dách x2 | Xì Bàng x3` });
+        .setFooter({ text : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B86533D0', { v0: amount.toLocaleString() }) });
 
     const msg = await interaction.editReply({ embeds: [embed], components: [row] });
     const filter = i => i.user.id === interaction.user.id && i.customId.startsWith('bj_');
@@ -9962,7 +10004,7 @@ async function handleBlackjack(interaction) {
 
             embed.setFields(
                 { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_21DA3C88', { v0: pScore }), value: formatHand(playerHand), inline: true },
-                { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B3A0E1AA'), value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_411DCA6A', { v0: formatHand([dealerHand[1]]) }), inline: true }
+                { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B3A0E1AA'), value: `**?** | ${formatHand([dealerHand[1]])}`, inline: true }
             );
             await i.update({ embeds: [embed], components: [row] });
         } else {
@@ -9972,7 +10014,7 @@ async function handleBlackjack(interaction) {
     });
 
     collector.on('end', async (collected, reason) => {
-        if (reason === 'time') return interaction.editReply({ content: '⏳ Sếp suy nghĩ quá lâu, ván bài bị hủy (Tiền cược được bảo toàn)!', components: [] });
+        if (reason === 'time') return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F0CF31DF'), components: [] });
 
         let pScore = getScore(playerHand);
         let finalEmbed = EmbedBuilder.from(embed).setColor(0xe74c3c);
@@ -9980,7 +10022,7 @@ async function handleBlackjack(interaction) {
         if (reason === 'ngulinh') {
             // Ngũ Linh: Nhân 2 tiền lãi
             await updatePilotBalance(interaction.user.id, amount * 2, amount, amount * 3);
-            finalEmbed.setColor(0xf1c40f).setTitle('🌟 NGŨ LINH 🌟')
+            finalEmbed.setColor(0xf1c40f).setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_35E59509'))
                 .setFields(
                     { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E51E897B'), value: formatHand(playerHand), inline: false },
                     { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B3A0E1AA'), value: formatHand(dealerHand), inline: false }
@@ -10066,21 +10108,21 @@ function evaluatePokerHand(hand) {
     values.forEach(v => counts[v] = (counts[v] || 0) + 1);
     const countArr = Object.values(counts).sort((a,b)=>b-a);
 
-    if (isFlush && isStraight) return { name: "👑 Sảnh Chúa / Sảnh Thùng (x50)", mult: 50 };
-    if (countArr[0] === 4) return { name: "💣 Tứ Quý (x25)", mult: 25 };
-    if (countArr[0] === 3 && countArr[1] === 2) return { name: "🏠 Cù Lũ (x9)", mult: 9 };
-    if (isFlush) return { name: "💧 Thùng (x6)", mult: 6 };
-    if (isStraight) return { name: "🪜 Sảnh (x4)", mult: 4 };
-    if (countArr[0] === 3) return { name: "🎸 Xám Cô (x3)", mult: 3 };
-    if (countArr[0] === 2 && countArr[1] === 2) return { name: "👯 Hai Đôi (x2)", mult: 2 };
+    if (isFlush && isStraight) return { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EDF893C0'), mult: 50 };
+    if (countArr[0] === 4) return { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6CBA4290'), mult: 25 };
+    if (countArr[0] === 3 && countArr[1] === 2) return { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F43C134A'), mult: 9 };
+    if (isFlush) return { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F8FA6111'), mult: 6 };
+    if (isStraight) return { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F51F2EE9'), mult: 4 };
+    if (countArr[0] === 3) return { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3DC79198'), mult: 3 };
+    if (countArr[0] === 2 && countArr[1] === 2) return { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9B65DAC6'), mult: 2 };
     if (countArr[0] === 2) {
         // Poker chuẩn: Đôi J, Q, K, A mới được tính tiền (Jacks or Better)
         const pairVal = parseInt(Object.keys(counts).find(k => counts[k] === 2));
-        if (pairVal >= 11) return { name: "🤵 Đôi Cao J-Q-K-A (Hòa Vốn)", mult: 1 };
-        return { name: "Đôi Thấp (Mất tiền)", mult: 0 };
+        if (pairVal >= 11) return { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5D2DEED3'), mult: 1 };
+        return { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0DF12ACF'), mult: 0 };
     }
     
-    return { name: "Rác (Mất tiền)", mult: 0 };
+    return { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D31428AC'), mult: 0 };
 }
 
 // ===================== LỆNH POKER =====================
@@ -10120,7 +10162,7 @@ async function handlePoker(interaction) {
       finalStr = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0E36D7FE', { v0: result.name, v1: amount.toLocaleString() });
     }
 
-    await interaction.editReply({ content: null, embeds: [new EmbedBuilder().setTitle('🃏 VIDEO POKER').setColor(result.mult > 0 ? 0x2ecc71 : 0xe74c3c).setDescription(finalStr).addFields({ name: '🃏 5 Lá Bài', value: formatHand(hand), inline: false })] });
+    await interaction.editReply({ content: null, embeds: [new EmbedBuilder().setTitle('🃏 VIDEO POKER').setColor(result.mult > 0 ? 0x2ecc71 : 0xe74c3c).setDescription(finalStr).addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_48D70F32'), value: formatHand(hand), inline: false })] });
 
     if (didLose) {
       const updateRes = await updatePilotBalance(userId, -amount, amount, 0);
@@ -10221,7 +10263,7 @@ async function handleGiveCash(interaction) {
   const amountInput = interaction.options.getString('amount');
   const senderId = interaction.user.id;
 
-  if (targetUser.bot || targetUser.id === senderId) return interaction.reply({ content: '❌ Không thể gửi cho chính mình hoặc Bot!', ephemeral: true });
+  if (targetUser.bot || targetUser.id === senderId) return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6EFF11CA'), ephemeral: true });
 
   await interaction.deferReply({ ephemeral: true });
   
@@ -10249,12 +10291,12 @@ async function handleGiveCash(interaction) {
 
   try {
     const dmEmbed = new EmbedBuilder()
-      .setTitle('💸 BẠN VỪA NHẬN ĐƯỢC TIỀN!')
+      .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CE8A9BB1'))
       .setColor(0x10b981)
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_7BBE17ED', { v0: balance.displayName, v1: senderId, v2: amount.toLocaleString() }))
       .setThumbnail('https://cdn-icons-png.flaticon.com/512/3135/3135706.png')
       .setTimestamp()
-      .setFooter({ text: 'Hệ thống ngân hàng trung ương tk.chill' });
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_84C0C078') });
     await targetUser.send({ embeds: [dmEmbed] });
   } catch (err) {}
 }
@@ -10362,7 +10404,7 @@ async function handleVietlott(interaction) {
   const collector = msg.createMessageComponentCollector({ filter, time: 60000 });
 
   collector.on('collect', async btnInt => {
-    const modal = new ModalBuilder().setCustomId(`modal_loto`).setTitle('Mua Vé Lô Tô 5x5');
+    const modal = new ModalBuilder().setCustomId(`modal_loto`).setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9A7363F1'));
 
     const numInput = new TextInputBuilder()
       .setCustomId('numbers')
@@ -10390,7 +10432,7 @@ async function handleVietlott(interaction) {
       const currentBal = await getPilotBalance(interaction.user.id);
       const amount = parseBetAmount(amountStr, currentBal.currentCash);
 
-      if (amount <= 0) return interaction.editReply({ content: '❌ Số tiền cược không hợp lệ!', components: [] });
+      if (amount <= 0) return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4CC856D7'), components: [] });
       if (currentBal.currentCash < amount) return interaction.editReply({ content : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_558836FF', { v0: currentBal.currentCash.toLocaleString() }), components: [] });
 
       let boardNumbers = [];
@@ -10485,7 +10527,7 @@ async function handleVietlott(interaction) {
           const embed = new EmbedBuilder()
               .setColor(embedColor)
               .setDescription(finalStr)
-              .setFooter({ text: 'Lô Tô 5x5 tk.chill - Bốc số cực lẹ!' });
+              .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8D96A66D') });
 
           await interaction.editReply({ content: null, embeds: [embed] });
       }, 3000); 
@@ -10497,7 +10539,7 @@ async function handleVietlott(interaction) {
 
   collector.on('end', (collected, reason) => {
     if (reason === 'time') {
-      interaction.editReply({ content: '⏳ Sếp đứng chọn vé lâu quá Gánh Hát đã dời đi nơi khác rồi!', components: [] });
+      interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1418D65E'), components: [] });
     }
   });
 }
@@ -10512,14 +10554,14 @@ async function handleAddCash(interaction) {
     const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
 
     if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền dùng máy in tiền!', ephemeral: true });
+        return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C4044903'), ephemeral: true });
     }
 
     const targetMentionable = interaction.options.getMentionable('target');
     const amount = interaction.options.getInteger('amount');
 
     if (amount <= 0) {
-        return interaction.reply({ content: '❌ Số tiền bơm phải lớn hơn 0!', ephemeral: true });
+        return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_14EADE22'), ephemeral: true });
     }
 
     await interaction.deferReply();
@@ -10539,15 +10581,15 @@ async function handleAddCash(interaction) {
         const adminChannel = interaction.client.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
         if (adminChannel) {
             const logEmbed = new EmbedBuilder()
-                .setTitle('💸 PHÁT HIỆN GIAO DỊCH BƠM TIỀN')
+                .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_04FB8B5A'))
                 .setColor(0xf1c40f)
                 .addFields(
-                    { name: '👮 Người thực hiện (Staff)', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: interaction.user.id }), inline: true },
-                    { name: '🎯 Người thụ hưởng', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: targetId }), inline: true },
-                    { name: '💰 Số tiền in thêm', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6B439400', { v0: amount.toLocaleString() }), inline: false }
+                    { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4DC67485'), value: `<@${interaction.user.id}>`, inline: true },
+                    { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_3755E4BB'), value: `<@${targetId}>`, inline: true },
+                    { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A108F5E8'), value: `**+${amount.toLocaleString()} Cash**`, inline: false }
                 )
                 .setThumbnail(interaction.user.displayAvatarURL())
-                .setFooter({ text: 'Hệ thống Camera giám sát chống lạm phát kinh tế' })
+                .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_58B348BE') })
                 .setTimestamp();
 
             await adminChannel.send({ embeds: [logEmbed] }).catch(() => {});
@@ -10582,8 +10624,8 @@ async function sendDailyCasinoLeaderboard() {
         const topRich = [...allUsers].sort((a, b) => b.currentCash - a.currentCash).slice(0, 10);
 
         const embed = new EmbedBuilder()
-            .setTitle('🏆 BẢNG XẾP HẠNG TỔNG KẾT CASINO CUỐI NGÀY 🏆')
-            .setDescription('Điểm danh các ông trùm sòng bạc server tk.chill lúc 23:59 hằng ngày!')
+            .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_66168A61'))
+            .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_56C2FAFB'))
             .setColor(0xFFD700)
             .setThumbnail('https://cdn-icons-png.flaticon.com/512/2830/2830284.png')
             .setTimestamp();
@@ -10596,11 +10638,11 @@ async function sendDailyCasinoLeaderboard() {
         });
 
         embed.addFields(
-            { name: '💸 TOP 10 ĐẠI GIA SỞ HỮU NHIỀU TIỀN NHẤT', value: richText || 'Chưa có dữ liệu' },
-            { name: '📊 Chú ý', value: 'Dữ liệu Thắng/Thua/Lượt chơi.', inline: false }
+            { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_90CB0070'), value: richText || 'Chưa có dữ liệu' },
+            { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_044EA26A'), value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6C61999E'), inline: false }
         );
 
-        await channel.send({ content: '🔔 **Tinh Tinh!** Đã 23:59, sòng bạc chuẩn bị chốt sổ sách!', embeds: [embed] });
+        await channel.send({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8D968135'), embeds: [embed] });
     } catch (err) {
         console.error('Lỗi khi gửi BXH Casino Daily:', err);
     }
@@ -10648,7 +10690,7 @@ async function handleBaiCao(interaction) {
     // Tính điểm bài cào
     const getCaoScore = (hand) => {
         let isBaTay = hand.every(c => ['J', 'Q', 'K'].includes(c.value));
-        if (isBaTay) return { score: 10, text: '🔥 BA TÂY (TIÊN)' }; // 10 điểm ảo để mặc định lớn hơn 9 nút
+        if (isBaTay) return { score: 10, text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DD8C375D') }; // 10 điểm ảo để mặc định lớn hơn 9 nút
         
         let total = 0;
         for (let card of hand) {
@@ -10657,7 +10699,7 @@ async function handleBaiCao(interaction) {
             else total += parseInt(card.value);
         }
         let nut = total % 10;
-        return { score: nut, text: `${nut} Nút` };
+        return { score: nut, text : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8993A1DE', { v0: nut }) };
     };
 
     let pData = getCaoScore(playerHand);
@@ -10689,13 +10731,13 @@ async function handleBaiCao(interaction) {
         await updatePilotBalance(interaction.user.id, profit, amount, profit > 0 ? amount * 2 : 0);
 
         const embed = new EmbedBuilder()
-            .setTitle('🎴 BÀI CÀO 3 LÁ 🎴')
+            .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_294A7965'))
             .setColor(color)
             .addFields(
                 { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BC44D618', { v0: pData.text }), value: formatHand(playerHand), inline: false },
                 { name : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2CA837A8', { v0: dData.text }), value: formatHand(dealerHand), inline: false }
             )
-            .setFooter({ text: `Tiền cược: ${amount.toLocaleString()} Cash` });
+            .setFooter({ text : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C80E4918', { v0: amount.toLocaleString() }) });
 
         await interaction.editReply({ content: resultMsg, embeds: [embed] });
     }, 2000);
@@ -10709,7 +10751,7 @@ async function handleCheckBalance(interaction) {
     const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
 
     if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền soi ví người khác!', ephemeral: true });
+        return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CA0383B5'), ephemeral: true });
     }
 
     const targetUser = interaction.options.getUser('target');
@@ -10725,9 +10767,9 @@ async function handleCheckBalance(interaction) {
         .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_218A82C1', { v0: targetUser.username.toUpperCase() }))
         .setColor(0x2ecc71)
         .addFields(
-            { name: '💰 Số dư hiện tại', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CE3EC3F7', { v0: parseFloat(balance.currentCash).toLocaleString() }), inline: false },
-            { name: '📥 Tổng tiền đã kiếm', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD84778D', { v0: parseFloat(balance.totalEarned).toLocaleString() }), inline: true },
-            { name: '📤 Tổng tiền đã tiêu', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BD84778D', { v0: parseFloat(balance.usedCash).toLocaleString() }), inline: true }
+            { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4170AED1'), value: `**${parseFloat(balance.currentCash).toLocaleString()} Cash**`, inline: false },
+            { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_44A987D2'), value: `${parseFloat(balance.totalEarned).toLocaleString()} Cash`, inline: true },
+            { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D4A62228'), value: `${parseFloat(balance.usedCash).toLocaleString()} Cash`, inline: true }
         )
         .setThumbnail(targetUser.displayAvatarURL())
         .setTimestamp();
@@ -10743,7 +10785,7 @@ async function handleClearBalance(interaction) {
     const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
 
     if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền tịch thu tài sản!', ephemeral: true });
+        return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E8785655'), ephemeral: true });
     }
 
     const targetUser = interaction.options.getUser('target');
@@ -10771,15 +10813,15 @@ async function handleClearBalance(interaction) {
         const adminChannel = interaction.client.channels.cache.get(ADMIN_CHANNEL_ID || '1448258683627638895');
         if (adminChannel) {
             const logEmbed = new EmbedBuilder()
-                .setTitle('🚨 LỆNH TỊCH THU TÀI SẢN (CLEAR BALANCE)')
+                .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BA596524'))
                 .setColor(0xe74c3c) // Đỏ báo động
                 .addFields(
-                    { name: '👮 Người thi hành án (Staff)', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: interaction.user.id }), inline: true },
-                    { name: '🎯 Nạn nhân', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_8CDE7BE9', { v0: targetUser.id }), inline: true },
-                    { name: '💸 Số tiền vừa bị bay màu', value : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_95776D45', { v0: currentCash.toLocaleString() }), inline: false }
+                    { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5EBD7315'), value: `<@${interaction.user.id}>`, inline: true },
+                    { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FA38F4D8'), value: `<@${targetUser.id}>`, inline: true },
+                    { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_5EEAA57D'), value: `**-${currentCash.toLocaleString()} Cash**`, inline: false }
                 )
                 .setThumbnail(targetUser.displayAvatarURL())
-                .setFooter({ text: 'Biên bản xử lý vi phạm kinh tế' })
+                .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F42048B5') })
                 .setTimestamp();
 
             await adminChannel.send({ embeds: [logEmbed] }).catch(() => {});
