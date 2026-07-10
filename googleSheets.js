@@ -157,49 +157,47 @@ async function createPendingUsersSheet() {
   }
 }
 
-// ========== LƯU CONTROLLER ==========
 async function saveControllerLeaderboard(month, year, stats) {
-  const sheetName = getSheetName(CONTROLLER_SHEET_PREFIX, month, year);
+  const sheetName = getSheetName(ATC_SHEET_PREFIX, month, year);
   const sheets = await initGoogleSheets();
 
   if (!(await sheetExists(sheetName))) await createControllerSheet(month, year);
 
-  // An toàn tuyệt đối: Dùng values.clear để tẩy trắng thay vì phá hủy cấu trúc hàng
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A2:H5000`,
-  });
-
   const rows = [];
-  for (const [category, controllers] of Object.entries(stats)) {
-    for (const [cid, data] of Object.entries(controllers)) {
-      rows.push([
-        category, cid,
-        data.name ? `'${data.name}` : '', 
-        data.callsign ? `'${data.callsign}` : '',
-        data.seconds || 0, data.lastUpdate || 0,
-        data.lastUpdate ? new Date(data.lastUpdate).toISOString() : '',
-        JSON.stringify({ callsignHistory: [data.callsign] }),
-      ]);
-    }
+  for (const [cid, data] of Object.entries(stats)) {
+    rows.push([
+      cid,
+      data.name,
+      data.rating,
+      data.timeOnline,
+      data.points,
+      data.controlledPositions.join(', '),
+      data.firstLoginMonth,
+      data.lastLoginMonth
+    ]);
   }
 
   if (rows.length === 0) return;
+
+  // XÓA ĐOẠN LỆNH values.clear CŨ ĐI
+  // Tab ATC có 8 cột, nên ta tạo mảng rỗng 8 phần tử
+  const emptyATCRow = Array(8).fill(""); 
+  for (let i = 0; i < 200; i++) {
+    rows.push(emptyATCRow);
+  }
 
   try {
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheetName}!A2`,
-      valueInputOption: 'USER_ENTERED', // Để GG Sheets tự cắt dấu nháy đơn bảo vệ
+      valueInputOption: 'USER_ENTERED',
       requestBody: { values: rows },
     });
-    console.log(`✅ Saved ${rows.length} controller records to sheet ${sheetName}`);
   } catch (err) {
-    console.error('❌ Lỗi khi ghi data Controller:', err.message);
+    console.error('❌ Lỗi khi ghi data ATC:', err.message);
   }
 }
 
-// ========== LƯU PILOT ==========
 async function savePilotLeaderboard(month, year, pilots) {
   const sheetName = getSheetName(PILOT_SHEET_PREFIX, month, year);
   const sheets = await initGoogleSheets();
@@ -210,20 +208,28 @@ async function savePilotLeaderboard(month, year, pilots) {
   for (const [cid, data] of Object.entries(pilots)) {
     rows.push([
       cid,
-      data.name ? `'${data.name}` : '',
-      data.callsign ? `'${data.callsign}` : '',
-      data.seconds || 0,
-      data.flights || 1,
-      data.lastUpdate || 0,
-      data.lastUpdate ? new Date(data.lastUpdate).toISOString() : '',
-      data.lastDeparture ? `'${data.lastDeparture}` : '',
-      data.lastArrival ? `'${data.lastArrival}` : '',
-      data.lastAircraft ? `'${data.lastAircraft}` : '',
+      data.callsign,
+      data.name,
+      data.rating,
+      data.flightRules,
+      data.dep,
+      data.arr,
+      data.aircraft,
+      data.timeOnline,
+      data.points
     ]);
   }
 
   if (rows.length === 0) return;
 
+  // XÓA HOẶC BỎ COMMENT HẾT ĐOẠN LỆNH values.clear CŨ ĐI
+  // BÍ QUYẾT Ở ĐÂY: Độn thêm 200 dòng rỗng (Mỗi dòng 10 cột) để đè nát dữ liệu cũ
+  const emptyPilotRow = Array(10).fill(""); 
+  for (let i = 0; i < 200; i++) {
+    rows.push(emptyPilotRow);
+  }
+
+  // Chỉ dùng đúng 1 lệnh update này thôi
   try {
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
