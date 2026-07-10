@@ -157,136 +157,47 @@ async function createPendingUsersSheet() {
   }
 }
 
-// ========== LƯU CONTROLLER ==========
-async function saveControllerLeaderboard(month, year, stats) {
-  const sheetName = getSheetName(CONTROLLER_SHEET_PREFIX, month, year);
-  const sheets = await initGoogleSheets();
-
-  const sheetExistsFlag = await sheetExists(sheetName);
-  if (!sheetExistsFlag) {
-    await createControllerSheet(month, year);
-  }
-
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: SPREADSHEET_ID,
-    fields: 'sheets.properties',
-  });
-  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === sheetName);
-  if (!sheet) throw new Error(`Sheet ${sheetName} not found`);
-  const sheetId = sheet.properties.sheetId;
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [
-        {
-          deleteRange: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: 5000,
-              startColumnIndex: 0,
-              endColumnIndex: 8,
-            },
-            shiftDimension: 'ROWS',
-          },
-        },
-      ],
-    },
-  });
-
-  const rows = [];
-  for (const [category, controllers] of Object.entries(stats)) {
-    for (const [cid, data] of Object.entries(controllers)) {
-      rows.push([
-        category,
-        cid,
-        data.name || '',
-        data.callsign || '',
-        data.seconds || 0,
-        data.lastUpdate || 0,
-        data.lastUpdate ? new Date(data.lastUpdate).toISOString() : '',
-        JSON.stringify({ callsignHistory: [data.callsign] }),
-      ]);
-    }
-  }
-
-  if (rows.length === 0) return;
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A2`,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  });
-
-  console.log(`✅ Saved ${rows.length} controller records to sheet ${sheetName}`);
-}
-
 // ========== LƯU PILOT ==========
 async function savePilotLeaderboard(month, year, pilots) {
   const sheetName = getSheetName(PILOT_SHEET_PREFIX, month, year);
   const sheets = await initGoogleSheets();
 
-  const sheetExistsFlag = await sheetExists(sheetName);
-  if (!sheetExistsFlag) {
-    await createPilotSheet(month, year);
-  }
+  if (!(await sheetExists(sheetName))) await createPilotSheet(month, year);
 
-  const spreadsheet = await sheets.spreadsheets.get({
+  await sheets.spreadsheets.values.clear({
     spreadsheetId: SPREADSHEET_ID,
-    fields: 'sheets.properties',
-  });
-  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === sheetName);
-  if (!sheet) throw new Error(`Sheet ${sheetName} not found`);
-  const sheetId = sheet.properties.sheetId;
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
-    requestBody: {
-      requests: [
-        {
-          deleteRange: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: 5000,
-              startColumnIndex: 0,
-              endColumnIndex: 10,
-            },
-            shiftDimension: 'ROWS',
-          },
-        },
-      ],
-    },
+    range: `${sheetName}!A2:J5000`,
   });
 
   const rows = [];
   for (const [cid, data] of Object.entries(pilots)) {
     rows.push([
       cid,
-      data.name || '',
-      data.callsign || '',
+      data.name ? `'${data.name}` : '',
+      data.callsign ? `'${data.callsign}` : '',
       data.seconds || 0,
       data.flights || 1,
       data.lastUpdate || 0,
       data.lastUpdate ? new Date(data.lastUpdate).toISOString() : '',
-      data.lastDeparture || '',
-      data.lastArrival || '',
-      data.lastAircraft || '',
+      data.lastDeparture ? `'${data.lastDeparture}` : '',
+      data.lastArrival ? `'${data.lastArrival}` : '',
+      data.lastAircraft ? `'${data.lastAircraft}` : '',
     ]);
   }
 
   if (rows.length === 0) return;
 
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A2`,
-    valueInputOption: 'RAW',
-    requestBody: { values: rows },
-  });
-
-  console.log(`✅ Saved ${rows.length} pilot records to sheet ${sheetName}`);
+  try {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A2`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: rows },
+    });
+    console.log(`✅ Saved ${rows.length} pilot records to sheet ${sheetName}`);
+  } catch (err) {
+    console.error('❌ Lỗi khi ghi data Pilot:', err.message);
+  }
 }
 
 // ========== LƯU PENDING USERS ==========
