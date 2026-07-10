@@ -3682,6 +3682,10 @@ client.on('voiceStateUpdate', (oldState, newState) => {
 
 // ===================== INTERACTIONS =====================
 client.on('interactionCreate', async (interaction) => {
+  // Tự động gán ngôn ngữ đã lưu của user vào interaction cho mọi lệnh
+  if (interaction.user) {
+    interaction.userLang = userLangs[interaction.user.id] || 'en'; // Mặc định là Tiếng Việt nếu chưa set
+  }
   // XỬ LÝ KHI NGƯỜI DÙNG CHỌN 1 BÀI TỪ MENU
   if (interaction.isStringSelectMenu() && interaction.customId === 'select_song') {
     const [searchId, index] = interaction.values[0].split('_');
