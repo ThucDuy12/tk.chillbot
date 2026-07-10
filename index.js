@@ -857,7 +857,7 @@ async function updateControllerLeaderboardForOnlineControllers(currentController
     const currentMonth = nowDate.getUTCMonth() + 1;
     const currentYear = nowDate.getUTCFullYear();
 
-    if (leaderboardData.month !== currentMonth || leaderboardData.year !== currentYear) {
+    if (Number(leaderboardData.month) !== currentMonth || Number(leaderboardData.year) !== currentYear) {
       console.log(`[Controller Leaderboard] Resetting for new month: ${currentMonth}/${currentYear}`);
       leaderboardData = {
         month: currentMonth,
@@ -1163,7 +1163,7 @@ async function updatePilotLeaderboard(currentPilots, currentTime) {
     const currentMonth = nowDate.getUTCMonth() + 1;
     const currentYear = nowDate.getUTCFullYear();
 
-    if (pilotLeaderboardData.month !== currentMonth || pilotLeaderboardData.year !== currentYear) {
+    if (Number(pilotLeaderboardData.month) !== currentMonth || Number(pilotLeaderboardData.year) !== currentYear) {
       console.log(`[Pilot Leaderboard] Resetting for new month: ${currentMonth}/${currentYear}`);
       pilotLeaderboardData = {
         month: currentMonth,
