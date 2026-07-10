@@ -15,7 +15,6 @@ const {
 const { createCanvas, loadImage, GlobalFonts } = require('canvas');
 const fetch = require('node-fetch'); // Thêm nếu chưa có
 const nodeFetch = require('node-fetch');
-const { t } = require('./i18n');
 
 // Thêm vào khu vực khai báo biến ở đầu file
 const temporarySearchResults = new Map();
@@ -24,11 +23,11 @@ const https = require('https');
 const deletedImageCache = new Map();
 
 const db = require('./database');
+const { t } = require('./i18n');
+let userLangs = {};
 
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
 const play = require('play-dl');
-
-let userLangs = {};
 
 // Kho chứa danh sách phát nhạc của các server
 const musicQueues = new Map();
@@ -3358,16 +3357,16 @@ client.once('ready', async () => {
       .addUserOption(opt => opt.setName('target').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C46A1FE2')).setRequired(true))
       .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
     new SlashCommandBuilder()
-          .setName('set_lang')
-          .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_29361814'))
-          .addStringOption(opt => opt.setName('lang')
-            .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C147DC81'))
-            .setRequired(true)
-            .addChoices(
-              { name: 'English', value: 'en' },
-              { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AD35B2DA'), value: 'vi' }
-            )
-          ),
+      .setName('set_lang')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_29361814'))
+      .addStringOption(opt => opt.setName('lang')
+        .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C147DC81'))
+        .setRequired(true)
+        .addChoices(
+          { name: 'English', value: 'en' },
+          { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_AD35B2DA'), value: 'vi' }
+        )
+      ),
     ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3597,14 +3596,6 @@ client.once('ready', async () => {
   vatsimWorker.postMessage('update');
   setInterval(() => vatsimWorker.postMessage('update'), vatsimPeriodMs);
   console.log(`VATSIM updater running: immediate + every ${vatsimPeriodMs / 60000} minutes`);
-
-
-  // Cập nhật dữ liệu thường xuyên hơn (mỗi phút)
-  setInterval(() => {
-    // Gọi VATSIM worker để cập nhật controllers và pilots
-    vatsimWorker.postMessage('update');
-  }, 60 * 1000); // Mỗi phút
-
 
   console.log('Leaderboard updater scheduled: data every minute, embed every hour');
 
