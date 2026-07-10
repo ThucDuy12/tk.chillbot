@@ -9637,10 +9637,11 @@ async function handleSlot(interaction) {
   }
 }
 
-// ===================== LỆNH TÀI XỈU =====================
+// ===================== LỆNH TÀI XỈU (THÊM NÚT BÃO + NERF TỶ LỆ + ĐA NGÔN NGỮ) =====================
 async function handleTaiSiu(interaction) {
   const amountInput = interaction.options.getString('amount');
   await interaction.deferReply(); 
+  
   const balance = await checkAndRegisterUser(interaction);
   if (!balance) return;
 
@@ -9648,65 +9649,100 @@ async function handleTaiSiu(interaction) {
   if (amount <= 0) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4CC856D7'));
   if (balance.currentCash < amount) return interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_2142336D'));
 
+  // 1. Gắn thêm nút BÃO vào giao diện
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('ts_xiu').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CCC4CBBD')).setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('ts_tai').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A6B2615D')).setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId('ts_xiu').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CCC4CBBD')).setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('ts_tai').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_A6B2615D')).setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('ts_bao').setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_TS_BTN_BAO')).setStyle(ButtonStyle.Success)
   );
 
   const msg = await interaction.editReply({ 
-    content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_80828F30', { v0: balance.displayName, v1: amount.toLocaleString() }), components: [row] 
+      content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_80828F30', { v0: balance.displayName, v1: amount.toLocaleString() }), 
+      components: [row] 
   });
 
-  const filter = i => i.user.id === interaction.user.id;
+  const filter = i => i.user.id === interaction.user.id && i.customId.startsWith('ts_');
   const collector = msg.createMessageComponentCollector({ filter, time: 30000, max: 1 }); 
 
-  // ===================== LỆNH TÀI XỈU (ĐÃ SỬA HIỆU ỨNG LẮC TỪNG CON) =====================
   collector.on('collect', async i => {
       await i.deferUpdate();
-      const choice = i.customId === 'ts_tai' ? 'tai' : 'xiu';
+      
+      // Nhận diện lựa chọn của sếp
+      const choice = i.customId === 'ts_tai' ? 'tai' : (i.customId === 'ts_xiu' ? 'xiu' : 'bao');
+      
+      // Lấy label TÀI/XỈU/BÃO từ file JSON để điền vào tin nhắn Đang lắc
+      let choiceText = choice === 'tai' ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B6CD05B1') : (choice === 'xiu' ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E6748DFF') : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6E171C4F'));
       
       // Hiện hũ lắc ban đầu
-      await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1335686D', { v0: choice.toUpperCase() }), components: [] });
+      await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1335686D', { v0: choiceText }), components: [] });
 
-      // Tính toán kết quả trước trong nền
-      let d1, d2, d3;
-      // Tăng gấp đôi tỷ lệ ra Bão (Triple), người chơi auto thua nếu không cược Bão (mà bot này không có nút cược Bão)
-      if (Math.random() < (amount >= 5000 ? 0.30 : 0.15)) {
-          d1 = d2 = d3 = Math.floor(Math.random() * 6) + 1; // Bão ngẫu nhiên từ 1-6
-      } else {
-          d1 = Math.floor(Math.random() * 6) + 1;
-          d2 = Math.floor(Math.random() * 6) + 1;
-          d3 = Math.floor(Math.random() * 6) + 1;
-          // Loại bỏ logic né bão cũ để bão ra tự nhiên hơn
+      // 2. Thuật toán đổ xí ngầu (Bóp méo tỷ lệ ra Bão)
+      let d1 = Math.floor(Math.random() * 6) + 1;
+      let d2 = Math.floor(Math.random() * 6) + 1;
+      let d3 = Math.floor(Math.random() * 6) + 1;
+
+      // Nếu hệ thống vô tình quay ra Bão (3 con giống nhau)
+      if (d1 === d2 && d2 === d3) {
+          // Có 75% cơ hội bóp méo con thứ 3 để ĐÁNH SẬP BÃO (Ép tỷ lệ Bão xuống cực thấp)
+          if (Math.random() < 0.75) {
+              d3 = d3 === 6 ? 1 : d3 + 1; 
+          }
       }
+
       const total = d1 + d2 + d3;
       let resultType = (d1 === d2 && d2 === d3) ? 'bao' : (total <= 10 ? 'xiu' : 'tai');
       let resultText = resultType === 'bao' ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_6E171C4F') : (resultType === 'xiu' ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E6748DFF') : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B6CD05B1'));
 
-      // Tạo hiệu ứng Delay lật từng xí ngầu
+      // Tạo hiệu ứng Delay lật từng con xí ngầu
       setTimeout(async () => {
-          await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BDA9E7AC', { v0: choice.toUpperCase(), v1: d1 }), components: [] });
+          await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BDA9E7AC', { v0: choiceText, v1: d1 }), components: [] });
           
           setTimeout(async () => {
-              await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CEB3A7F7', { v0: choice.toUpperCase(), v1: d1, v2: d2 }), components: [] });
+              await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CEB3A7F7', { v0: choiceText, v1: d1, v2: d2 }), components: [] });
               
               setTimeout(async () => {
                   // KẾT QUẢ CUỐI CÙNG
                   if (resultType === choice) {
-                      await updatePilotBalance(interaction.user.id, amount, amount, amount * 2);
-                      await interaction.editReply(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68EE68F1', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: amount.toLocaleString() }));
+                      // NẾU THẮNG
+                      let profitMultiplier = choice === 'bao' ? 24 : 1; 
+                      let profit = amount * profitMultiplier;
+                      let grossPayout = amount + profit;
+
+                      await updatePilotBalance(interaction.user.id, profit, amount, grossPayout);
+                      
+                      let winMsg = choice === 'bao' 
+                        ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_TS_WIN_BAO', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: profit.toLocaleString() })
+                        : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_68EE68F1', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: profit.toLocaleString() });
+
+                      await interaction.editReply({ content: winMsg, components: [] });
                   } else {
+                      // NẾU THUA (Kể cả cược Tài/Xỉu mà lỡ xui ra Bão thì cũng chết tiền)
                       const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
-                      let loseMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EA9C9831', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: amount.toLocaleString() });
-                      if (resultType === 'bao') loseMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1D4B6783', { v0: d1, v1: d2, v2: d3, v3: amount.toLocaleString() });
-                      await interaction.editReply(loseMsg);
+                      
+                      let loseMsg = '';
+                      if (resultType === 'bao') {
+                          // Thua do nhà cái nổ bão
+                          loseMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_1D4B6783', { v0: d1, v1: d2, v2: d3, v3: amount.toLocaleString() });
+                      } else {
+                          // Thua bình thường
+                          loseMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EA9C9831', { v0: d1, v1: d2, v2: d3, v3: total, v4: resultText, v5: amount.toLocaleString() });
+                      }
+                      
+                      await interaction.editReply({ content: loseMsg, components: [] });
                       if (updateRes.success) await checkBankruptcy(interaction, balance.displayName, updateRes.currentCash);
                   }
               }, 1200); // Lật con thứ 3
           }, 1200); // Lật con thứ 2
       }, 1200); // Lật con thứ 1
   });
+
+  collector.on('end', (collected, reason) => {
+      if (reason === 'time') {
+          interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_TS_TIMEOUT'), components: [] });
+      }
+  });
 }
+
 
 // ===================== LỆNH BẦU CUA TÔM CÁ (HỆ THỐNG NÚT BẤM CHỌN 3 LẦN) =====================
 async function handleBauCua(interaction) {
