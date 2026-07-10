@@ -630,6 +630,6 @@
   "STR_98C970A4": "⚠️ Utterly broke! <@{v0}>'s account already has **0 Cash**, cannot strip any more from them!",
   "STR_DB28B325": "✅ **Sentence executed!** Completely confiscated **{v0} Cash** from <@{v1}>, resetting it to 0.",
   "STR_TS_BTN_BAO": "TRIPLE (3 identical dice)",
-  "STR_TS_WIN_BAO": "🎲 **SIC BO** 🎲\n> 🎲 **{v0}** | 🎲 **{v1}** | 🎲 **{v2}** ({v3})\n👉 Result: **{v4}**\n🔥 **JACKPOT! TRIPLE HIT!** You scooped up **{v5} Cash** (x24)!",
+  "STR_TS_WIN_BAO": "🎲 **SIC BO** 🎲\n> 🎲 **{v0}** | 🎲 **{v1}** | 🎲 **{v2}** ({v3})\n👉 Result: **{v4}**\n🔥 **JACKPOT! TRIPLE HIT!** You scooped up **{v5} Cash** (x2)!",
   "STR_TS_TIMEOUT": "⏳ You took too long to decide—the betting window has closed!"
 }
