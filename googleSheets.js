@@ -821,12 +821,15 @@ async function updatePilotBalance(discordId, cashChange, usedCashChange = 0, ear
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: CASH_SPREADSHEET_ID, 
       range: `${CASH_DATABASE_SHEET_NAME}!A2:T`,
+      // BẮT BUỘC THÊM DÒNG NÀY ĐỂ GG SHEET TRẢ VỀ SỐ GỐC:
+      valueRenderOption: 'UNFORMATTED_VALUE', 
     });
     const rows = response.data.values;
     if (!rows || rows.length === 0) return { success: false, msg: 'Không tìm thấy database' };
 
+    // SỬA LẠI PARSENUM RẤT GỌN (Vì lúc này val là số thật, không bị dính dấu chấm/phẩy)
     const parseNum = (val) => {
-      let n = parseFloat(String(val).replace(/,/g, ''));
+      let n = parseFloat(val);
       return isNaN(n) ? 0 : n;
     };
 
