@@ -189,6 +189,53 @@ if (!LEADERBOARD_CHANNEL_ID) {
   console.error('Missing LEADERBOARD_CHANNEL_ID in environment.');
 }
 
+const { translate } = require('@vitalets/google-translate-api');
+
+// Hàm gửi tin nhắn thông minh tự dịch
+async function replyBilingual(interaction, textVi) {
+    try {
+        // Lấy ngôn ngữ cài đặt trên Discord của người dùng
+        const userLocale = interaction.locale; 
+        
+        // Nếu người dùng xài Discord tiếng Việt, gửi thẳng không cần dịch
+        if (userLocale === 'vi') {
+            return await interaction.reply({ content: textVi });
+        }
+
+        // Nếu người dùng xài tiếng Anh (hoặc ngôn ngữ khác), dịch sang tiếng Anh
+        const translated = await translate(textVi, { to: 'en' });
+        
+        // Gửi kết quả đã dịch
+        return await interaction.reply({ content: translated.text });
+    } catch (err) {
+        console.error("Lỗi dịch thuật:", err);
+        // Lỗi thì gửi bản Tiếng Việt chữa cháy
+        return await interaction.reply({ content: textVi }); 
+    }
+}
+
+async function sendBilingual(channel, options) {
+    try {
+        const isString = typeof options === 'string';
+        let textVi = isString ? options : options.content;
+
+        if (textVi) {
+            const translated = await translate(textVi, { to: 'en' });
+            // Ghép nối cả tiếng Việt và Tiếng Anh
+            const combinedText = `${textVi}\n${translated.text}`; 
+
+            if (isString) {
+                options = combinedText;
+            } else {
+                options.content = combinedText;
+            }
+        }
+        return await channel.send(options);
+    } catch (err) {
+        return await channel.send(options); 
+    }
+}
+
 // ===================== Gemini setup =====================
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
@@ -3085,6 +3132,7 @@ client.once('ready', async () => {
 
   // Đảm bảo role event tồn tại
   await ensureEventRoleExists();
+  
 
 
   // Register slash commands
@@ -3588,6 +3636,7 @@ client.once('ready', async () => {
   await loadAllLeaderboards(); // Đợi bot kéo xong data Sheets rồi...
 
   startHourlyLeaderboard(); // ...thì mới được nổ súng cập nhật Leaderboard!
+  startDailyCasinoLeaderboard();
   await ensureACDMMessageExists();
 
   // Thêm dòng này để bật kết nối lấy dữ liệu ACDM liên tục
@@ -3705,11 +3754,11 @@ client.on('interactionCreate', async (interaction) => {
     const [searchId, index] = interaction.values[0].split('_');
     const songs = temporarySearchResults.get(searchId);
 
-    if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
+    if (!songs) return replyBilingual(interaction,{ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
 
     const selectedSong = songs[index];
     let queue = musicQueues.get(interaction.guild.id);
-    if (!queue) return interaction.reply({ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
+    if (!queue) return replyBilingual(interaction,{ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
 
     // Bơm bài hát đã chọn vào hàng chờ
     queue.songs.push(selectedSong);
@@ -3730,10 +3779,10 @@ client.on('interactionCreate', async (interaction) => {
     const searchId = interaction.customId.split('_')[2];
     const songs = temporarySearchResults.get(searchId);
 
-    if (!songs) return interaction.reply({ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
+    if (!songs) return replyBilingual(interaction,{ content: '❌ Danh sách đã hết hạn (sau 1 phút)!', ephemeral: true });
 
     let queue = musicQueues.get(interaction.guild.id);
-    if (!queue) return interaction.reply({ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
+    if (!queue) return replyBilingual(interaction,{ content: '❌ Bot chưa kết nối vào phòng thoại.', ephemeral: true });
 
     // Bơm CÙNG LÚC TOÀN BỘ 100 BÀI HÁT vào hàng chờ
     queue.songs.push(...songs);
@@ -3759,6 +3808,24 @@ client.on('interactionCreate', async (interaction) => {
 
   if (!isChatCmd && !interaction.isButton?.() && !interaction.isModalSubmit?.() && !isStringSelect) return;
   if (isChatCmd) {
+    // ===================== TỰ ĐỘNG GẮN ROLE CON NGHIỆN =====================
+    const casinoCommands = ['taisiu', 'baucua', 'blackjack', 'poker', 'roulette', 'oantuti', 'vietlott', 'baicao', 'coinflip', 'jackpot'];
+    
+    if (casinoCommands.includes(interaction.commandName)) {
+        // SẾP THAY ID ROLE "CON NGHIỆN" CỦA SẾP VÀO ĐÂY NHÉ:
+        const CON_NGHIEN_ROLE_ID = '123456789012345678'; 
+        
+        try {
+            const member = interaction.member;
+            if (member && !member.roles.cache.has(CON_NGHIEN_ROLE_ID)) {
+                await member.roles.add(CON_NGHIEN_ROLE_ID);
+                console.log(`[Casino] Đã phát hiện và đóng mộc "Con Nghiện" cho ${interaction.user.tag}`);
+            }
+        } catch (err) {
+            console.error('Lỗi khi tự động cấp role Con Nghiện:', err.message);
+        }
+    }
+    // =========================================================================
     const embed = createLogEmbed(
       '💻 Command Executed',
       `**User:** ${getUserIdentifier(interaction.user)}\n**Command:** /${interaction.commandName}\n**Channel:** ${getChannelIdentifier(interaction.channel)}`,
@@ -3933,7 +4000,7 @@ client.on('interactionCreate', async (interaction) => {
           const attachments = [anh1, anh2, anh3, anh4].filter(a => a && a.contentType?.startsWith('image')).map(a => a.url);
 
           if (attachments.length === 0) {
-            return interaction.reply({ content: '❌ Bạn phải gửi ít nhất 1 ảnh (định dạng hình ảnh)!', ephemeral: true });
+            return replyBilingual(interaction,{ content: '❌ Bạn phải gửi ít nhất 1 ảnh (định dạng hình ảnh)!', ephemeral: true });
           }
 
           const saleId = Date.now().toString();
@@ -3958,11 +4025,11 @@ client.on('interactionCreate', async (interaction) => {
       if (customId.startsWith('music_')) {
         const queue = musicQueues.get(interaction.guild.id);
         if (!queue) {
-          return interaction.reply({ content: '❌ Nhạc đang tắt, bạn không thể bấm nút này.', ephemeral: true }).catch(() => { });
+          return replyBilingual(interaction,{ content: '❌ Nhạc đang tắt, bạn không thể bấm nút này.', ephemeral: true }).catch(() => { });
         }
 
         if (interaction.member.voice.channel?.id !== queue.voiceChannel.id) {
-          return interaction.reply({ content: '❌ Bạn phải vào chung phòng Voice với bot mới điều khiển được!', ephemeral: true }).catch(() => { });
+          return replyBilingual(interaction,{ content: '❌ Bạn phải vào chung phòng Voice với bot mới điều khiển được!', ephemeral: true }).catch(() => { });
         }
 
         try {
@@ -4011,7 +4078,7 @@ client.on('interactionCreate', async (interaction) => {
       if (interaction.customId.startsWith('ann_editai_')) {
         const reqId = interaction.customId.replace('ann_editai_', '');
         const data = pendingAnnouncements.get(reqId);
-        if (!data) return interaction.reply({ content: '❌ Phiên đã hết hạn.', ephemeral: true });
+        if (!data) return replyBilingual(interaction,{ content: '❌ Phiên đã hết hạn.', ephemeral: true });
 
         const modal = new ModalBuilder()
           .setCustomId(`modalai_${reqId}`)
@@ -4039,7 +4106,7 @@ client.on('interactionCreate', async (interaction) => {
         if (action === 'edit' || action === 'approve' || action === 'reject') {
           const hasAdmin = interaction.member.roles.cache.some(r => r.name === 'Admin') || interaction.member.roles.cache.has(roles.adminRoleId);
           if (!hasAdmin && interaction.user.id !== OWNER_ID) {
-            return interaction.reply({ content: '❌ Chỉ Admin mới được thực hiện thao tác này!', ephemeral: true });
+            return replyBilingual(interaction,{ content: '❌ Chỉ Admin mới được thực hiện thao tác này!', ephemeral: true });
           }
         }
 
@@ -4072,7 +4139,7 @@ client.on('interactionCreate', async (interaction) => {
 
         if (action === 'approve') {
           const marketChannel = interaction.guild.channels.cache.get(MARKETPLACE_CHANNEL_ID);
-          if (!marketChannel) return interaction.reply({ content: '❌ Không tìm thấy kênh Marketplace!', ephemeral: true });
+          if (!marketChannel) return replyBilingual(interaction, { content: '❌ Không tìm thấy kênh Marketplace!', ephemeral: true });
 
           const publicEmbed = EmbedBuilder.from(oldEmbed)
             .setFooter({ text: `Ngày đăng: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}` });
@@ -4082,9 +4149,9 @@ client.on('interactionCreate', async (interaction) => {
             new ButtonBuilder().setCustomId(`market_soldout_${parsedData.sellerId}`).setLabel('Hết hàng / Đã bán').setStyle(ButtonStyle.Danger).setEmoji('✖️')
           );
 
-          await marketChannel.send({ content: '📢 **CÓ SẢN PHẨM MỚI!**', embeds: [publicEmbed], components: [row] });
-          await interaction.message.edit({ content: `✅ **Đã duyệt** bởi ${interaction.user.mention}`, components: [], embeds: [] });
-          await interaction.reply({ content: '✅ Đã đăng bài thành công ra kênh Marketplace!', ephemeral: true });
+          await sendBilingual(marketChannel,{ content: '📢 **CÓ SẢN PHẨM MỚI!**', embeds: [publicEmbed], components: [row] });
+          await editBilingual(interaction,{ content: `✅ **Đã duyệt** bởi ${interaction.user.mention}`, components: [], embeds: [] });
+          await replyBilingual(interaction,{ content: '✅ Đã đăng bài thành công ra kênh Marketplace!', ephemeral: true });
           return;
         }
 
@@ -4094,7 +4161,7 @@ client.on('interactionCreate', async (interaction) => {
           const isSeller = interaction.user.id === sellerId;
 
           if (!isSeller && !hasAdmin && interaction.user.id !== OWNER_ID) {
-            return interaction.reply({ content: '❌ Chỉ người bán hoặc Admin mới được đóng bài!', ephemeral: true });
+            return replyBilingual(interaction,{ content: '❌ Chỉ người bán hoặc Admin mới được đóng bài!', ephemeral: true });
           }
 
           const soldEmbed = EmbedBuilder.from(oldEmbed)
@@ -4105,8 +4172,8 @@ client.on('interactionCreate', async (interaction) => {
             new ButtonBuilder().setCustomId('disabled_sold').setLabel('Đã Hết Hàng').setStyle(ButtonStyle.Secondary).setDisabled(true)
           );
 
-          await interaction.message.edit({ embeds: [soldEmbed], components: [row] });
-          await interaction.reply({ content: '✅ Đã đóng bài đăng bán thành công.', ephemeral: true });
+          await editBilingual(interaction,{ embeds: [soldEmbed], components: [row] });
+          await replyBilingual(interaction,{ content: '✅ Đã đóng bài đăng bán thành công.', ephemeral: true });
           return;
         }
       }
@@ -4140,7 +4207,7 @@ client.on('interactionCreate', async (interaction) => {
         if (adminChannel) {
           await adminChannel.send({ content: `📩 **ĐƠN BÁN MỚI** từ <@${interaction.user.id}>`, embeds: [embed], components: [row] });
         }
-        await interaction.reply({ content: '✅ Đã gửi đơn đăng bán cho Admin duyệt!', ephemeral: true });
+        await replyBilingual(interaction,{ content: '✅ Đã gửi đơn đăng bán cho Admin duyệt!', ephemeral: true });
         return;
       }
 
@@ -4173,9 +4240,9 @@ client.on('interactionCreate', async (interaction) => {
           const channel = await interaction.client.channels.fetch(channelId);
           const msg = await channel.messages.fetch(messageId);
           await msg.edit(newText);
-          await interaction.reply({ content: '✅ Đã cập nhật thành công thông báo cũ!', ephemeral: true });
+          await replyBilingual(interaction, { content: '✅ Đã cập nhật thành công thông báo cũ!', ephemeral: true });
         } catch (err) {
-          await interaction.reply({ content: '❌ Lỗi không sửa được tin nhắn (Có thể khác tác giả).', ephemeral: true });
+          await replyBilingual(interaction, { content: '❌ Lỗi không sửa được tin nhắn (Có thể khác tác giả).', ephemeral: true });
         }
       }
 
@@ -4185,7 +4252,7 @@ client.on('interactionCreate', async (interaction) => {
         const newText = interaction.fields.getTextInputValue('ai_text');
         const data = pendingAnnouncements.get(reqId);
 
-        if (!data) return interaction.reply({ content: '❌ Phiên đã hết hạn.', ephemeral: true });
+        if (!data) return replyBilingual(interaction, { content: '❌ Phiên đã hết hạn.', ephemeral: true });
 
         // Lưu lại nội dung người dùng vừa sửa vào bộ nhớ tạm
         data.aiMessage = newText;
@@ -4215,9 +4282,9 @@ client.on('interactionCreate', async (interaction) => {
         if (scheduledIndex !== -1) {
           scheduledAnnouncements[scheduledIndex].content = newText;
           await db.saveAnnouncements(scheduledAnnouncements);
-          await interaction.reply({ content: '✅ Đã cập nhật nội dung cho thông báo hẹn giờ thành công!', ephemeral: true });
+          await replyBilingual(interaction,{ content: '✅ Đã cập nhật nội dung cho thông báo hẹn giờ thành công!', ephemeral: true });
         } else {
-          await interaction.reply({ content: '❌ Lịch trình này không còn tồn tại hoặc đã được gửi đi.', ephemeral: true });
+          await replyBilingual(interaction, { content: '❌ Lịch trình này không còn tồn tại hoặc đã được gửi đi.', ephemeral: true });
         }
       }
       // Nộp form từ chối bài bán
@@ -4260,7 +4327,7 @@ client.on('interactionCreate', async (interaction) => {
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({ content: '❌ Đã có lỗi nội bộ.', ephemeral: true });
       } else {
-        await interaction.reply({ content: '❌ Đã có lỗi nội bộ.', ephemeral: true });
+        await replyBilingual(interaction,{ content: '❌ Đã có lỗi nội bộ.', ephemeral: true });
       }
     } catch (_) { }
   }
@@ -4599,7 +4666,7 @@ async function handleTimeCommand(interaction) {
     .setFooter({ text: 'Bot được cung cấp thông tin thời gian thực', iconURL: 'https://cdn-icons-png.flaticon.com/512/3114/3114840.png' })
     .setTimestamp();
 
-  await interaction.reply({ embeds: [embed] });
+  await replyBilingual(interaction,{ embeds: [embed] });
 }
 
 // ===================== AWARD FUNCTIONS =====================
@@ -4766,7 +4833,7 @@ async function sendATCAward(interaction = null) {
 
     // Nếu gọi từ interaction, reply
     if (interaction) {
-      await interaction.reply({
+      await replyBilingual(interaction,{
         content: `✅ Đã gửi thông báo chúc mừng top 5 ATC vào <#${channelId}>!`,
         ephemeral: true
       });
@@ -4777,7 +4844,7 @@ async function sendATCAward(interaction = null) {
   } catch (err) {
     console.error('Error sending ATC award:', err);
     if (interaction) {
-      await interaction.reply({
+      await replyBilingual(interaction,{
         content: '❌ Đã có lỗi khi gửi thông báo award ATC!',
         ephemeral: true
       });
@@ -4865,7 +4932,7 @@ async function sendPilotAward(interaction = null) {
 
     // Nếu gọi từ interaction, reply
     if (interaction) {
-      await interaction.reply({
+      await replyBilingual(interaction,{
         content: `✅ Đã gửi thông báo chúc mừng top 5 pilot vào <#${channelId}>!`,
         ephemeral: true
       });
@@ -4876,7 +4943,7 @@ async function sendPilotAward(interaction = null) {
   } catch (err) {
     console.error('Error sending pilot award:', err);
     if (interaction) {
-      await interaction.reply({
+      await replyBilingual(interaction,{
         content: '❌ Đã có lỗi khi gửi thông báo award pilot!',
         ephemeral: true
       });
@@ -4953,7 +5020,7 @@ async function resetAwardStatus() {
 async function handleSummarize(interaction) {
   try {
     if (!interaction.inGuild()) {
-      return interaction.reply({ content: '❌ Lệnh này chỉ dùng trong server.', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ Lệnh này chỉ dùng trong server.', ephemeral: true });
     }
 
     const sub = interaction.options.getSubcommand();
@@ -4961,7 +5028,7 @@ async function handleSummarize(interaction) {
     const durationMs = parseDurationToMs(durationStr);
 
     if (!durationMs || isNaN(durationMs) || durationMs <= 0) {
-      return interaction.reply({
+      return replyBilingual(interaction,{
         content: '❌ Duration không hợp lệ. Ví dụ: `30m`, `2h`, `1d` (hoặc `45` = 45 phút).',
         ephemeral: true,
       });
@@ -4969,12 +5036,12 @@ async function handleSummarize(interaction) {
 
     const maxAllowed = 7 * 24 * 60 * 60 * 1000;
     if (durationMs > maxAllowed) {
-      return interaction.reply({ content: '❌ Duration quá dài. Tối đa 7 ngày.', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ Duration quá dài. Tối đa 7 ngày.', ephemeral: true });
     }
 
     const channel = interaction.options.getChannel('channel') || interaction.channel;
     if (!channel || typeof channel.isTextBased !== 'function' || !channel.isTextBased()) {
-      return interaction.reply({ content: '❌ Kênh này không phải text channel.', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ Kênh này không phải text channel.', ephemeral: true });
     }
 
     const targetUser = sub === 'user' ? interaction.options.getUser('user', true) : null;
@@ -5067,7 +5134,7 @@ ${transcript}
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply('❌ Tóm tắt thất bại do lỗi nội bộ. Admin kiểm tra log giúp nhé.');
       } else {
-        await interaction.reply({ content: '❌ Tóm tắt thất bại do lỗi nội bộ. Admin kiểm tra log giúp nhé.', ephemeral: true });
+        await replyBilingual(interaction,{ content: '❌ Tóm tắt thất bại do lỗi nội bộ. Admin kiểm tra log giúp nhé.', ephemeral: true });
       }
     } catch (_) { }
   }
@@ -5079,25 +5146,25 @@ async function handleLeaderboardCommand(interaction) {
 
   if (subcommand === 'show') {
     await updateControllerLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
+    await replyBilingual(interaction,{ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
 
   } else if (subcommand === 'update') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ Bạn không có quyền cập nhật leaderboard.', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ Bạn không có quyền cập nhật leaderboard.', ephemeral: true });
     }
 
     await updateControllerLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
+    await replyBilingual(interaction,{ content: '✅ Controller Leaderboard đã được cập nhật!', ephemeral: true });
 
   } else if (subcommand === 'reset') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ Bạn không có quyền reset leaderboard.', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ Bạn không có quyền reset leaderboard.', ephemeral: true });
     }
 
     const now = new Date();
@@ -5110,7 +5177,7 @@ async function handleLeaderboardCommand(interaction) {
     };
     await saveControllerLeaderboard(currentMonth, currentYear, leaderboardData.stats);
     await updateControllerLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Controller Leaderboard đã được reset!', ephemeral: true });
+    await replyBilingual(interaction,{ content: '✅ Controller Leaderboard đã được reset!', ephemeral: true });
   }
 }
 
@@ -5120,25 +5187,25 @@ async function handlePilotLeaderboardCommand(interaction) {
 
   if (subcommand === 'show') {
     await updatePilotLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
+    await replyBilingual(interaction,{ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
 
   } else if (subcommand === 'update') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ Bạn không có quyền cập nhật pilot leaderboard.', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ Bạn không có quyền cập nhật pilot leaderboard.', ephemeral: true });
     }
 
     await updatePilotLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
+    await replyBilingual(interaction,{ content: '✅ Pilot Leaderboard đã được cập nhật!', ephemeral: true });
 
   } else if (subcommand === 'reset') {
     const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ Bạn không có quyền reset pilot leaderboard.', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ Bạn không có quyền reset pilot leaderboard.', ephemeral: true });
     }
 
     const now = new Date();
@@ -5151,7 +5218,7 @@ async function handlePilotLeaderboardCommand(interaction) {
     };
     await savePilotLeaderboard(currentMonth, currentYear, pilotLeaderboardData.pilots);
     await updatePilotLeaderboardEmbed();
-    await interaction.reply({ content: '✅ Pilot Leaderboard đã được reset!', ephemeral: true });
+    await replyBilingual(interaction,{ content: '✅ Pilot Leaderboard đã được reset!', ephemeral: true });
 
   } else if (subcommand === 'full') {
     await interaction.deferReply();
@@ -5193,7 +5260,7 @@ async function handleRequestRole(interaction) {
   const userId = member.id;
 
   if ((bans.users[userId] && bans.users[userId].endTime > Date.now()) || (member.roles && member.roles.cache.has(roles.banRoleId))) {
-    return interaction.reply({ content: 'Bạn đang bị ban, không thể xin role.', ephemeral: true });
+    return replyBilingual(interaction,{ content: 'Bạn đang bị ban, không thể xin role.', ephemeral: true });
   }
 
   const hasDev = member.roles.cache.has(roles.devRoleId);
@@ -5204,7 +5271,7 @@ async function handleRequestRole(interaction) {
     const filteredRoles = (roles.otherRoles || []).filter(
       (r) => r.id !== roles.devRoleId && r.id !== roles.adminRoleId && r.id !== roles.verifiedMemberRoleId
     );
-    if (filteredRoles.length === 0) return interaction.reply({ content: 'Không có role nào có thể xin.', ephemeral: true });
+    if (filteredRoles.length === 0) return replyBilingual(interaction,{ content: 'Không có role nào có thể xin.', ephemeral: true });
 
     const row = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
@@ -5212,12 +5279,12 @@ async function handleRequestRole(interaction) {
         .setPlaceholder('Chọn role')
         .addOptions(filteredRoles.map((r) => ({ label: r.name, value: r.id })))
     );
-    await interaction.reply({ content: 'Chọn role bạn muốn xin:', components: [row], ephemeral: true });
+    await replyBilingual(interaction,{ content: 'Chọn role bạn muốn xin:', components: [row], ephemeral: true });
   } else {
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('request_member').setLabel('Xin Role Member').setStyle(ButtonStyle.Primary)
     );
-    await interaction.reply({ content: 'Bạn cần có role Member trước. Bấm để xin:', components: [row], ephemeral: true });
+    await replyBilingual(interaction,{ content: 'Bạn cần có role Member trước. Bấm để xin:', components: [row], ephemeral: true });
   }
 }
 
@@ -5268,7 +5335,7 @@ async function handleButton(interaction) {
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasVerified && !hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ Bạn không có quyền duyệt request này.', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ Bạn không có quyền duyệt request này.', ephemeral: true });
     }
 
     const action = customId.split('_')[0];
@@ -5276,7 +5343,7 @@ async function handleButton(interaction) {
     const request = pendingRequests.get(requestId);
 
     if (!request) {
-      return interaction.reply({ content: '❌ Yêu cầu này đã hết hạn hoặc đã được xử lý.', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ Yêu cầu này đã hết hạn hoặc đã được xử lý.', ephemeral: true });
     }
 
     pendingRequests.delete(requestId);
@@ -5393,7 +5460,7 @@ async function handleButton(interaction) {
     const eventId = customId.split('_')[2];
     const event = events.get(eventId);
     if (!event || event.creator !== interaction.user.id) {
-      return interaction.reply({ content: 'Không tìm thấy sự kiện hoặc bạn không phải người tạo.', ephemeral: true });
+      return replyBilingual(interaction,{ content: 'Không tìm thấy sự kiện hoặc bạn không phải người tạo.', ephemeral: true });
     }
 
     const guild = await client.guilds.fetch(GUILD_ID);
@@ -5523,7 +5590,7 @@ async function handleButton(interaction) {
           .setLabel('Xin Role Member')
           .setStyle(ButtonStyle.Primary)
       );
-      return interaction.reply({ 
+      return replyBilingual(interaction,{ 
         content: '❌ Chầm chậm đã! Bạn cần có role **Member** để chính thức tham gia server trước khi liên kết tài khoản VATSIM. Bấm nút dưới đây để xin role nha:', 
         components: [row], 
         ephemeral: true 
@@ -5663,7 +5730,7 @@ async function handleButton(interaction) {
     const action = parts[1];
     const eventId = parts.slice(2).join('_');
     const event = events.get(eventId);
-    if (!event) return interaction.reply({ content: 'Không tìm thấy sự kiện.', ephemeral: true });
+    if (!event) return replyBilingual(interaction,{ content: 'Không tìm thấy sự kiện.', ephemeral: true });
 
     if (action === 'join') {
       if (!event.participants.includes(interaction.user.id)) {
@@ -5673,7 +5740,7 @@ async function handleButton(interaction) {
         // Thêm user vào event tracking
         await addUserToEvent(interaction.user.id, eventId);
       }
-      await interaction.reply({ content: '✅ Đã tham gia sự kiện!', ephemeral: true });
+      await replyBilingual(interaction,{ content: '✅ Đã tham gia sự kiện!', ephemeral: true });
       return;
     }
 
@@ -5684,7 +5751,7 @@ async function handleButton(interaction) {
       // Xóa user khỏi event tracking
       await removeUserFromEvent(interaction.user.id, eventId);
 
-      await interaction.reply({ content: '❌ Đã hủy tham gia sự kiện!', ephemeral: true });
+      await replyBilingual(interaction,{ content: '❌ Đã hủy tham gia sự kiện!', ephemeral: true });
       return;
     }
 
@@ -5713,9 +5780,9 @@ async function handleButton(interaction) {
         } catch (_) { }
 
         events.delete(eventId);
-        await interaction.reply({ content: '🚫 Sự kiện đã bị hủy!', ephemeral: true });
+        await replyBilingual(interaction,{ content: '🚫 Sự kiện đã bị hủy!', ephemeral: true });
       } else {
-        await interaction.reply({ content: 'Bạn không có quyền hủy sự kiện.', ephemeral: true });
+        await replyBilingual(interaction,{ content: 'Bạn không có quyền hủy sự kiện.', ephemeral: true });
       }
     }
   }
@@ -5747,7 +5814,7 @@ async function handleSendAward(interaction) {
     const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
 
     if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-      return interaction.reply({
+      return replyBilingual(interaction,{
         content: '❌ Chỉ admin và dev mới có thể sử dụng lệnh này!',
         ephemeral: true
       });
@@ -5796,7 +5863,7 @@ async function handleModal(interaction) {
     const cid = parseInt(cidStr);
 
     if (isNaN(cid)) {
-      return interaction.reply({ content: '❌ CID không hợp lệ. Vui lòng nhập số.', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ CID không hợp lệ. Vui lòng nhập số.', ephemeral: true });
     }
 
     await interaction.deferReply({ ephemeral: true }); // Chờ API VATSIM phản hồi
@@ -5855,8 +5922,8 @@ async function handleModal(interaction) {
     const timeStr = interaction.fields.getTextInputValue('time');
     const startTime = parseUTCDateTime(timeStr);
 
-    if (isNaN(startTime)) return interaction.reply({ content: 'Giờ không hợp lệ. Vui lòng dùng định dạng YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
-    if (startTime <= Date.now()) return interaction.reply({ content: 'Thời gian bắt đầu phải ở tương lai.', ephemeral: true });
+    if (isNaN(startTime)) return replyBilingual(interaction,{ content: 'Giờ không hợp lệ. Vui lòng dùng định dạng YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
+    if (startTime <= Date.now()) return replyBilingual(interaction,{ content: 'Thời gian bắt đầu phải ở tương lai.', ephemeral: true });
 
     const eventId = Date.now().toString();
     events.set(eventId, {
@@ -5878,7 +5945,7 @@ async function handleModal(interaction) {
       new ButtonBuilder().setCustomId(`confirm_event_${eventId}`).setLabel('🚀 Xác nhận và công bố').setStyle(ButtonStyle.Success).setEmoji('🚀')
     );
 
-    await interaction.reply({
+    await replyBilingual(interaction,{
       content: `📋 **Xem trước sự kiện:**\n🛫 **Departure:** ${dep}\n🛬 **Arrival:** ${arr}\n🧭 **Route:** ${route}\n⏰ **Start Time (UTC):** ${formatDateTime(startTimeObj)}`,
       components: [row],
       ephemeral: true,
@@ -5897,10 +5964,10 @@ async function handleModal(interaction) {
       // Cập nhật luôn vào RAM để AI đọc được ngay lập tức
       profiles[interaction.user.id] = { name, age, bio };
 
-      await interaction.reply({ content: '✅ Profile của bạn đã được lưu vĩnh viễn lên MongoDB!', ephemeral: true });
+      await replyBilingual(interaction,{ content: '✅ Profile của bạn đã được lưu vĩnh viễn lên MongoDB!', ephemeral: true });
     } catch (err) {
       console.error(err);
-      await interaction.reply({ content: '⚠️ Lỗi lưu Database.', ephemeral: true });
+      await replyBilingual(interaction,{ content: '⚠️ Lỗi lưu Database.', ephemeral: true });
     }
     return;
   }
@@ -5981,10 +6048,10 @@ async function handleModal(interaction) {
           });
 
           pendingRequests.get(requestId).messageId = sentMessage.id;
-          await interaction.reply({ content: '✅ Request sent for approval.', ephemeral: true });
+          await replyBilingual(interaction,{ content: '✅ Request sent for approval.', ephemeral: true });
         } catch (err) {
           console.error('Error sending request to channel:', err);
-          await interaction.reply({ content: '❌ Error sending request.', ephemeral: true });
+          await replyBilingual(interaction,{ content: '❌ Error sending request.', ephemeral: true });
           pendingRequests.delete(requestId);
         }
       }
@@ -6117,7 +6184,7 @@ async function handleSubmitProfile(interaction) {
 async function handleAnnouncement(interaction) {
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
-  if (!hasDev && !hasAdmin) return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+  if (!hasDev && !hasAdmin) return replyBilingual(interaction,{ content: '❌ Bạn không có quyền.', ephemeral: true });
 
   const channel = interaction.options.getChannel('channel');
   const rawMessage = interaction.options.getString('message');
@@ -6128,7 +6195,7 @@ async function handleAnnouncement(interaction) {
   if (timeStr) {
     targetTime = parseUTCDateTime(timeStr);
     if (isNaN(targetTime) || targetTime <= Date.now()) {
-      return interaction.reply({ content: '❌ Giờ không hợp lệ hoặc đã qua. Định dạng đúng: YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
+      return replyBilingual(interaction,{ content: '❌ Giờ không hợp lệ hoặc đã qua. Định dạng đúng: YYYY-MM-DD HH:MM (UTC).', ephemeral: true });
     }
   }
 
@@ -6240,7 +6307,7 @@ async function handleAnnouncement(interaction) {
 async function handleSetupAtcNoti(interaction) {
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   if (!hasAdmin && interaction.user.id !== OWNER_ID) {
-    return interaction.reply({ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
+    return replyBilingual(interaction,{ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
   }
 
   const embed = new EmbedBuilder()
@@ -6258,7 +6325,7 @@ async function handleSetupAtcNoti(interaction) {
   fs.writeFileSync(REACTION_ROLES_FILE, JSON.stringify(reactionRoleData, null, 2));
   // ------------------------------------
 
-  await interaction.reply({ content: '✅ Đã khởi tạo tin nhắn lấy role và lưu vào cơ sở dữ liệu thành công!', ephemeral: true });
+  await replyBilingual(interaction,{ content: '✅ Đã khởi tạo tin nhắn lấy role và lưu vào cơ sở dữ liệu thành công!', ephemeral: true });
 }
 
 async function ensureVatsimMessageExists() {
@@ -7760,7 +7827,7 @@ async function handleEditAnnoun(interaction) {
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-    return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+    return replyBilingual(interaction,{ content: '❌ Bạn không có quyền.', ephemeral: true });
   }
 
   const channel = interaction.options.getChannel('channel');
@@ -7786,12 +7853,12 @@ async function handleEditAnnoun(interaction) {
 
   // 2. Nếu KHÔNG PHẢI lịch trình hẹn giờ, bắt buộc phải có Channel để móc tin nhắn cũ
   if (!channel) {
-    return interaction.reply({ content: '❌ Đây không phải ID lịch trình. Nếu bạn muốn sửa tin nhắn đã gửi, vui lòng chọn thêm mục `channel` (kênh chứa tin nhắn đó) nhé!', ephemeral: true });
+    return replyBilingual(interaction,{ content: '❌ Đây không phải ID lịch trình. Nếu bạn muốn sửa tin nhắn đã gửi, vui lòng chọn thêm mục `channel` (kênh chứa tin nhắn đó) nhé!', ephemeral: true });
   }
 
   try {
     const targetMsg = await channel.messages.fetch(messageId);
-    if (!targetMsg) return interaction.reply({ content: '❌ Không tìm thấy tin nhắn với ID này.', ephemeral: true });
+    if (!targetMsg) return replyBilingual(interaction,{ content: '❌ Không tìm thấy tin nhắn với ID này.', ephemeral: true });
 
     // Tạo bảng nhập (Modal) cho tin nhắn đã gửi
     const modal = new ModalBuilder()
@@ -7812,7 +7879,7 @@ async function handleEditAnnoun(interaction) {
 
   } catch (error) {
     console.error('Lỗi lấy tin nhắn cũ:', error);
-    await interaction.reply({ content: '❌ Có lỗi xảy ra, đảm bảo ID đúng và bot có quyền xem kênh đó.', ephemeral: true });
+    await replyBilingual(interaction,{ content: '❌ Có lỗi xảy ra, đảm bảo ID đúng và bot có quyền xem kênh đó.', ephemeral: true });
   }
 }
 
@@ -7820,7 +7887,7 @@ async function handleCancelAnnoun(interaction) {
   const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
   const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
   if (!hasDev && !hasAdmin && interaction.user.id !== OWNER_ID) {
-    return interaction.reply({ content: '❌ Bạn không có quyền.', ephemeral: true });
+    return replyBilingual(interaction,{ content: '❌ Bạn không có quyền.', ephemeral: true });
   }
 
   const id = interaction.options.getString('id');
@@ -7829,9 +7896,9 @@ async function handleCancelAnnoun(interaction) {
 
   if (scheduledAnnouncements.length < initialLength) {
     await db.saveAnnouncements(scheduledAnnouncements);
-    return interaction.reply({ content: `✅ Đã hủy lịch trình gửi thông báo (ID: \`${id}\`)!`, ephemeral: true });
+    return replyBilingual(interaction,{ content: `✅ Đã hủy lịch trình gửi thông báo (ID: \`${id}\`)!`, ephemeral: true });
   } else {
-    return interaction.reply({ content: `❌ Không tìm thấy lịch trình nào với ID: \`${id}\` (Có thể nó đã được gửi đi rồi)`, ephemeral: true });
+    return replyBilingual(interaction,{ content: `❌ Không tìm thấy lịch trình nào với ID: \`${id}\` (Có thể nó đã được gửi đi rồi)`, ephemeral: true });
   }
 }
 
@@ -8272,7 +8339,7 @@ async function handlePlayMusic(interaction) {
   const voiceChannel = interaction.member.voice.channel;
 
   if (!voiceChannel) {
-    return interaction.reply({ content: '❌ Bạn phải vào một kênh thoại (Voice Channel) trước mới nghe nhạc được chứ!', ephemeral: true });
+    return replyBilingual(interaction,{ content: '❌ Bạn phải vào một kênh thoại (Voice Channel) trước mới nghe nhạc được chứ!', ephemeral: true });
   }
 
   await interaction.deferReply();
@@ -8579,7 +8646,7 @@ async function handleQueue(interaction) {
 
   // Nếu không có nhạc hoặc chỉ có mỗi 1 bài đang hát (hàng chờ = 0)
   if (!queue || queue.songs.length <= 1) {
-    return interaction.reply({
+    return replyBilingual(interaction,{
       content: '📭 **Hàng chờ hiện tại đang trống!** Hãy dùng lệnh `/play` để thêm nhạc vào nhé.',
       ephemeral: true
     });
@@ -8623,7 +8690,7 @@ async function handleClearQueue(interaction) {
 
   // Nếu không có hàng chờ hoặc chỉ có mỗi 1 bài đang hát thì không có gì để xóa
   if (!queue || queue.songs.length <= 1) {
-    return interaction.reply({
+    return replyBilingual(interaction,{
       content: '❌ Hàng chờ đang trống sẵn rồi, không có gì để dọn đâu!',
       ephemeral: true
     });
@@ -8634,7 +8701,7 @@ async function handleClearQueue(interaction) {
   // Giữ lại bài ở vị trí số 0 (đang phát), chém bay màu toàn bộ bài từ vị trí số 1 trở đi
   queue.songs.splice(1);
 
-  await interaction.reply({ content: `🧹 Đã dọn dẹp sạch sẽ **${removeCount}** bài hát khỏi hàng chờ!` });
+  await replyBilingual(interaction,{ content: `🧹 Đã dọn dẹp sạch sẽ **${removeCount}** bài hát khỏi hàng chờ!` });
 
   // Cập nhật lại cái bảng điều khiển Dashboard ngay lập tức cho con số nó nhảy về 0
   if (queue.dashboardMsg) {
@@ -8648,7 +8715,7 @@ async function handleSetupVatsimVerify(interaction) {
   const hasAdmin = memberRoles?.cache?.has(roles.adminRoleId) || (Array.isArray(memberRoles) && memberRoles.includes(roles.adminRoleId));
 
   if (!hasAdmin && interaction.user.id !== OWNER_ID) {
-    return interaction.reply({ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
+    return replyBilingual(interaction,{ content: '❌ Chỉ Admin mới có thể dùng lệnh này.', ephemeral: true });
   }
 
   const embed = new EmbedBuilder()
@@ -8662,7 +8729,7 @@ async function handleSetupVatsimVerify(interaction) {
   );
 
   await interaction.channel.send({ embeds: [embed], components: [row] });
-  await interaction.reply({ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
+  await replyBilingual(interaction,{ content: '✅ Đã tạo bảng liên kết VATSIM thành công!', ephemeral: true });
 }
 
 // ===================== SIÊU LOGGING: BẮT TRỌN MỌI CHUYỂN ĐỘNG CỦA SERVER =====================
@@ -9814,7 +9881,7 @@ async function handleBauCua(interaction) {
             if (matchCount > 0) {
                 const profit = amount * matchCount;
                 const grossPayout = amount + profit;
-                await updatePilotBalance(interaction.user.id, profit, amount, grossPayout);
+               await updatePilotBalance(interaction.user.id, profit, amount, grossPayout); 
                 resultStr += `🎉 **THẮNG RỒI!** Trúng ${matchCount} mục. Ăn tiền nhân ${matchCount}! Thu về **${profit.toLocaleString()} Cash** tiền lãi!`;
             } else {
                 const updateRes = await updatePilotBalance(interaction.user.id, -amount, amount, 0);
@@ -9827,7 +9894,7 @@ async function handleBauCua(interaction) {
     });
 }
 
-// ===================== LỆNH XÌ DÁCH (BLACKJACK LUẬT VIỆT NAM) =====================
+// ===================== LỆNH XÌ DÁCH (BLACKJACK LUẬT VIỆT NAM CHUẨN) =====================
 function getDeck() {
     const suits = ['♠️', '♣️', '♥️', '♦️'];
     const values = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
@@ -9838,18 +9905,30 @@ function getDeck() {
     return deck.sort(() => Math.random() - 0.5);
 }
 
+// Tính điểm thông minh: A = 1, 10, hoặc 11
 function getScore(hand) {
-    let score = 0, aces = 0;
+    let baseScore = 0;
+    let aces = 0;
     for (let card of hand) {
-        if (['J', 'Q', 'K'].includes(card.value)) score += 10;
-        else if (card.value === 'A') { score += 1; aces += 1; }
-        else score += parseInt(card.value);
+        if (['J', 'Q', 'K'].includes(card.value)) baseScore += 10;
+        else if (card.value === 'A') aces += 1;
+        else baseScore += parseInt(card.value);
     }
-    while (aces > 0 && score + 10 <= 21) {
-        score += 10;
-        aces -= 1;
+
+    // Đệ quy tính điểm ngon nhất cho từng con Át
+    function calculate(currentScore, acesLeft) {
+        if (acesLeft === 0) return currentScore;
+        let options = [
+            calculate(currentScore + 1, acesLeft - 1),
+            calculate(currentScore + 10, acesLeft - 1),
+            calculate(currentScore + 11, acesLeft - 1)
+        ];
+        let valid = options.filter(s => s <= 21);
+        if (valid.length > 0) return Math.max(...valid); // Lấy điểm cao nhất mà không Quắc
+        return Math.min(...options); // Nếu đường nào cũng Quắc thì lấy điểm thấp nhất để hạn chế
     }
-    return score;
+
+    return aces > 0 ? calculate(baseScore, aces) : baseScore;
 }
 
 function formatHand(hand) {
@@ -9859,26 +9938,39 @@ function formatHand(hand) {
 async function handleBlackjack(interaction) {
     const amountInput = interaction.options.getString('amount');
     await interaction.deferReply();
-    const balance = await checkAndRegisterUser(interaction); // Thay bằng hàm check user của sếp
-    if (!balance) return;
-    const amount = parseBetAmount(amountInput, balance.currentCash); // Thay bằng hàm parse tiền của sếp
-    if (amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
+    
+    // --- LƯU Ý: Sếp tự điều chỉnh lại cách lấy Balance và lấy Tiền của sếp ở đây nha ---
+    const balance = await getPilotBalance(interaction.user.id);
+    if (!balance) return interaction.editReply('❌ Sếp chưa có tài khoản, hãy gõ `/daily` hoặc `/work` để mở ví!');
+    
+    let amount = parseInt(amountInput);
+    if (amountInput === 'all') amount = balance.currentCash;
+    else if (amountInput === 'half') amount = Math.floor(balance.currentCash / 2);
+    
+    if (isNaN(amount) || amount <= 0) return interaction.editReply('❌ Số tiền cược không hợp lệ!');
     if (balance.currentCash < amount) return interaction.editReply(`❌ Số dư không đủ!`);
+    // -------------------------------------------------------------------------------------
 
     let deck = getDeck();
     let playerHand = [deck.pop(), deck.pop()];
     let dealerHand = [deck.pop(), deck.pop()];
 
-    // Kiểm tra Xì Bàng / Xì Dách ngay từ 2 lá đầu
+    // Khai báo điều kiện Xì Bàng, Xì Dách
     const isXiBang = (hand) => hand.length === 2 && hand[0].value === 'A' && hand[1].value === 'A';
     const isXiDach = (hand) => hand.length === 2 && getScore(hand) === 21;
 
     let pXiBang = isXiBang(playerHand), pXiDach = isXiDach(playerHand);
     
-    if (pXiBang || pXiDach) {
-        let winStr = pXiBang ? '💥 XÌ BÀNG' : '🔥 XÌ DÁCH';
-        await updatePilotBalance(interaction.user.id, amount, amount, amount * 2);
-        return interaction.editReply(`🃏 **XÌ DÁCH VIỆT NAM** 🃏\n> Bài của sếp: ${formatHand(playerHand)} \n🎉 **${winStr}!** Sếp thắng ngay lập tức và húp **${amount.toLocaleString()} Cash**!`);
+    if (pXiBang) {
+        // Xì Bàng: Nhân 3 tiền lãi
+        await updatePilotBalance(interaction.user.id, amount * 3, amount, amount * 4);
+        return interaction.editReply(`🃏 **XÌ DÁCH VIỆT NAM** 🃏\n> Bài của sếp: ${formatHand(playerHand)} \n💥 **XÌ BÀNG!** (Nhân 3 tiền). Sếp húp **${(amount * 3).toLocaleString()} Cash** lãi!`);
+    }
+    
+    if (pXiDach) {
+        // Xì Dách: Nhân 2 tiền lãi
+        await updatePilotBalance(interaction.user.id, amount * 2, amount, amount * 3);
+        return interaction.editReply(`🃏 **XÌ DÁCH VIỆT NAM** 🃏\n> Bài của sếp: ${formatHand(playerHand)} \n🔥 **XÌ DÁCH!** (Nhân 2 tiền). Sếp húp **${(amount * 2).toLocaleString()} Cash** lãi!`);
     }
 
     const row = new ActionRowBuilder().addComponents(
@@ -9893,7 +9985,7 @@ async function handleBlackjack(interaction) {
             { name: `Bài của bạn (Điểm: ${getScore(playerHand)})`, value: formatHand(playerHand), inline: true },
             { name: `Bài Nhà Cái`, value: `**?** | ${formatHand([dealerHand[1]])}`, inline: true }
         )
-        .setFooter({ text: `Cược: ${amount.toLocaleString()} Cash | Ngũ Linh sẽ được x2!` });
+        .setFooter({ text: `Cược: ${amount.toLocaleString()} Cash | Ngũ Linh, Xì Dách x2 | Xì Bàng x3` });
 
     const msg = await interaction.editReply({ embeds: [embed], components: [row] });
     const filter = i => i.user.id === interaction.user.id && i.customId.startsWith('bj_');
@@ -9904,21 +9996,18 @@ async function handleBlackjack(interaction) {
             playerHand.push(deck.pop());
             let pScore = getScore(playerHand);
 
-            // Xử lý Ngũ Linh
             if (playerHand.length === 5 && pScore <= 21) {
                 collector.stop('ngulinh');
                 await i.deferUpdate();
                 return;
             }
 
-            // Xử lý Quắc
             if (pScore > 21) {
                 collector.stop('bust');
                 await i.deferUpdate();
                 return;
             }
 
-            // Ẩn nút rút nếu đã đủ 5 lá (chỉ cho dằn nếu chưa ngũ linh nhưng thực tế code trên đã cản rồi)
             row.components[0].setDisabled(playerHand.length >= 5);
 
             embed.setFields(
@@ -9933,20 +10022,20 @@ async function handleBlackjack(interaction) {
     });
 
     collector.on('end', async (collected, reason) => {
-        if (reason === 'time') return interaction.editReply({ content: '⏳ Sếp suy nghĩ lâu quá, ván bài bị hủy!', components: [] });
+        if (reason === 'time') return interaction.editReply({ content: '⏳ Sếp suy nghĩ quá lâu, ván bài bị hủy (Tiền cược được bảo toàn)!', components: [] });
 
         let pScore = getScore(playerHand);
-        let finalEmbed = EmbedBuilder.from(embed).setColor(0xe74c3c); // Mặc định đỏ (thua)
+        let finalEmbed = EmbedBuilder.from(embed).setColor(0xe74c3c);
 
         if (reason === 'ngulinh') {
-            // Ngũ linh ăn x2
+            // Ngũ Linh: Nhân 2 tiền lãi
             await updatePilotBalance(interaction.user.id, amount * 2, amount, amount * 3);
             finalEmbed.setColor(0xf1c40f).setTitle('🌟 NGŨ LINH 🌟')
                 .setFields(
                     { name: `Bài của bạn (Ngũ Linh)`, value: formatHand(playerHand), inline: false },
                     { name: `Bài Nhà Cái`, value: formatHand(dealerHand), inline: false }
                 );
-            return interaction.editReply({ content: `🎉 Sếp bốc 5 lá không quắc! **NGŨ LINH ĂN x2** húp **${(amount * 2).toLocaleString()} Cash**!`, embeds: [finalEmbed], components: [] });
+            return interaction.editReply({ content: `🎉 Sếp bốc 5 lá không quắc! **NGŨ LINH ĂN x2** húp **${(amount * 2).toLocaleString()} Cash** lãi!`, embeds: [finalEmbed], components: [] });
         }
 
         if (reason === 'bust') {
@@ -9958,33 +10047,39 @@ async function handleBlackjack(interaction) {
             return interaction.editReply({ content: `💀 Sếp đã Quắc (Bust)! Mất trắng **${amount.toLocaleString()} Cash**.`, embeds: [finalEmbed], components: [] });
         }
 
-        // Nhà cái lật bài và rút nếu dưới 15 (Luật VN nhà cái dằn dơ từ 15)
+        // Tới lượt Nhà Cái (Bắt buộc dằn khi >= 16)
         let dScore = getScore(dealerHand);
-        while (dScore < 15 && dealerHand.length < 5) {
+        while (dScore < 16 && dealerHand.length < 5) {
             dealerHand.push(deck.pop());
             dScore = getScore(dealerHand);
         }
 
-        // Xử lý thắng thua
+        let dNgulinh = (dealerHand.length === 5 && dScore <= 21);
+        let dXiBang = isXiBang(dealerHand);
+        let dXiDach = isXiDach(dealerHand);
+
         let resultMsg = '';
         let profit = 0;
+        let gross = 0;
 
-        if (dScore > 21 || pScore > dScore) {
-            profit = amount;
-            resultMsg = `🎉 Nhà cái tuổi tôm! Sếp ăn **${amount.toLocaleString()} Cash**!`;
+        if (dXiBang) {
+            profit = -amount; gross = 0; resultMsg = `💀 Nhà cái lật bài **XÌ BÀNG**! Sếp nộp mạng **${amount.toLocaleString()} Cash**.`;
+        } else if (dXiDach) {
+            profit = -amount; gross = 0; resultMsg = `💀 Nhà cái lật bài **XÌ DÁCH**! Sếp nộp mạng **${amount.toLocaleString()} Cash**.`;
+        } else if (dNgulinh) {
+            profit = -amount; gross = 0; resultMsg = `💀 Nhà cái chẻ **Ngũ Linh**! Sếp nộp mạng **${amount.toLocaleString()} Cash**.`;
+        } else if (dScore > 21 || pScore > dScore) {
+            profit = amount; gross = amount * 2; resultMsg = `🎉 Nhà cái tuổi tôm! Sếp ăn **${amount.toLocaleString()} Cash**!`;
             finalEmbed.setColor(0x2ecc71);
             if (dScore > 21) resultMsg = `🎉 Nhà cái bị Quắc! Sếp ăn **${amount.toLocaleString()} Cash**!`;
         } else if (pScore === dScore) {
-            profit = 0;
-            resultMsg = `🤝 Hòa kèo! Sếp được hoàn lại tiền cược.`;
+            profit = 0; gross = amount; resultMsg = `🤝 Hòa kèo! Sếp được hoàn lại tiền cược.`;
             finalEmbed.setColor(0x3498db);
         } else {
-            profit = -amount;
-            resultMsg = `💀 Nhà cái điểm cao hơn! Sếp mất **${amount.toLocaleString()} Cash**.`;
-            if (dealerHand.length === 5 && dScore <= 21) resultMsg = `💀 Nhà cái chẻ **Ngũ Linh**! Sếp nộp mạng **${amount.toLocaleString()} Cash**.`;
+            profit = -amount; gross = 0; resultMsg = `💀 Nhà cái điểm cao hơn! Sếp mất **${amount.toLocaleString()} Cash**.`;
         }
 
-        await updatePilotBalance(interaction.user.id, profit, amount, profit > 0 ? amount * 2 : 0);
+        await updatePilotBalance(interaction.user.id, profit, amount, gross);
         
         finalEmbed.setFields(
             { name: `Bài của bạn (Điểm: ${pScore})`, value: formatHand(playerHand), inline: false },
@@ -10176,7 +10271,7 @@ async function handleGiveCash(interaction) {
   const amountInput = interaction.options.getString('amount');
   const senderId = interaction.user.id;
 
-  if (targetUser.bot || targetUser.id === senderId) return interaction.reply({ content: '❌ Không thể gửi cho chính mình hoặc Bot!', ephemeral: true });
+  if (targetUser.bot || targetUser.id === senderId) return replyBilingual(interaction,{ content: '❌ Không thể gửi cho chính mình hoặc Bot!', ephemeral: true });
 
   await interaction.deferReply({ ephemeral: true });
   
@@ -10287,6 +10382,19 @@ function checkLotoKinh(board, drawnSet) {
 }
 
 async function handleVietlott(interaction) {
+  // Giả sử sếp có mảng 'grid' là 25 số đã bốc và 'hitNumbers' là danh sách số sếp đã trúng
+  let displayGrid = "";
+  for (let i = 0; i < grid.length; i++) {
+      let num = grid[i];
+      // Nếu số này nằm trong danh sách trúng thì thêm hiệu ứng
+      if (hitNumbers.includes(num)) {
+          displayGrid += `[**${num}**]✨ `; // In đậm và thêm icon ✨ cho số trúng
+      } else {
+          displayGrid += `[${num}] `;      // Số thường
+      }
+      // Xuống dòng sau mỗi 5 số
+      if ((i + 1) % 5 === 0) displayGrid += "\n";
+  }
   await interaction.deferReply(); 
   const balance = await checkAndRegisterUser(interaction);
   if (!balance) return;
@@ -10454,14 +10562,14 @@ async function handleAddCash(interaction) {
     const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
 
     if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền dùng máy in tiền!', ephemeral: true });
+        return replyBilingual(interaction,{ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền dùng máy in tiền!', ephemeral: true });
     }
 
     const targetMentionable = interaction.options.getMentionable('target');
     const amount = interaction.options.getInteger('amount');
 
     if (amount <= 0) {
-        return interaction.reply({ content: '❌ Số tiền bơm phải lớn hơn 0!', ephemeral: true });
+        return replyBilingual(interaction,{ content: '❌ Số tiền bơm phải lớn hơn 0!', ephemeral: true });
     }
 
     await interaction.deferReply();
@@ -10651,7 +10759,7 @@ async function handleCheckBalance(interaction) {
     const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
 
     if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền soi ví người khác!', ephemeral: true });
+        return replyBilingual(interaction,{ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền soi ví người khác!', ephemeral: true });
     }
 
     const targetUser = interaction.options.getUser('target');
@@ -10685,7 +10793,7 @@ async function handleClearBalance(interaction) {
     const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); 
 
     if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
-        return interaction.reply({ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền tịch thu tài sản!', ephemeral: true });
+        return replyBilingual(interaction,{ content: '❌ Cảnh báo: Chỉ Admin, Dev hoặc Staff mới có quyền tịch thu tài sản!', ephemeral: true });
     }
 
     const targetUser = interaction.options.getUser('target');
