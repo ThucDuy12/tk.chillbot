@@ -157,30 +157,31 @@ async function createPendingUsersSheet() {
   }
 }
 
+// ========== LƯU CONTROLLER ==========
 async function saveControllerLeaderboard(month, year, stats) {
-  const sheetName = getSheetName(ATC_SHEET_PREFIX, month, year);
+  // Đã sửa lại đúng tên biến CONTROLLER_SHEET_PREFIX của bạn
+  const sheetName = getSheetName(CONTROLLER_SHEET_PREFIX, month, year);
   const sheets = await initGoogleSheets();
 
   if (!(await sheetExists(sheetName))) await createControllerSheet(month, year);
 
   const rows = [];
-  for (const [cid, data] of Object.entries(stats)) {
-    rows.push([
-      cid,
-      data.name,
-      data.rating,
-      data.timeOnline,
-      data.points,
-      data.controlledPositions.join(', '),
-      data.firstLoginMonth,
-      data.lastLoginMonth
-    ]);
+  for (const [category, controllers] of Object.entries(stats)) {
+    for (const [cid, data] of Object.entries(controllers)) {
+      rows.push([
+        category, cid,
+        data.name ? `'${data.name}` : '', 
+        data.callsign ? `'${data.callsign}` : '',
+        data.seconds || 0, data.lastUpdate || 0,
+        data.lastUpdate ? new Date(data.lastUpdate).toISOString() : '',
+        JSON.stringify({ callsignHistory: [data.callsign] }),
+      ]);
+    }
   }
 
   if (rows.length === 0) return;
 
-  // XÓA ĐOẠN LỆNH values.clear CŨ ĐI
-  // Tab ATC có 8 cột, nên ta tạo mảng rỗng 8 phần tử
+  // Thuật toán dọn rác (Độn thêm 200 dòng rỗng 8 cột)
   const emptyATCRow = Array(8).fill(""); 
   for (let i = 0; i < 200; i++) {
     rows.push(emptyATCRow);
@@ -193,8 +194,9 @@ async function saveControllerLeaderboard(month, year, stats) {
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: rows },
     });
+    console.log(`✅ Saved controller records to sheet ${sheetName}`);
   } catch (err) {
-    console.error('❌ Lỗi khi ghi data ATC:', err.message);
+    console.error('❌ Lỗi khi ghi data Controller:', err.message);
   }
 }
 
