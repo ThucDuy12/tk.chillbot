@@ -9637,7 +9637,7 @@ async function handleSlot(interaction) {
   }
 }
 
-// ===================== LỆNH TÀI XỈU (THÊM NÚT BÃO + NERF TỶ LỆ + ĐA NGÔN NGỮ) =====================
+// ===================== LỆNH TÀI XỈU (NÚT BÃO + NERF TỶ LỆ + NHÂN 2 + ĐA NGÔN NGỮ) =====================
 async function handleTaiSiu(interaction) {
   const amountInput = interaction.options.getString('amount');
   await interaction.deferReply(); 
@@ -9703,8 +9703,8 @@ async function handleTaiSiu(interaction) {
               setTimeout(async () => {
                   // KẾT QUẢ CUỐI CÙNG
                   if (resultType === choice) {
-                      // NẾU THẮNG
-                      let profitMultiplier = choice === 'bao' ? 24 : 1; 
+                      // NẾU THẮNG (ĐÃ SỬA HỆ SỐ NHÂN BÃO THÀNH 2)
+                      let profitMultiplier = choice === 'bao' ? 2 : 1; 
                       let profit = amount * profitMultiplier;
                       let grossPayout = amount + profit;
 
@@ -9742,7 +9742,6 @@ async function handleTaiSiu(interaction) {
       }
   });
 }
-
 
 // ===================== LỆNH BẦU CUA TÔM CÁ (HỆ THỐNG NÚT BẤM CHỌN 3 LẦN) =====================
 async function handleBauCua(interaction) {
