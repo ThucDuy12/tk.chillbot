@@ -82,7 +82,7 @@ const LEADERBOARD_CHANNEL_ID = process.env.LEADERBOARD_CHANNEL_ID || '1458058709
 const BOT_ANNOUNCEMENTS_CHANNEL_ID = process.env.BOT_ANNOUNCEMENTS_CHANNEL_ID || '1510136210683723927';
 const ATC_NOTI_ROLE_ID = process.env.ATC_NOTI_ROLE_ID || '1510148740634382517';
 // Thay ID kênh tk.chill cash của sếp vào đây nhé
-const CASH_CHANNEL_ID = process.env.CASH_CHANNEL_ID || '1524602750229418115';
+const CASH_CHANNEL_ID = process.env.CASH_CHANNEL_ID || '1525090610233741352';
 
 const GUILD_ID = process.env.GUILD_ID || '1365693391668777051';
 const OWNER_ID = process.env.OWNER_ID;
@@ -9538,13 +9538,15 @@ async function handleCoinflip(interaction) {
   const userId = interaction.user.id;
   let userDb = await db.getGamblingData(userId);
   
-  let baseChance = amount < 500 ? 0.50 : (amount <= 1500 ? 0.40 : (amount <= 5000 ? 0.30 : 0.20));
+  // Tỷ lệ gốc bị nerf (Chỉ còn 40% - 45% thắng)
+  let baseChance = amount < 500 ? 0.45 : (amount <= 1500 ? 0.40 : (amount <= 5000 ? 0.35 : 0.30));
   const variance = (Math.random() * 0.06) - 0.03; 
   let winChance = baseChance + variance;
 
+  // Streak buffs bị giảm mạnh, giới hạn win rate tối đa chỉ 60% thay vì 75%
   if (userDb.coinflipLosses >= 2) {
-    winChance += (userDb.coinflipLosses - 1) * 0.10; 
-    winChance = Math.min(winChance, 0.75); 
+    winChance += (userDb.coinflipLosses - 1) * 0.05; 
+    winChance = Math.min(winChance, 0.60); 
   } else if (userDb.coinflipWins >= 2) {
     winChance -= (userDb.coinflipWins - 1) * 0.15;
     winChance = Math.max(winChance, 0.05); 
@@ -9585,11 +9587,12 @@ async function handleSlot(interaction) {
   let userDb = await db.getGamblingData(userId);
   userDb.slotPlays += 1;
   
+  // Tỷ lệ nổ hũ cực gắt
   let winChance = 0.0; 
-  if (userDb.slotPlays >= 5) winChance = 0.05; 
-  if (userDb.slotPlays >= 15) winChance = 0.30; 
-  if (amount > 1500 && amount < 5000) winChance = Math.min(winChance, 0.15); 
-  else if (amount >= 5000) winChance = Math.min(winChance, 0.05); 
+  if (userDb.slotPlays >= 10) winChance = 0.02; // Chơi 10 lần mới tăng tí
+  if (userDb.slotPlays >= 30) winChance = 0.10; // Chơi 30 lần mới được 10%
+  if (amount > 1500 && amount < 5000) winChance = Math.min(winChance, 0.05); 
+  else if (amount >= 5000) winChance = Math.min(winChance, 0.01); // Bet lớn gần như tạch
 
   winChance = Math.max(0, winChance + (Math.random() * 0.04) - 0.02);
   let isWin = Math.random() < winChance;
@@ -9667,13 +9670,14 @@ async function handleTaiSiu(interaction) {
 
       // Tính toán kết quả trước trong nền
       let d1, d2, d3;
-      if (Math.random() < (amount >= 5000 ? 0.15 : 0.05)) {
-          d1 = d2 = d3 = Math.random() < 0.5 ? 1 : 6;
+      // Tăng gấp đôi tỷ lệ ra Bão (Triple), người chơi auto thua nếu không cược Bão (mà bot này không có nút cược Bão)
+      if (Math.random() < (amount >= 5000 ? 0.30 : 0.15)) {
+          d1 = d2 = d3 = Math.floor(Math.random() * 6) + 1; // Bão ngẫu nhiên từ 1-6
       } else {
           d1 = Math.floor(Math.random() * 6) + 1;
           d2 = Math.floor(Math.random() * 6) + 1;
           d3 = Math.floor(Math.random() * 6) + 1;
-          if (d1 === d2 && d2 === d3) d3 = d3 === 6 ? 5 : d3 + 1;
+          // Loại bỏ logic né bão cũ để bão ra tự nhiên hơn
       }
       const total = d1 + d2 + d3;
       let resultType = (d1 === d2 && d2 === d3) ? 'bao' : (total <= 10 ? 'xiu' : 'tai');
@@ -9770,10 +9774,18 @@ async function handleBauCua(interaction) {
 
         setTimeout(async () => {
             let riggedMascots = Object.values(nameMap);
+            
+            // Tỷ lệ gian lận: 30% bot sẽ cố tình random ra các con vật KHÔNG nằm trong danh sách người chơi chọn
+            let isRigged = Math.random() < 0.40;
+            let availableMascots = isRigged ? riggedMascots.filter(m => !choices.includes(m)) : riggedMascots;
+            
+            // Tránh lỗi mảng rỗng nếu user chọn hết 6 con (dù logic user chỉ chọn đc 3)
+            if (availableMascots.length === 0) availableMascots = riggedMascots;
+
             const results = [
-                riggedMascots[Math.floor(Math.random() * 6)],
-                riggedMascots[Math.floor(Math.random() * 6)],
-                riggedMascots[Math.floor(Math.random() * 6)]
+                availableMascots[Math.floor(Math.random() * availableMascots.length)],
+                availableMascots[Math.floor(Math.random() * availableMascots.length)],
+                availableMascots[Math.floor(Math.random() * availableMascots.length)]
             ];
 
             // So khớp kết quả và trả thưởng (Đúng luật x1, x2, x3 của sếp)
