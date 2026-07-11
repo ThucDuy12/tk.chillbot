@@ -3484,7 +3484,6 @@ client.once('ready', async () => {
   await loadAllLeaderboards(); // Đợi bot kéo xong data Sheets rồi...
 
   startHourlyLeaderboard(); // ...thì mới được nổ súng cập nhật Leaderboard!
-  startDailyCasinoLeaderboard();
   await ensureACDMMessageExists();
 
   // Thêm dòng này để bật kết nối lấy dữ liệu ACDM liên tục
