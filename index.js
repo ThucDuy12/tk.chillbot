@@ -5132,7 +5132,7 @@ async function handleButton(interaction) {
       const oldEmbed = interaction.message.embeds[0];
       const newEmbed = EmbedBuilder.from(oldEmbed)
         .addFields({
-          name: action === 'approve' ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_03D0BABA') : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E6D90901'),
+          name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_03D0BABA'), // Đã duyệt bởi
           value: `<@${interaction.user.id}>`,
           inline: true
         })
@@ -5145,14 +5145,20 @@ async function handleButton(interaction) {
 
     // 2. Xử lý logic TỪ CHỐI
     if (action === 'deny') {
-      await interaction.followUp({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_60F28F28'), ephemeral: true });
-      try {
-        const user = await client.users.fetch(request.userId);
-        await user.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_44221952'));
-      } catch (err) {
-        console.error('Error notifying user (deny):', err);
-      }
-      return;
+      const modal = new ModalBuilder()
+        .setCustomId(`deny_role_${requestId}`)
+        .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ROLE_DENY_TITLE'));
+
+      const reasonInput = new TextInputBuilder()
+        .setCustomId('reason')
+        .setLabel(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ROLE_DENY_REASON_LABEL'))
+        .setPlaceholder(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ROLE_DENY_REASON_PH'))
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+      await interaction.showModal(modal);
+      return; 
     }
 
     // 3. Xử lý logic ĐỒNG Ý
@@ -5635,6 +5641,43 @@ async function handleSendAward(interaction) {
 }
 
 async function handleModal(interaction) {
+  if (interaction.customId.startsWith('deny_role_')) {
+    const requestId = interaction.customId.replace('deny_role_', '');
+    const reason = interaction.fields.getTextInputValue('reason');
+    
+    const request = pendingRequests.get(requestId);
+    if (!request) {
+      return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_47B2215F'), ephemeral: true });
+    }
+
+    pendingRequests.delete(requestId);
+
+    // Cập nhật giao diện tin nhắn gốc báo Đã từ chối kèm lý do
+    try {
+      const oldEmbed = interaction.message.embeds[0];
+      const newEmbed = EmbedBuilder.from(oldEmbed)
+        .addFields({
+          name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_E6D90901'), // Đã từ chối bởi
+          value: `<@${interaction.user.id}>\n**Lý do:** ${reason}`,
+          inline: false
+        })
+        .setColor(0xe74c3c) // Đổi khung thành màu đỏ
+        .setTimestamp();
+
+      await interaction.update({ embeds: [newEmbed], components: [] });
+    } catch (err) {
+      console.error('Error updating embed on deny:', err);
+    }
+
+    // Gửi tin nhắn DM thẳng cho người dùng với lý do
+    try {
+      const user = await client.users.fetch(request.userId);
+      await user.send(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ROLE_DENY_DM', { v0: reason }));
+    } catch (err) {
+      console.error('Error notifying user (deny):', err);
+    }
+    return;
+  }
   // Nhận dữ liệu nộp từ Popup Xác thực VATSIM
   if (interaction.customId.startsWith('modal_verify_')) {
     const roleType = interaction.customId.split('_')[2]; // 'pilot' hoặc 'atc'
@@ -6652,6 +6695,44 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
+// ===================== HELPER: KÉO METAR TỪ VATM (CHO CÁC SÂN BAY VIỆT NAM) =====================
+async function fetchMetarFromVATM(icao) {
+  try {
+    const fetch = (await import('node-fetch')).default;
+    const response = await fetch('https://met.vatm.vn/airline', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      timeout: 8000
+    });
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const cheerio = require('cheerio');
+    const $ = cheerio.load(html);
+
+    // Gộp text toàn bộ trang
+    const bodyText = $('body').text();
+    
+    // Quét từng dòng tìm chữ "METAR VVxx"
+    const lines = bodyText.split('\n');
+    for (let line of lines) {
+      line = line.trim();
+      if (line.startsWith(`METAR ${icao}`)) {
+        return line.replace(/^METAR\s+/i, ''); // Xóa chữ METAR ở đầu để giống cấu trúc CheckWX
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.error(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_VATM_FETCH_ERR', { v0: icao }), err.message);
+    return null;
+  }
+}
+
+
+
 // ===================== COMMAND: METAR =====================
 async function handleMetar(interaction) {
   const icao = interaction.options.getString('icao').toUpperCase();
@@ -6664,9 +6745,16 @@ async function handleMetar(interaction) {
     let metarText = atisData ? atisData.metar : null;
     let hasAtis = atisData && (atisData.arrival || atisData.departure);
 
-    // 2. Fallback CheckWX
+    // 2. Fallback VATM & CheckWX
     if (!metarText && !hasAtis) {
-      metarText = await fetchMetarFromCheckWX(icao);
+      if (icao.startsWith('VV')) {
+        metarText = await fetchMetarFromVATM(icao);
+        if (!metarText) {
+          metarText = await fetchMetarFromCheckWX(icao); // Nếu VATM lỗi thì quay lại CheckWX
+        }
+      } else {
+        metarText = await fetchMetarFromCheckWX(icao);
+      }
     }
 
     let replyContent = '';
@@ -6788,7 +6876,12 @@ async function handleRunway(interaction) {
     if (atisData && atisData.metar) {
       metar = atisData.metar;
     } else {
-      metar = await fetchMetarFromCheckWX(icao);
+      if (icao.startsWith('VV')) {
+        metar = await fetchMetarFromVATM(icao);
+        if (!metar) metar = await fetchMetarFromCheckWX(icao);
+      } else {
+        metar = await fetchMetarFromCheckWX(icao);
+      }
     }
 
     if (!metar) {
