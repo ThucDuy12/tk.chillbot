@@ -1620,7 +1620,7 @@ async function updateVatseaLeaderboardEmbed(startTime, endTime) {
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C851CEF2', { v0: startStr, v1: endStr, v2: utcHourMinute }))
       .setColor(0x004c8f) // Màu xanh đậm chuẩn VATSIM
       // Sếp dán link ảnh trực tiếp vào đây (Tui lấy tạm link ảnh sếp vừa gửi)
-      .setImage('https://i.ibb.co/5yMXWyR/VATSEA-LOGO-1000x310-Photoroom.png')
+      .setImage('https://i.ibb.co/2Y1fMq9c/VATSEA-Corrected.png')
       .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_EAC1A309'), iconURL: 'https://cdn-icons-png.flaticon.com/512/8144/8144342.png' })
       .setTimestamp(roundedNow);
 
