@@ -1,4 +1,5 @@
 require('node:dns').setDefaultResultOrder('ipv4first');
+const puppeteer = require('puppeteer');
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -6695,43 +6696,52 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
-// ===================== HELPER: KÉO METAR TỪ VATM (CHO CÁC SÂN BAY VIỆT NAM) =====================
+// ===================== HELPER: KÉO METAR TỪ VATM (TRÌNH DUYỆT ẨN) =====================
 async function fetchMetarFromVATM(icao) {
+  let browser;
   try {
-    const fetch = (await import('node-fetch')).default;
-    const response = await fetch('https://met.vatm.vn/airline', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      timeout: 8000
+    // Mở một trình duyệt Chrome tàng hình
+    browser = await puppeteer.launch({
+      headless: "new", // Chạy ngầm không hiện cửa sổ
+      args: ['--no-sandbox', '--disable-setuid-sandbox'] // Bypass các lớp bảo vệ của server
     });
-
-    if (!response.ok) return null;
-
-    const html = await response.text();
-    const cheerio = require('cheerio');
-    const $ = cheerio.load(html);
-
-    // Gộp text toàn bộ trang
-    const bodyText = $('body').text();
     
-    // Quét từng dòng tìm chữ "METAR VVxx"
+    const page = await browser.newPage();
+    
+    // Ngụy trang thành người dùng thật
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+    
+    // Truy cập trang và chờ đến khi mạng ngưng hoạt động (nghĩa là JS đã load xong data)
+    await page.goto('https://met.vatm.vn/airline', { waitUntil: 'networkidle2', timeout: 15000 });
+    
+    // Ép chờ thêm 1.5 giây cho chắc ăn dữ liệu đã render kịp ra bảng
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Dùng JS nội bộ của trang để cào sạch toàn bộ chữ hiển thị trên màn hình
+    const bodyText = await page.evaluate(() => document.body.innerText);
+    
+    // Quét tìm dòng chứa ICAO của sếp
     const lines = bodyText.split('\n');
     for (let line of lines) {
       line = line.trim();
+      // Tìm dòng bắt đầu bằng "METAR VVTS" hoặc tương tự
       if (line.startsWith(`METAR ${icao}`)) {
-        return line.replace(/^METAR\s+/i, ''); // Xóa chữ METAR ở đầu để giống cấu trúc CheckWX
+        // Cắt bỏ chữ METAR ở đầu để tương thích hoàn hảo với logic hàm handleMetar cũ
+        return line.replace(/^METAR\s+/i, '').trim(); 
       }
     }
 
     return null;
   } catch (err) {
-    console.error(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_VATM_FETCH_ERR', { v0: icao }), err.message);
+    console.error(`❌ Lỗi kéo METAR bằng Puppeteer từ VATM (${icao}):`, err.message);
     return null;
+  } finally {
+    // Xong việc là PHẢI TẮT TRÌNH DUYỆT để tránh kẹt tràn RAM máy chủ của sếp
+    if (browser) {
+      await browser.close();
+    }
   }
 }
-
-
 
 // ===================== COMMAND: METAR =====================
 async function handleMetar(interaction) {
