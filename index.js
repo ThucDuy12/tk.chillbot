@@ -9301,7 +9301,7 @@ async function handleAltitude(interaction) {
   await interaction.deferReply();
 
   try {
-    // 1. Kéo tọa độ từ File CSV Local (Tốc độ ánh sáng, Không bao giờ chết)
+    // 1. Kéo tọa độ từ File CSV Local
     const depCoords = getLocalAirportCoords(dep);
     const arrCoords = getLocalAirportCoords(arr);
 
@@ -9331,12 +9331,22 @@ async function handleAltitude(interaction) {
     let bearing = Math.atan2(y, x) * 180 / Math.PI;
     if (bearing < 0) bearing += 360; 
 
-    // 4. Áp dụng RVSM (Semi-circular Rule)
+    // 4. KIỂM TRA DATABASE ĐƯỜNG BAY NỘI BỘ (routes.json)
+    let routeUsed = null;
+    const routeKey = `${dep}-${arr}`;
+    // Biến routesData đã được khai báo sẵn ở đầu file code của bạn
+    if (typeof routesData !== 'undefined' && routesData[routeKey] && routesData[routeKey].length > 0) {
+        routeUsed = routesData[routeKey][0]; // Lấy route ưu tiên số 1
+    }
+
+    // 5. ÁP DỤNG RVSM VÀ CUE CARD OVERRIDE
     const isEast = bearing >= 0 && bearing < 180;
     const directionText = isEast ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_EAST') : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_WEST');
-
-    // 5. Tính toán đề xuất độ cao phù hợp dựa vào khoảng cách
+    
+    let ruleText = isEast ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE_EAST') : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE_WEST');
     let suggestedFLs = [];
+
+    // Base RVSM Calculation (Quy tắc chuẩn Quốc tế)
     if (distance < 150) {
       suggestedFLs = isEast ? ['FL150', 'FL170', 'FL190', 'FL210'] : ['FL160', 'FL180', 'FL200', 'FL220'];
     } else if (distance < 400) {
@@ -9347,18 +9357,34 @@ async function handleAltitude(interaction) {
       suggestedFLs = isEast ? ['FL330', 'FL350', 'FL370', 'FL390', 'FL410'] : ['FL320', 'FL340', 'FL360', 'FL380', 'FL400'];
     }
 
+    // 🔥 VŨ KHÍ TỐI THƯỢNG: GHI ĐÈ BẰNG CUE CARD NẾU NHẬN DIỆN ĐƯỢC Q1 HOẶC Q2
+    if (routeUsed && /\bQ1\b/.test(routeUsed)) {
+        suggestedFLs = ['FL320', 'FL360', 'FL400'];
+        ruleText = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE_Q1');
+    } else if (routeUsed && /\bQ2\b/.test(routeUsed)) {
+        suggestedFLs = ['FL310', 'FL350', 'FL390', 'FL410'];
+        ruleText = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE_Q2');
+    }
+
     // 6. Trình bày UI (Embed)
+    const finalSuggestion = suggestedFLs.join(', ');
+    const disclaimer = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_DISCLAIMER');
+
     const embed = new EmbedBuilder()
       .setTitle(`✈️ Flight Level Suggestion: ${dep} ➔ ${arr}`)
       .setColor(0x00A8FF)
       .addFields(
         { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_DISTANCE'), value: `**${Math.round(distance)} NM**`, inline: true },
         { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_BEARING'), value: `**${Math.round(bearing)}°** (${directionText})`, inline: true },
-        { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE'), value: isEast ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE_EAST') : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE_WEST'), inline: false },
-        { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_SUGGESTION'), value: `\`\`\`yaml\n${suggestedFLs.join(', ')}\n\`\`\``, inline: false }
+        { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE'), value: ruleText, inline: false },
+        { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_SUGGESTION'), value: `\`\`\`yaml\n${finalSuggestion}\n\`\`\`\n${disclaimer}`, inline: false }
       )
-      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_FOOTER'), iconURL: 'https://cdn-icons-png.flaticon.com/512/3063/3063822.png' })
       .setTimestamp();
+      
+    // Nhét thêm thông tin Route đã check vào Embed để người dùng biết tại sao lại ra số đó
+    if (routeUsed) {
+        embed.addFields({ name: '📍 Identified Route', value: `\`${routeUsed}\``, inline: false });
+    }
 
     await interaction.editReply({ embeds: [embed] });
 
