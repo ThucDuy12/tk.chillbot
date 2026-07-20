@@ -210,6 +210,103 @@ if (!LOG_CHANNEL_ID) {
   console.warn('⚠️ Missing LOG_CHANNEL_ID in environment. Logging will be disabled.');
 }
 
+// ===================== LOCAL DATABASE ENGINE (CSV PARSER) =====================
+const fs = require('fs');
+const path = require('path');
+
+let cachedAirports = null;
+let cachedRunways = null;
+
+// Hàm hỗ trợ bóc tách CSV siêu chuẩn (Xử lý được cả dấu phẩy kẹt trong ngoặc kép)
+function parseCSVLine(line) {
+  const result = [];
+  let curVal = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          curVal += '"'; i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        curVal += char;
+      }
+    } else {
+      if (char === '"') {
+        inQuotes = true;
+      } else if (char === ',') {
+        result.push(curVal);
+        curVal = '';
+      } else {
+        curVal += char;
+      }
+    }
+  }
+  result.push(curVal);
+  return result;
+}
+
+// Lấy tọa độ sân bay [Longitude, Latitude]
+function getLocalAirportCoords(icao) {
+  if (!cachedAirports) {
+    const filePath = path.join(__dirname, 'airports.csv');
+    cachedAirports = {};
+    if (fs.existsSync(filePath)) {
+      const rows = fs.readFileSync(filePath, 'utf8').split('\n');
+      for (let i = 1; i < rows.length; i++) {
+        if (!rows[i].trim()) continue;
+        const cols = parseCSVLine(rows[i]);
+        if (cols.length > 5) {
+          const code = cols[1].toUpperCase().trim();
+          const lat = parseFloat(cols[4]);
+          const lon = parseFloat(cols[5]);
+          if (code && !isNaN(lat) && !isNaN(lon)) {
+            cachedAirports[code] = [lon, lat]; // Trả về [Kinh độ, Vĩ độ]
+          }
+        }
+      }
+      console.log(`✅ Nạp thành công Database tọa độ: ${Object.keys(cachedAirports).length} sân bay.`);
+    } else {
+      console.warn('⚠️ Không tìm thấy file airports.csv!');
+    }
+  }
+  return cachedAirports[icao] || null;
+}
+
+// Lấy danh sách đường băng & heading
+function getLocalRunways(icao) {
+  if (!cachedRunways) {
+    const filePath = path.join(__dirname, 'runways.csv');
+    cachedRunways = {};
+    if (fs.existsSync(filePath)) {
+      const rows = fs.readFileSync(filePath, 'utf8').split('\n');
+      for (let i = 1; i < rows.length; i++) {
+        if (!rows[i].trim()) continue;
+        const cols = parseCSVLine(rows[i]);
+        if (cols.length > 18) {
+          const code = cols[2].toUpperCase().trim();
+          if (!cachedRunways[code]) cachedRunways[code] = [];
+          
+          const leIdent = cols[8].trim();
+          const leHdg = parseFloat(cols[12]);
+          const heIdent = cols[14].trim();
+          const heHdg = parseFloat(cols[18]);
+
+          if (leIdent && !isNaN(leHdg)) cachedRunways[code].push({ id: leIdent, heading: leHdg });
+          if (heIdent && !isNaN(heHdg)) cachedRunways[code].push({ id: heIdent, heading: heHdg });
+        }
+      }
+      console.log(`✅ Nạp thành công Database đường băng: ${Object.keys(cachedRunways).length} sân bay.`);
+    } else {
+      console.warn('⚠️ Không tìm thấy file runways.csv!');
+    }
+  }
+  return cachedRunways[icao] || [];
+}
+
 // ===================== LOGGING HELPER =====================
 async function sendLog(embed, options = {}) {
   if (!LOG_CHANNEL_ID) return;
@@ -6928,46 +7025,17 @@ async function handleRunway(interaction) {
     const windDir = parseInt(windDirStr, 10);
     embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_F8499809'), value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_9618842C', { v0: windDir, v1: windSpeed }), inline: false });
 
-    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỪ OPENAIP (ĐÃ FIX CƠ CHẾ TÌM KIẾM)
+    // ==========================================
+    // 2. LẤY DỮ LIỆU ĐƯỜNG BĂNG TỪ FILE CSV LOCAL
+    // ==========================================
     let runways = [];
-    let dataSource = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0A59FBEA');
+    let dataSource = 'Local Database (runways.csv)';
 
-    try {
-      const fetchObj = (await import('node-fetch')).default;
-      const openAipKey = process.env.OPENAIP_API_KEY || 'ce754e3a33063d110f1879a62508ee6a';
-
-      // Tìm bằng param 'icao' trực tiếp, và thêm 'limit' để tránh lỗi
-      const res = await fetchObj(`https://api.openaip.net/api/airports?icao=${icao}&apiKey=${openAipKey}`);
-
-      if (res.ok) {
-        const data = await res.json();
-
-        // Fix: Tìm trong trường 'items', kiểm tra kỹ cả object
-        const airport = data.items ? data.items.find(ap => ap.icaoCode === icao) : null;
-
-        if (airport && airport.runways) {
-          airport.runways.forEach(rw => {
-            if (rw.designator) {
-              const parts = rw.designator.split('/');
-              // Sử dụng trueHeading hoặc magneticHeading từ API
-              const hdg = rw.trueHeading !== undefined ? rw.trueHeading : rw.magneticHeading;
-
-              if (hdg !== undefined) {
-                parts.forEach(part => {
-                  runways.push({ id: part.trim(), heading: hdg });
-                });
-              }
-            }
-          });
-          if (runways.length > 0) dataSource = 'OpenAIP API';
-        }
-      }
-    } catch (e) { console.error(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C9435860'), e); }
-
-    // ==========================================
-    // 3. HỆ THỐNG DỰ PHÒNG (DATABASE NỘI BỘ) - Cứu cánh khi API ngáo
-    // ==========================================
-    if (runways.length === 0) {
+    const localRws = getLocalRunways(icao);
+    if (localRws && localRws.length > 0) {
+      runways = localRws;
+    } else {
+      // 3. HỆ THỐNG DỰ PHÒNG CỨU CÁNH (Nếu file CSV không có hoặc bị lỗi)
       const fallbackRunways = {
         // Vietnam
         VVTS: [{ id: '07', heading: 70 }, { id: '25', heading: 250 }],
@@ -9235,35 +9303,21 @@ async function handleAltitude(interaction) {
   await interaction.deferReply();
 
   try {
-    const fetchObj = (await import('node-fetch')).default;
-    const openAipKey = process.env.OPENAIP_API_KEY || 'ce754e3a33063d110f1879a62508ee6a'; // Dùng lại Key có sẵn của bạn
+    // 1. Kéo tọa độ từ File CSV Local (Tốc độ ánh sáng, Không bao giờ chết)
+    const depCoords = getLocalAirportCoords(dep);
+    const arrCoords = getLocalAirportCoords(arr);
 
-    // 1. Kéo tọa độ từ OpenAIP API
-    const depRes = await fetchObj(`https://api.openaip.net/api/airports?icao=${dep}&apiKey=${openAipKey}`);
-    const arrRes = await fetchObj(`https://api.openaip.net/api/airports?icao=${arr}&apiKey=${openAipKey}`);
-
-    if (!depRes.ok || !arrRes.ok) {
-      return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_ERR_API') });
-    }
-
-    const depData = await depRes.json();
-    const arrData = await arrRes.json();
-
-    const depAirport = depData.items ? depData.items.find(ap => ap.icaoCode === dep) : null;
-    const arrAirport = arrData.items ? arrData.items.find(ap => ap.icaoCode === arr) : null;
-
-    if (!depAirport || !arrAirport) {
+    if (!depCoords || !arrCoords) {
       return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_ERR_NOTFOUND', { v0: dep, v1: arr }) });
     }
 
-    // Tọa độ GeoJSON trả về là [Longitude, Latitude]
-    const depLon = depAirport.geometry.coordinates[0];
-    const depLat = depAirport.geometry.coordinates[1];
-    const arrLon = arrAirport.geometry.coordinates[0];
-    const arrLat = arrAirport.geometry.coordinates[1];
+    const depLon = depCoords[0];
+    const depLat = depCoords[1];
+    const arrLon = arrCoords[0];
+    const arrLat = arrCoords[1];
 
     // 2. Tính toán khoảng cách (Haversine Formula) bằng Hải Lý (NM)
-    const R = 3440.065; // Bán kính trái đất tính bằng Hải Lý (Nautical Miles)
+    const R = 3440.065; 
     const dLat = (arrLat - depLat) * Math.PI / 180;
     const dLon = (arrLon - depLon) * Math.PI / 180;
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -9277,26 +9331,21 @@ async function handleAltitude(interaction) {
     const x = Math.cos(depLat * Math.PI / 180) * Math.sin(arrLat * Math.PI / 180) -
               Math.sin(depLat * Math.PI / 180) * Math.cos(arrLat * Math.PI / 180) * Math.cos(dLon);
     let bearing = Math.atan2(y, x) * 180 / Math.PI;
-    if (bearing < 0) bearing += 360; // Đưa về hệ quy chiếu 0 - 360 độ
+    if (bearing < 0) bearing += 360; 
 
     // 4. Áp dụng RVSM (Semi-circular Rule)
-    // Hướng Đông (000 - 179) bay LẺ, Hướng Tây (180 - 359) bay CHẴN
     const isEast = bearing >= 0 && bearing < 180;
     const directionText = isEast ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_EAST') : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_WEST');
 
     // 5. Tính toán đề xuất độ cao phù hợp dựa vào khoảng cách
     let suggestedFLs = [];
     if (distance < 150) {
-      // Dưới 150NM: Bay thấp
       suggestedFLs = isEast ? ['FL150', 'FL170', 'FL190', 'FL210'] : ['FL160', 'FL180', 'FL200', 'FL220'];
     } else if (distance < 400) {
-      // Từ 150 - 400NM: Bay tầm trung
       suggestedFLs = isEast ? ['FL230', 'FL250', 'FL270', 'FL290', 'FL310'] : ['FL240', 'FL260', 'FL280', 'FL300', 'FL320'];
     } else if (distance < 1500) {
-      // Bay xa: Bay cao
       suggestedFLs = isEast ? ['FL310', 'FL330', 'FL350', 'FL370', 'FL390'] : ['FL320', 'FL340', 'FL360', 'FL380', 'FL400'];
     } else {
-      // Bay vượt châu lục: Step-climb
       suggestedFLs = isEast ? ['FL330', 'FL350', 'FL370', 'FL390', 'FL410'] : ['FL320', 'FL340', 'FL360', 'FL380', 'FL400'];
     }
 
