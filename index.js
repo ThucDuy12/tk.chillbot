@@ -31,6 +31,8 @@ const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerSta
 const play = require('play-dl');
 // Bộ nhớ đệm lưu tin nhắn Voice Chat
 const voiceChatBackups = new Map();
+// Bộ nhớ đệm theo dõi số lượng tag (ping) của mỗi user
+const mentionTracker = new Map();
 
 // Kho chứa danh sách phát nhạc của các server
 const musicQueues = new Map();
@@ -4516,6 +4518,65 @@ client.on('messageCreate', async (message) => {
 
   // KHAI BÁO 1 LẦN DUY NHẤT Ở ĐÂY ĐỂ DÙNG CHUNG CHO CẢ QUOTE LẪN AI CHAT
   const isMentionedExplicitly = message.content.includes(`<@${client.user.id}>`) || message.content.includes(`<@!${client.user.id}>`);
+
+  // ================= TÍNH NĂNG 4: ANTI SPAM TAG (PING MÀ SÚNG BẮN LIÊN THANH) =================
+  // Lọc ra danh sách những người bị tag thật sự (không tính tag Bot và tự tag chính mình)
+  const mentionedUsers = message.mentions.users.filter(u => !u.bot && u.id !== message.author.id);
+  
+  if (mentionedUsers.size > 0) {
+    const hasAdmin = message.member?.roles.cache.has(roles.adminRoleId);
+    const hasDev = message.member?.roles.cache.has(roles.devRoleId);
+    const hasStaff = message.member?.roles.cache.has('1493908725231128617'); // ID role Staff hiện tại của sếp
+    const isOwner = message.author.id === OWNER_ID;
+
+    // Chỉ bắt bớ dân thường, miễn nhiễm cho cấp cao
+    if (!hasAdmin && !hasDev && !hasStaff && !isOwner) {
+      const now = Date.now();
+      const tenMinsAgo = now - 10 * 60 * 1000; // Mốc thời gian 10 phút trước
+      
+      // Lấy cuốn sổ của user này ra (nếu chưa có thì tạo mới)
+      let userMentions = mentionTracker.get(message.author.id) || [];
+      
+      // Xóa bỏ những lần tag cũ đã vượt quá 10 phút
+      userMentions = userMentions.filter(timestamp => timestamp > tenMinsAgo);
+      
+      // Thêm lần tag mới vào sổ (Tag 3 người cùng lúc thì đếm thành 3 lần)
+      for (let i = 0; i < mentionedUsers.size; i++) {
+        userMentions.push(now);
+      }
+      
+      // Cập nhật lại vào hệ thống
+      mentionTracker.set(message.author.id, userMentions);
+
+      // Nếu trong sổ có TRÊN 5 lần tag
+      if (userMentions.length > 5) {
+        try {
+          // Bịt miệng 30 phút
+          await message.member.timeout(30 * 60 * 1000, "Spam ping/tag quá 5 lần trong 10 phút");
+          
+          // Đăng loa cảnh cáo ra kênh chat (Tự động xóa sau 10s để đỡ rác)
+          const warningMsg = await message.channel.send(
+            t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ANTISPAM_WARN', { v0: message.author.id })
+          );
+          setTimeout(() => warningMsg.delete().catch(() => {}), 10000);
+          
+          // Lên biên bản gửi vào kênh Log
+          const logEmbed = createLogEmbed(
+            t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ANTISPAM_LOG_TITLE'),
+            t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ANTISPAM_LOG_DESC', { v0: message.author.id, v1: message.author.id, v2: userMentions.length }),
+            0xe74c3c
+          );
+          await sendLog(logEmbed);
+          
+          // Ân xá: Xé nháp cuốn sổ để sau 30 phút nó được xả trại tính lại từ đầu
+          mentionTracker.delete(message.author.id);
+          
+        } catch (err) {
+          console.error("Lỗi khi Auto-Mute Spam Ping:", err);
+        }
+      }
+    }
+  }
 
   // ================= TÍNH NĂNG 1: RÀNG BUỘC AI CHAT =================
   if (message.channel.id === AI_CHANNEL_ID) {
