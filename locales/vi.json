@@ -1028,5 +1028,8 @@
   "STR_VOICE_BACKUP_DATE": "Ngày lưu: {v0}",
   "STR_VOICE_BACKUP_ATTACHMENT": "[Hình ảnh / Tệp đính kèm]",
   "STR_ROUTE_SINGLE": "🗺️ Flight Route",
-  "STR_ROUTE_MULTI": "🗺️ Flight Route (Phương án {v0})"
+  "STR_ROUTE_MULTI": "🗺️ Flight Route (Phương án {v0})",
+  "STR_ANTISPAM_WARN": "🚨 **CẢNH BÁO:** <@{v0}> đã bị **Mute 30 phút** do tag quá nhiều người trong thời gian ngắn (Spam Ping)!",
+  "STR_ANTISPAM_LOG_TITLE": "🔇 Auto Mute (Spam Ping)",
+  "STR_ANTISPAM_LOG_DESC": "**User:** <@{v0}> ({v1})\\n**Lý do:** Tag {v2} lần trong chưa đầy 10 phút.\\n**Hình phạt:** Timeout 30 phút."
 }
