@@ -493,7 +493,6 @@
   "STR_F9D5BAA1": "**Starts:** <t:{v0}:F>\\n**Ends:** <t:{v1}:F>",
   "STR_F3CEBAB5": "📅 VATSIM events at {v0}",
   "STR_8C2A6052": "❌ The system currently does not have a route suggestion for the flight **{v0} ➔ {v1}**.\\nYou can check SimBrief or Charts for more info!",
-  "STR_231C991F": "🗺️ Flight Route${routesList.length > 1 ? ` (Option {v0})` : ''}",
   "STR_922EDAFC": "✅ Canceled the scheduled announcement (ID: \\`{v0}\\`)!",
   "STR_6FC19979": "❌ Could not find any schedule with ID: \\`{v0}\\` (It might have already been sent)",
   "STR_54F7E5F7": "❌ An error occurred while generating the VATSEA leaderboard: {v0}",
@@ -652,5 +651,15 @@
   "STR_ALT_RULE_Q2": "Route uses **Airway Q2** ➔ Apply Q2 standard separation",
   "STR_ALT_SUGGESTION": "🎯 Suggested Flight Levels",
   "STR_ALT_DISCLAIMER": "⚠️ **Note:** This is a suggested flight level. Always follow actual ATC clearances.",
-  "STR_ALT_ERR_INTERNAL": "❌ An internal error occurred during calculation."
+  "STR_ALT_ERR_INTERNAL": "❌ An internal error occurred during calculation.",
+  "STR_VOICE_BACKUP_TITLE": "💾 Voice Chat Backup",
+  "STR_VOICE_BACKUP_DESC": "Backed up text messages in voice channel **{v0}** before deletion.",
+  "STR_VOICE_BACKUP_HEADER": "=== VOICE CHANNEL CHAT LOG: {v0} ===",
+  "STR_VOICE_BACKUP_DATE": "Date saved: {v0}",
+  "STR_VOICE_BACKUP_ATTACHMENT": "[Image / Attachment]",
+  "STR_16467E5E": "👥 All: {v0}",
+  "STR_A3909E37": "🗣️ Members: {v0}",
+  "STR_FC55E9BC": "🤖 Bots: {v0}",
+  "STR_ROUTE_SINGLE": "🗺️ Flight Route",
+  "STR_ROUTE_MULTI": "🗺️ Flight Route (Option {v0})"
 }
