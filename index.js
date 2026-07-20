@@ -7708,16 +7708,21 @@ async function handleRoute(interaction) {
 
     // Xử lý chèn Route vào code block
     if (Array.isArray(routesList)) {
+      const isMultiple = routesList.length > 1; // Kiểm tra xem có nhiều hơn 1 route không
+      
       routesList.forEach((rt, index) => {
         embed.addFields({
-          name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_231C991F', { v0: index + 1 }),
+          // Nếu có nhiều route thì gọi mã MULTI (kèm số thứ tự), nếu chỉ có 1 thì gọi mã SINGLE
+          name: isMultiple 
+            ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ROUTE_MULTI', { v0: index + 1 }) 
+            : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ROUTE_SINGLE'),
           value: `\`\`\`\n${rt}\n\`\`\``,
           inline: false
         });
       });
     } else {
       embed.addFields({
-        name: '🗺️ Flight Route',
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ROUTE_SINGLE'),
         value: `\`\`\`\n${routesList}\n\`\`\``,
         inline: false
       });
@@ -8901,6 +8906,61 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         0xe74c3c
       );
       await sendLog(embed);
+    }
+  }
+  // ==========================================
+  // 3. CHỨC NĂNG BACKUP TIN NHẮN VOICE MASTER
+  // ==========================================
+  // Kích hoạt khi có người rời khỏi phòng thoại (Out hẳn hoặc Move sang phòng khác)
+  if (oldState.channelId && oldState.channelId !== newState.channelId) {
+    const oldChannel = oldState.channel;
+    
+    // Nếu phòng voice trống không còn ai (Khoảnh khắc Voice Master chuẩn bị xóa phòng)
+    if (oldChannel && oldChannel.members.size === 0) {
+      try {
+        // Tranh thủ fetch tối đa 100 tin nhắn trước khi phòng bốc hơi
+        const messages = await oldChannel.messages.fetch({ limit: 100 }).catch(() => null);
+        
+        if (messages && messages.size > 0) {
+          // Lọc tin nhắn: Bỏ qua người có role "Bot ngáo" (1366035755079696405) và bỏ qua các lệnh rỗng
+          const validMessages = messages.filter(msg => {
+            const hasBotNgao = msg.member?.roles.cache.has('1366035755079696405');
+            return !hasBotNgao && (msg.content || msg.attachments.size > 0);
+          });
+
+          // Nếu sau khi lọc mà vẫn còn tin nhắn (không phải phòng trống trơn)
+          if (validMessages.size > 0) {
+            // Sắp xếp tin nhắn theo thứ tự từ cũ -> mới
+            const sortedMessages = validMessages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+            
+            let txtContent = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_VOICE_BACKUP_HEADER', { v0: oldChannel.name }) + '\n';
+            txtContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_VOICE_BACKUP_DATE', { v0: new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) }) + '\n';
+            txtContent += '========================================\n\n';
+
+            sortedMessages.forEach(msg => {
+              const time = new Date(msg.createdTimestamp).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+              const author = msg.author.tag;
+              const content = msg.cleanContent || (msg.attachments.size > 0 ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_VOICE_BACKUP_ATTACHMENT') : '');
+              txtContent += `[${time}] ${author}: ${content}\n`;
+            });
+
+            // Gói lại thành file .txt
+            const buffer = Buffer.from(txtContent, 'utf8');
+            const attachment = new AttachmentBuilder(buffer, { name: `ChatLog_${oldChannel.name.replace(/[^a-zA-Z0-9 ]/g, '')}.txt` });
+
+            const embed = createLogEmbed(
+              t(typeof interaction !== 'undefined' ? interaction : null, 'STR_VOICE_BACKUP_TITLE'),
+              t(typeof interaction !== 'undefined' ? interaction : null, 'STR_VOICE_BACKUP_DESC', { v0: oldChannel.name }),
+              0x3498db
+            );
+
+            // Bắn thẳng file .txt vào kênh Log
+            await sendLog(embed, { files: [attachment] });
+          }
+        }
+      } catch (err) {
+        console.error("Lỗi khi backup tin nhắn voice channel:", err);
+      }
     }
   }
 });
