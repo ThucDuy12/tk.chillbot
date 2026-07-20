@@ -3275,6 +3275,11 @@ client.once('ready', async () => {
     new SlashCommandBuilder()
       .setName('balance')
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_37BCF263')),
+    new SlashCommandBuilder()
+      .setName('altitude')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_DESC'))
+      .addStringOption((option) => option.setName('dep').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_DEP')).setRequired(true))
+      .addStringOption((option) => option.setName('arr').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_ARR')).setRequired(true)),
     ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3787,6 +3792,9 @@ client.on('interactionCreate', async (interaction) => {
         case 'balance':
             await handleBalance(interaction);
             break;
+        case 'altitude':
+          await handleAltitude(interaction);
+          break;
         case 'set_lang': {
           const chosenLang = interaction.options.getString('lang');
           
@@ -9218,6 +9226,99 @@ async function handleBalance(interaction) {
       );
 
   await interaction.editReply({ embeds: [embed] });
+}
+
+// ===================== COMMAND: ALTITUDE (FLIGHT LEVEL SUGGESTION) =====================
+async function handleAltitude(interaction) {
+  const dep = interaction.options.getString('dep').toUpperCase().trim();
+  const arr = interaction.options.getString('arr').toUpperCase().trim();
+  await interaction.deferReply();
+
+  try {
+    const fetchObj = (await import('node-fetch')).default;
+    const openAipKey = process.env.OPENAIP_API_KEY || 'ce754e3a33063d110f1879a62508ee6a'; // Dùng lại Key có sẵn của bạn
+
+    // 1. Kéo tọa độ từ OpenAIP API
+    const depRes = await fetchObj(`https://api.openaip.net/api/airports?icao=${dep}&apiKey=${openAipKey}`);
+    const arrRes = await fetchObj(`https://api.openaip.net/api/airports?icao=${arr}&apiKey=${openAipKey}`);
+
+    if (!depRes.ok || !arrRes.ok) {
+      return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_ERR_API') });
+    }
+
+    const depData = await depRes.json();
+    const arrData = await arrRes.json();
+
+    const depAirport = depData.items ? depData.items.find(ap => ap.icaoCode === dep) : null;
+    const arrAirport = arrData.items ? arrData.items.find(ap => ap.icaoCode === arr) : null;
+
+    if (!depAirport || !arrAirport) {
+      return interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_ERR_NOTFOUND', { v0: dep, v1: arr }) });
+    }
+
+    // Tọa độ GeoJSON trả về là [Longitude, Latitude]
+    const depLon = depAirport.geometry.coordinates[0];
+    const depLat = depAirport.geometry.coordinates[1];
+    const arrLon = arrAirport.geometry.coordinates[0];
+    const arrLat = arrAirport.geometry.coordinates[1];
+
+    // 2. Tính toán khoảng cách (Haversine Formula) bằng Hải Lý (NM)
+    const R = 3440.065; // Bán kính trái đất tính bằng Hải Lý (Nautical Miles)
+    const dLat = (arrLat - depLat) * Math.PI / 180;
+    const dLon = (arrLon - depLon) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(depLat * Math.PI / 180) * Math.cos(arrLat * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
+
+    // 3. Tính toán hướng bay (Bearing/Track)
+    const y = Math.sin(dLon) * Math.cos(arrLat * Math.PI / 180);
+    const x = Math.cos(depLat * Math.PI / 180) * Math.sin(arrLat * Math.PI / 180) -
+              Math.sin(depLat * Math.PI / 180) * Math.cos(arrLat * Math.PI / 180) * Math.cos(dLon);
+    let bearing = Math.atan2(y, x) * 180 / Math.PI;
+    if (bearing < 0) bearing += 360; // Đưa về hệ quy chiếu 0 - 360 độ
+
+    // 4. Áp dụng RVSM (Semi-circular Rule)
+    // Hướng Đông (000 - 179) bay LẺ, Hướng Tây (180 - 359) bay CHẴN
+    const isEast = bearing >= 0 && bearing < 180;
+    const directionText = isEast ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_EAST') : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_WEST');
+
+    // 5. Tính toán đề xuất độ cao phù hợp dựa vào khoảng cách
+    let suggestedFLs = [];
+    if (distance < 150) {
+      // Dưới 150NM: Bay thấp
+      suggestedFLs = isEast ? ['FL150', 'FL170', 'FL190', 'FL210'] : ['FL160', 'FL180', 'FL200', 'FL220'];
+    } else if (distance < 400) {
+      // Từ 150 - 400NM: Bay tầm trung
+      suggestedFLs = isEast ? ['FL230', 'FL250', 'FL270', 'FL290', 'FL310'] : ['FL240', 'FL260', 'FL280', 'FL300', 'FL320'];
+    } else if (distance < 1500) {
+      // Bay xa: Bay cao
+      suggestedFLs = isEast ? ['FL310', 'FL330', 'FL350', 'FL370', 'FL390'] : ['FL320', 'FL340', 'FL360', 'FL380', 'FL400'];
+    } else {
+      // Bay vượt châu lục: Step-climb
+      suggestedFLs = isEast ? ['FL330', 'FL350', 'FL370', 'FL390', 'FL410'] : ['FL320', 'FL340', 'FL360', 'FL380', 'FL400'];
+    }
+
+    // 6. Trình bày UI (Embed)
+    const embed = new EmbedBuilder()
+      .setTitle(`✈️ Flight Level Suggestion: ${dep} ➔ ${arr}`)
+      .setColor(0x00A8FF)
+      .addFields(
+        { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_DISTANCE'), value: `**${Math.round(distance)} NM**`, inline: true },
+        { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_BEARING'), value: `**${Math.round(bearing)}°** (${directionText})`, inline: true },
+        { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE'), value: isEast ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE_EAST') : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_RULE_WEST'), inline: false },
+        { name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_SUGGESTION'), value: `\`\`\`yaml\n${suggestedFLs.join(', ')}\n\`\`\``, inline: false }
+      )
+      .setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_FOOTER'), iconURL: 'https://cdn-icons-png.flaticon.com/512/3063/3063822.png' })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (error) {
+    console.error('Altitude calculation error:', error);
+    await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_ERR_INTERNAL') });
+  }
 }
 
 // ===================== LOGIN =====================
