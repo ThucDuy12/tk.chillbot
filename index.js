@@ -211,8 +211,6 @@ if (!LOG_CHANNEL_ID) {
 }
 
 // ===================== LOCAL DATABASE ENGINE (CSV PARSER) =====================
-const fs = require('fs');
-const path = require('path');
 
 let cachedAirports = null;
 let cachedRunways = null;
