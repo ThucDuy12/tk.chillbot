@@ -494,7 +494,6 @@
   "STR_F9D5BAA1": "**Bắt đầu:** <t:{v0}:F>\\n**Kết thúc:** <t:{v1}:F>",
   "STR_F3CEBAB5": "📅 Các sự kiện VATSIM tại {v0}",
   "STR_8C2A6052": "❌ Hiện tại hệ thống chưa có gợi ý route cho chặng bay **{v0} ➔ {v1}**.\\nBạn có thể tự tra cứu thêm trên SimBrief hoặc Chart nhé!",
-  "STR_231C991F": "🗺️ Flight Route${routesList.length > 1 ? ` (Phương án {v0})` : ''}",
   "STR_922EDAFC": "✅ Đã hủy lịch trình gửi thông báo (ID: \\`{v0}\\`)!",
   "STR_6FC19979": "❌ Không tìm thấy lịch trình nào với ID: \\`{v0}\\` (Có thể nó đã được gửi đi rồi)",
   "STR_54F7E5F7": "❌ Đã xảy ra lỗi khi tạo bảng xếp hạng VATSEA: {v0}",
@@ -1022,5 +1021,12 @@
   "STR_ALT_RULE_Q2": "Đường bay sử dụng **Airway Q2** ➔ Áp dụng phân cách tiêu chuẩn Q2",
   "STR_ALT_SUGGESTION": "🎯 Các mức bay đề xuất",
   "STR_ALT_DISCLAIMER": "⚠️ **Lưu ý:** Đây chỉ là mức bay tham khảo theo quy tắc RVSM. Luôn tuân thủ huấn lệnh thực tế của ATC.",
-  "STR_ALT_ERR_INTERNAL": "❌ Đã có lỗi xảy ra trong quá trình tính toán khoảng cách."
+  "STR_ALT_ERR_INTERNAL": "❌ Đã có lỗi xảy ra trong quá trình tính toán khoảng cách.",
+  "STR_VOICE_BACKUP_TITLE": "💾 Lịch Sử Chat Voice",
+  "STR_VOICE_BACKUP_DESC": "Đã sao lưu tin nhắn text trong kênh voice **{v0}** trước khi bị xóa.",
+  "STR_VOICE_BACKUP_HEADER": "=== LỊCH SỬ CHAT KÊNH VOICE: {v0} ===",
+  "STR_VOICE_BACKUP_DATE": "Ngày lưu: {v0}",
+  "STR_VOICE_BACKUP_ATTACHMENT": "[Hình ảnh / Tệp đính kèm]",
+  "STR_ROUTE_SINGLE": "🗺️ Flight Route",
+  "STR_ROUTE_MULTI": "🗺️ Flight Route (Phương án {v0})"
 }
