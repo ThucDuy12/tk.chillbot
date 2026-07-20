@@ -1031,5 +1031,6 @@
   "STR_ROUTE_MULTI": "🗺️ Flight Route (Phương án {v0})",
   "STR_ANTISPAM_WARN": "🚨 **CẢNH BÁO:** <@{v0}> đã bị **Mute 30 phút** do tag quá nhiều người trong thời gian ngắn (Spam Ping)!",
   "STR_ANTISPAM_LOG_TITLE": "🔇 Auto Mute (Spam Ping)",
-  "STR_ANTISPAM_LOG_DESC": "**User:** <@{v0}> ({v1})\\n**Lý do:** Tag {v2} lần trong chưa đầy 10 phút.\\n**Hình phạt:** Timeout 30 phút."
+  "STR_ANTISPAM_LOG_DESC": "**User:** <@{v0}> ({v1})\\n**Lý do:** Tag {v2} lần trong chưa đầy 10 phút.\\n**Hình phạt:** Timeout 30 phút.",
+  "STR_TIMEOUT_ADMIN_PING": "🚨 **BÁO ĐỘNG:** <@{v0}> vừa bị Timeout (Mute) trong server! Admin/Staff vào xem xét nhé!"
 }
