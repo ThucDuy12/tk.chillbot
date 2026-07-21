@@ -28,3 +28,4 @@ acdm_message.json
 npm-debug.log*
 .DS_Store
 gen-lang-client-*.json
+.cache
