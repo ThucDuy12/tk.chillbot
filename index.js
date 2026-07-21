@@ -6945,24 +6945,26 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
-// ===================== HELPER: KÉO METAR TỪ VCLvACC PANEL (NHANH & GỌN) =====================
+// ===================== HELPER: KÉO METAR TỪ VCLvACC PANEL (BẢN cURL CHỐNG BLOCK) =====================
 async function fetchMetarFromVCL(icao) {
   try {
-    const fetch = (await import('node-fetch')).default;
+    const util = require('util');
+    const exec = util.promisify(require('child_process').exec);
     const url = 'https://panel.vclvacc.net/flight/weather/metar/all';
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-      },
-      timeout: 8000
-    });
+    // Lệnh cURL giả lập trình duyệt Chrome xịn nhất để qua mặt hệ thống chống bot/firewall
+    const command = `curl -k -s -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36" -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" -H "Accept-Language: vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7" --compressed "${url}"`;
+    
+    // Ép thời gian chờ tối đa 15 giây
+    const { stdout } = await exec(command, { timeout: 15000 }); 
+    
+    if (!stdout || stdout.trim() === '') {
+      console.log(`[VCL] HTML rỗng cho ${icao}`);
+      return null;
+    }
 
-    if (!response.ok) return null;
-
-    const html = await response.text();
     const cheerio = require('cheerio');
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(stdout);
 
     let foundMetar = null;
 
@@ -6976,10 +6978,10 @@ async function fetchMetarFromVCL(icao) {
       }
     });
 
-    // Cứu cánh: Nếu vì lý do nào đó web đổi cấu trúc HTML, dùng Regex rà thẳng trên text luôn
+    // Cứu cánh: Nếu web đổi cấu trúc HTML, dùng Regex rà thẳng trên text luôn
     if (!foundMetar) {
       const regex = new RegExp(`(?:METAR\\s+)?${icao}\\s+\\d{6}Z\\s+[^<\\r\\n]+`, 'i');
-      const match = html.match(regex);
+      const match = stdout.match(regex);
       if (match) {
         foundMetar = match[0].replace(/^METAR\s+/i, '').trim();
       }
@@ -6987,7 +6989,7 @@ async function fetchMetarFromVCL(icao) {
 
     return foundMetar;
   } catch (err) {
-    console.error(`❌ [VCL] Lỗi kéo METAR cho ${icao}:`, err.message);
+    console.error(`❌ [VCL] Lỗi cURL kéo METAR cho ${icao}:`, err.message);
     return null;
   }
 }
