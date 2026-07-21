@@ -6945,17 +6945,14 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
-
-
-// ===================== HELPER: KÉO METAR TỪ VATM (BẢN SIÊU CHẮC CHẮN) =====================
+// ===================== HELPER: KÉO METAR TỪ VATM (BẢN SIÊU CHẮC CHẮN V2) =====================
 async function fetchMetarFromVATM(icao) {
   let foundMetar = null;
 
-  // 1. TẦNG FETCH TRỰC TIẾP TỪ HTML (TỐC ĐỘ BÀN THỜ - 0.1s)
+  // 1. TẦNG FETCH TRỰC TIẾP TỪ HTML
   try {
     const nodeFetch = (await import('node-fetch')).default;
     const https = require('https');
-    // Vượt rào lỗi SSL Certificate cực kỳ phổ biến ở các website nhà nước VN
     const agent = new https.Agent({ rejectUnauthorized: false }); 
 
     const res = await nodeFetch('https://met.vatm.vn/airline', {
@@ -6965,12 +6962,11 @@ async function fetchMetarFromVATM(icao) {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7'
       },
-      timeout: 10000 // Tăng lên 10s cho chắc ăn
+      timeout: 10000 
     });
     
     if (res.ok) {
       const html = await res.text();
-      // Regex bọc thép, bao trọn kể cả khi có chữ AUTO hay mã Z
       const regex = new RegExp(`(?:METAR\\s+)?${icao}\\s+\\d{6}Z[^<\\r\\n]+`, 'i');
       const match = html.match(regex);
       if (match) {
@@ -6981,28 +6977,42 @@ async function fetchMetarFromVATM(icao) {
     console.log(`[VATM] Lỗi Fetch HTML cho ${icao}, chuyển sang Puppeteer... (${e.message})`);
   }
 
-  // 2. TẦNG PUPPETEER (CỨU CÁNH KHI WEB RENDER BẰNG JAVASCRIPT)
+  // 2. TẦNG PUPPETEER (ĐÃ FIX TẬN GỐC LỖI KẾT NỐI BROWSER)
   let page = null;
   try {
     const puppeteer = require('puppeteer');
     
-    if (!globalVatmBrowser || !globalVatmBrowser.isConnected()) {
-      globalVatmBrowser = await puppeteer.launch({
+    // Đóng gói hàm khởi tạo Browser để gọi lại khi cần
+    const launchBrowser = async () => {
+      return await puppeteer.launch({
         headless: "new",
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-gpu',
-          '--ignore-certificate-errors' // Bỏ qua lỗi SSL trên Puppeteer
+          '--ignore-certificate-errors'
         ]
       });
+    };
+
+    // Nếu bot mới bật, chưa có browser thì tạo mới
+    if (!globalVatmBrowser) {
+      globalVatmBrowser = await launchBrowser();
+    }
+
+    // Thử mở tab mới. Nếu Browser chết/ngắt kết nối thì catch lỗi và hồi sinh nó!
+    try {
+      page = await globalVatmBrowser.newPage();
+    } catch (err) {
+      console.log(`[VATM] Browser nền bị ngắt kết nối, đang khởi động lại máy cày...`);
+      globalVatmBrowser = await launchBrowser();
+      page = await globalVatmBrowser.newPage();
     }
     
-    page = await globalVatmBrowser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // Ép nhịn ăn: Chặn tải hình ảnh, CSS để load siêu tốc
+    // Chặn tải tài nguyên dư thừa để lấy Tốc độ bàn thờ
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
@@ -7012,18 +7022,15 @@ async function fetchMetarFromVATM(icao) {
       }
     });
 
-    // QUAN TRỌNG NHẤT: Chờ 'networkidle2' thay vì 'domcontentloaded' 
-    // để đảm bảo các API ngầm của VATM đã đổ dữ liệu JS ra màn hình xong!
     await page.goto('https://met.vatm.vn/airline', { waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
     
-    // Bồi thêm 3 giây chờ từ khóa 'Z ' hoặc 'METAR' xuất hiện để chắc chắn 100% không bắt hụt
     try {
       await page.waitForFunction(
         () => document.body.innerText.includes('Z ') || document.body.innerText.includes('METAR'),
         { timeout: 3000 }
       );
     } catch (e) {
-      // Hết 3 giây vẫn chưa thấy thì nhắm mắt quét bừa luôn
+      // Hết 3 giây vẫn chưa thấy thì nhắm mắt quét luôn
     }
 
     const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
@@ -7040,7 +7047,6 @@ async function fetchMetarFromVATM(icao) {
     console.error(`❌ Lỗi Puppeteer VATM (${icao}):`, err.message);
     return null;
   } finally {
-    // Đóng tab để trả lại RAM cho server
     if (page) await page.close().catch(() => {});
   }
 }
