@@ -5330,26 +5330,11 @@ async function handleButton(interaction) {
       return interaction.reply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_47B2215F'), ephemeral: true });
     }
 
-    pendingRequests.delete(requestId);
-
-    // 1. Dùng interaction.update() để báo cho Discord biết nút đã được nhận (tránh lỗi 3 giây)
-    try {
-      const oldEmbed = interaction.message.embeds[0];
-      const newEmbed = EmbedBuilder.from(oldEmbed)
-        .addFields({
-          name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_03D0BABA'), // Đã duyệt bởi
-          value: `<@${interaction.user.id}>`,
-          inline: true
-        })
-        .setTimestamp();
-
-      await interaction.update({ embeds: [newEmbed], components: [] });
-    } catch (err) {
-      console.error('Error updating embed:', err);
-    }
-
-    // 2. Xử lý logic TỪ CHỐI
+    // ==========================================
+    // XỬ LÝ TỪ CHỐI (DENY) TRƯỚC TIÊN
+    // ==========================================
     if (action === 'deny') {
+      // Phải show modal ngay lập tức, không update hay delete gì lúc này
       const modal = new ModalBuilder()
         .setCustomId(`deny_role_${requestId}`)
         .setTitle(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ROLE_DENY_TITLE'));
@@ -5366,7 +5351,30 @@ async function handleButton(interaction) {
       return; 
     }
 
-    // 3. Xử lý logic ĐỒNG Ý
+    // ==========================================
+    // XỬ LÝ ĐỒNG Ý (APPROVE)
+    // ==========================================
+    if (action === 'approve') {
+        // Chỉ xóa khỏi bộ nhớ chờ duyệt khi chọn Đồng ý
+        pendingRequests.delete(requestId);
+
+        // 1. Cập nhật giao diện thành "Đã duyệt bởi"
+        try {
+          const oldEmbed = interaction.message.embeds[0];
+          const newEmbed = EmbedBuilder.from(oldEmbed)
+            .addFields({
+              name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_03D0BABA'), // Đã duyệt bởi
+              value: `<@${interaction.user.id}>`,
+              inline: true
+            })
+            .setTimestamp();
+
+          await interaction.update({ embeds: [newEmbed], components: [] });
+        } catch (err) {
+          console.error('Error updating embed:', err);
+        }
+
+        // 2. Logic cấp role
         try {
           const guild = await client.guilds.fetch(request.guildId);
           const member = await guild.members.fetch(request.userId);
@@ -5385,7 +5393,7 @@ async function handleButton(interaction) {
           
           let responseMsg = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_83024050');
 
-          // THÊM: Xử lý cấp role VATSIM dựa trên CID đính kèm
+          // Xử lý cấp role VATSIM dựa trên CID đính kèm
           if (request.cid) {
               const cidNum = parseInt(request.cid);
               if (!isNaN(cidNum)) {
@@ -5445,6 +5453,7 @@ async function handleButton(interaction) {
           await interaction.followUp({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_48B855CC'), ephemeral: true });
         }
         return;
+    }
   }
   if (customId.startsWith('confirm_event_')) {
     const eventId = customId.split('_')[2];
