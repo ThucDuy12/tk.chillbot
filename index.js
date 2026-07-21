@@ -6933,12 +6933,14 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
-// ===================== HELPER: KÉO METAR TỪ VATM (BẮT GÓI TIN NGẦM - KHÔNG CHỜ GIAO DIỆN) =====================
-async function fetchMetarFromVATM(icao) {
-  let browser;
-  try {
-    const puppeteer = require('puppeteer');
-    browser = await puppeteer.launch({
+// ===================== HELPER: KÉO METAR TỪ VATM (BẢN TỐI ƯU TỐC ĐỘ ĐỈNH CAO) =====================
+const puppeteer = require('puppeteer');
+let globalVatmBrowser = null; // Cuốn sổ hộ mệnh giữ Chrome sống dai
+
+// Hàm mồi: Kiểm tra xem Chrome đã bật chưa, nếu chưa thì bật lên
+async function getVatmBrowser() {
+  if (!globalVatmBrowser || !globalVatmBrowser.isConnected()) {
+    globalVatmBrowser = await puppeteer.launch({
       headless: "new",
       args: [
         '--no-sandbox',
@@ -6948,53 +6950,55 @@ async function fetchMetarFromVATM(icao) {
         '--window-size=1920,1080'
       ]
     });
+    console.log("🚀 [VATM] Đã khởi động động cơ Chrome ngầm siêu tốc!");
+  }
+  return globalVatmBrowser;
+}
+
+async function fetchMetarFromVATM(icao) {
+  let page = null;
+  try {
+    // Kéo con Chrome đang chạy ngầm ra xài
+    const browser = await getVatmBrowser();
     
-    const page = await browser.newPage();
+    // CHỈ MỞ TAB MỚI (Tốn 0.1s thay vì 4s như trước)
+    page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
 
     let foundMetar = null;
 
-    // 🚀 CHIẾN THUẬT MỚI: Đánh chặn và lục soát toàn bộ gói tin API bay qua mạng
+    // Đánh chặn và lục soát toàn bộ gói tin API
     page.on('response', async (response) => {
       const req = response.request();
-      // Chỉ bắt các gói tin dữ liệu ngầm (API/XHR/Fetch), bỏ qua rác (hình ảnh, css...)
       if (req.resourceType() === 'xhr' || req.resourceType() === 'fetch') {
         try {
           const text = await response.text();
-          // Lục tìm mã ICAO trong cục dữ liệu JSON vừa bắt được
           if (text.includes(icao)) {
-            // Dùng Regex moi chính xác đoạn METAR ra khỏi mớ ngoặc kép JSON
             let regex = new RegExp(`METAR\\s+${icao}\\s+[^"\\n\\\\]+`, 'i');
             let match = text.match(regex);
             
-            // Trường hợp VATM lười, không thèm ghi chữ METAR ở đầu (VD: "VVTX 210100Z...")
             if (!match) {
               regex = new RegExp(`${icao}\\s+\\d{6}Z\\s+[^"\\n\\\\]+`, 'i');
               match = text.match(regex);
             }
 
             if (match && !foundMetar) {
-              // Cắt gọt sạch sẽ và lưu vào kho
               foundMetar = match[0].replace(/^METAR\s+/i, '').trim();
             }
           }
-        } catch (e) {
-          // Bỏ qua nếu gói tin bị mã hóa hoặc lỗi CORS
-        }
+        } catch (e) {}
       }
     });
     
-    // Mở trang. Dùng 'domcontentloaded' để kích hoạt script nhanh nhất có thể.
+    // Mở trang web (Tốc độ bàn thờ)
     await page.goto('https://met.vatm.vn/airline', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
     
     // Vòng lặp chờ phản hồi API (Tối đa 8 giây)
-    // Cứ mỗi 0.5s nó sẽ liếc nhìn xem bắt được METAR chưa. Nếu bắt được rồi thì ngắt luôn, tiết kiệm cực nhiều thời gian!
     for (let i = 0; i < 16; i++) {
       if (foundMetar) break;
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // 🛡️ Cứu cánh cuối cùng: Nếu API bị mã hoá ẩn, quét vét máng trên giao diện DOM như cũ
     if (!foundMetar) {
       const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
       const regex = new RegExp(`METAR\\s+${icao}\\s+[^\\n]+`, 'i');
@@ -7009,13 +7013,9 @@ async function fetchMetarFromVATM(icao) {
     console.error(`❌ Lỗi Puppeteer VATM (${icao}):`, err.message);
     return null;
   } finally {
-    // 🧹 Dọn dẹp RAM triệt để
-    if (browser) {
-      try {
-        const pages = await browser.pages();
-        for (const p of pages) await p.close();
-        await browser.close();
-      } catch (e) {}
+    // 🧹 ĐIỂM SÁNG GIÁ NHẤT: CHỈ ĐÓNG TAB, CẤM ĐƯỢC ĐÓNG BROWSER!
+    if (page) {
+      await page.close().catch(() => {});
     }
   }
 }
@@ -7137,10 +7137,7 @@ async function handleMetar(interaction) {
           replyContent += `\n🛫 **Departure ATIS (${icao}):**\n\`\`\`${formattedDep}\`\`\``;
         }
       }
-    } else {
-      replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_B763D956', { v0: icao });
-    }
-
+    } 
     await interaction.editReply({ content: replyContent });
 
   } catch (err) {
