@@ -6945,109 +6945,50 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
-// ===================== HELPER: KÉO METAR TỪ VATM (BẢN SIÊU CHẮC CHẮN V2) =====================
-async function fetchMetarFromVATM(icao) {
-  let foundMetar = null;
-
-  // 1. TẦNG FETCH TRỰC TIẾP TỪ HTML
+// ===================== HELPER: KÉO METAR TỪ VCLvACC PANEL (NHANH & GỌN) =====================
+async function fetchMetarFromVCL(icao) {
   try {
-    const nodeFetch = (await import('node-fetch')).default;
-    const https = require('https');
-    const agent = new https.Agent({ rejectUnauthorized: false }); 
+    const fetch = (await import('node-fetch')).default;
+    const url = 'https://panel.vclvacc.net/flight/weather/metar/all';
 
-    const res = await nodeFetch('https://met.vatm.vn/airline', {
-      agent,
-      headers: { 
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7'
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
       },
-      timeout: 10000 
+      timeout: 8000
     });
-    
-    if (res.ok) {
-      const html = await res.text();
-      const regex = new RegExp(`(?:METAR\\s+)?${icao}\\s+\\d{6}Z[^<\\r\\n]+`, 'i');
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const cheerio = require('cheerio');
+    const $ = cheerio.load(html);
+
+    let foundMetar = null;
+
+    // Tìm trong bảng, duyệt qua từng hàng (tr)
+    $('table tbody tr').each((index, element) => {
+      // Cột 1 (eq 0) là ICAO, Cột 3 (eq 2) là Info (chứa METAR)
+      const rowIcao = $(element).find('td').eq(0).text().trim().toUpperCase();
+      
+      if (rowIcao === icao) {
+        foundMetar = $(element).find('td').eq(2).text().trim();
+      }
+    });
+
+    // Cứu cánh: Nếu vì lý do nào đó web đổi cấu trúc HTML, dùng Regex rà thẳng trên text luôn
+    if (!foundMetar) {
+      const regex = new RegExp(`(?:METAR\\s+)?${icao}\\s+\\d{6}Z\\s+[^<\\r\\n]+`, 'i');
       const match = html.match(regex);
       if (match) {
-        return match[0].replace(/^METAR\s+/i, '').trim();
+        foundMetar = match[0].replace(/^METAR\s+/i, '').trim();
       }
-    }
-  } catch (e) {
-    console.log(`[VATM] Lỗi Fetch HTML cho ${icao}, chuyển sang Puppeteer... (${e.message})`);
-  }
-
-  // 2. TẦNG PUPPETEER (ĐÃ FIX TẬN GỐC LỖI KẾT NỐI BROWSER)
-  let page = null;
-  try {
-    const puppeteer = require('puppeteer');
-    
-    // Đóng gói hàm khởi tạo Browser để gọi lại khi cần
-    const launchBrowser = async () => {
-      return await puppeteer.launch({
-        headless: "new",
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--ignore-certificate-errors'
-        ]
-      });
-    };
-
-    // Nếu bot mới bật, chưa có browser thì tạo mới
-    if (!globalVatmBrowser) {
-      globalVatmBrowser = await launchBrowser();
-    }
-
-    // Thử mở tab mới. Nếu Browser chết/ngắt kết nối thì catch lỗi và hồi sinh nó!
-    try {
-      page = await globalVatmBrowser.newPage();
-    } catch (err) {
-      console.log(`[VATM] Browser nền bị ngắt kết nối, đang khởi động lại máy cày...`);
-      globalVatmBrowser = await launchBrowser();
-      page = await globalVatmBrowser.newPage();
-    }
-    
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-    // Chặn tải tài nguyên dư thừa để lấy Tốc độ bàn thờ
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
-    await page.goto('https://met.vatm.vn/airline', { waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
-    
-    try {
-      await page.waitForFunction(
-        () => document.body.innerText.includes('Z ') || document.body.innerText.includes('METAR'),
-        { timeout: 3000 }
-      );
-    } catch (e) {
-      // Hết 3 giây vẫn chưa thấy thì nhắm mắt quét luôn
-    }
-
-    const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
-    
-    const regex = new RegExp(`(?:METAR\\s+)?${icao}\\s+\\d{6}Z[^\\r\\n]+`, 'i');
-    const match = bodyText.match(regex);
-    
-    if (match) {
-      foundMetar = match[0].replace(/^METAR\s+/i, '').trim();
     }
 
     return foundMetar;
   } catch (err) {
-    console.error(`❌ Lỗi Puppeteer VATM (${icao}):`, err.message);
+    console.error(`❌ [VCL] Lỗi kéo METAR cho ${icao}:`, err.message);
     return null;
-  } finally {
-    if (page) await page.close().catch(() => {});
   }
 }
 
@@ -7063,12 +7004,13 @@ async function handleMetar(interaction) {
     let metarText = atisData ? atisData.metar : null;
     let hasAtis = atisData && (atisData.arrival || atisData.departure);
 
-    // 2. Fallback VATM & CheckWX
+    // 2. Fallback VCLvACC & CheckWX
     if (!metarText && !hasAtis) {
-      if (icao.startsWith('VV')) {
-        metarText = await fetchMetarFromVATM(icao);
+      // Mở rộng tìm kiếm cho cả Việt Nam (VV), Campuchia (VD), Lào (VL)
+      if (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL')) {
+        metarText = await fetchMetarFromVCL(icao);
         if (!metarText) {
-          metarText = await fetchMetarFromCheckWX(icao); // Nếu VATM lỗi thì quay lại CheckWX
+          metarText = await fetchMetarFromCheckWX(icao); // Cứu cánh bằng CheckWX
         }
       } else {
         metarText = await fetchMetarFromCheckWX(icao);
@@ -7191,8 +7133,9 @@ async function handleRunway(interaction) {
     if (atisData && atisData.metar) {
       metar = atisData.metar;
     } else {
-      if (icao.startsWith('VV')) {
-        metar = await fetchMetarFromVATM(icao);
+      // Mở rộng tìm kiếm cho cả khu vực VCL
+      if (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL')) {
+        metar = await fetchMetarFromVCL(icao);
         if (!metar) metar = await fetchMetarFromCheckWX(icao);
       } else {
         metar = await fetchMetarFromCheckWX(icao);
