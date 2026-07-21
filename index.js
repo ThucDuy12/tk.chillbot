@@ -6934,7 +6934,6 @@ async function fetchMetarFromCheckWX(icao) {
 }
 
 // ===================== HELPER: KÉO METAR TỪ VATM (BẢN GLOBAL BROWSER + TỰ ĐỘNG RESET 12H) =====================
-const puppeteer = require('puppeteer');
 let globalVatmBrowser = null;
 
 // 1. HỆ THỐNG ĐỒNG HỒ SINH HỌC: Tự động dọn dẹp Chrome ngầm mỗi 12 tiếng để chống tràn RAM
