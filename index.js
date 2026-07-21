@@ -6933,24 +6933,14 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
-// ===================== HELPER: KÉO METAR TỪ VATM (BẢN GLOBAL BROWSER + TỰ ĐỘNG RESET 12H) =====================
-let globalVatmBrowser = null;
-
-// 1. HỆ THỐNG ĐỒNG HỒ SINH HỌC: Tự động dọn dẹp Chrome ngầm mỗi 12 tiếng để chống tràn RAM
-setInterval(async () => {
-  if (globalVatmBrowser) {
-    console.log("♻️ [VATM] Đang khởi động lại Chrome định kỳ (12h/lần) để giải phóng RAM...");
-    try {
-      await globalVatmBrowser.close();
-    } catch (e) {}
-    globalVatmBrowser = null;
-  }
-}, 12 * 60 * 60 * 1000);
-
-// 2. HÀM MỒI: Khởi động Chrome (Chỉ chạy 1 lần duy nhất hoặc khi vừa bị reset)
-async function getVatmBrowser() {
-  if (!globalVatmBrowser || !globalVatmBrowser.isConnected()) {
-    globalVatmBrowser = await puppeteer.launch({
+// ===================== HELPER: KÉO METAR TỪ VATM (BẢN ỔN ĐỊNH TUYỆT ĐỐI 100%) =====================
+async function fetchMetarFromVATM(icao) {
+  let browser;
+  try {
+    const puppeteer = require('puppeteer');
+    
+    // Khởi động Chrome MỚI HOÀN TOÀN mỗi lần gọi, đảm bảo không bao giờ bị đơ
+    browser = await puppeteer.launch({
       headless: "new",
       args: [
         '--no-sandbox',
@@ -6960,76 +6950,60 @@ async function getVatmBrowser() {
         '--window-size=1920,1080'
       ]
     });
-    console.log("🚀 [VATM] Khởi động động cơ Chrome ngầm siêu tốc...");
-  }
-  return globalVatmBrowser;
-}
-
-// 3. HÀM CÀO DỮ LIỆU: Tốc độ xé gió, bọc thép 100% chống văng lỗi
-async function fetchMetarFromVATM(icao) {
-  let page = null;
-  try {
-    const browser = await getVatmBrowser();
     
-    // Mở Tab mới (Tốn 0.1 giây)
-    page = await browser.newPage();
+    const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
 
-    let foundMetar = null;
-
-    // 🎧 Đặt máy nghe lén gói tin API (Không thèm quan tâm giao diện web có load được không)
-    page.on('response', async (response) => {
-      const req = response.request();
-      if (req.resourceType() === 'xhr' || req.resourceType() === 'fetch') {
-        try {
-          const text = await response.text();
-          if (text.includes(icao)) {
-            let regex = new RegExp(`METAR\\s+${icao}\\s+[^"\\n\\\\]+`, 'i');
-            let match = text.match(regex);
-            
-            if (!match) {
-              regex = new RegExp(`${icao}\\s+\\d{6}Z\\s+[^"\\n\\\\]+`, 'i');
-              match = text.match(regex);
-            }
-
-            if (match && !foundMetar) {
-              foundMetar = match[0].replace(/^METAR\s+/i, '').trim();
-            }
-          }
-        } catch (e) {} // Im lặng nuốt lỗi nếu gói tin bị mã hóa
+    // Bật khiên chặn hình ảnh, CSS để load nhanh như chớp
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      const resType = req.resourceType();
+      if (resType === 'image' || resType === 'stylesheet' || resType === 'font' || resType === 'media') {
+        req.abort();
+      } else {
+        req.continue();
       }
     });
     
-    // 🌐 Bắt đầu tải trang. Ép thời gian chờ tối đa 15s. Nếu 15s web chưa load xong thì kệ nó, chạy tiếp!
-    await page.goto('https://met.vatm.vn/airline', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+    // Load trang và đợi mạng lưới API của VATM chạy xong (networkidle2)
+    await page.goto('https://met.vatm.vn/airline', { waitUntil: 'networkidle2', timeout: 20000 });
     
-    // ⏳ Vòng lặp chờ dữ liệu API: Quét 16 lần, mỗi lần 0.5s (Tối đa 8 giây)
-    for (let i = 0; i < 16; i++) {
-      if (foundMetar) break; // Bắt được phát là thoát vòng lặp về đích luôn
-      await new Promise(resolve => setTimeout(resolve, 500));
+    // Đợi chữ METAR xuất hiện trên màn hình. Bọc Try/Catch để 10s không thấy thì lướt qua, không văng lỗi đỏ!
+    try {
+      await page.waitForFunction(() => {
+        return document.body.innerText.includes('METAR');
+      }, { timeout: 10000 });
+    } catch (e) {
+      // Hết 10s không thấy chữ METAR, im lặng đi tiếp xuống dưới quét DOM
     }
 
-    // 🛡️ Phương án dự phòng: Nếu API bắt hụt, liếc nhanh qua màn hình web xem có chữ không
-    if (!foundMetar) {
-      try {
-        const bodyText = await page.evaluate(() => document.body.innerText);
-        const regex = new RegExp(`METAR\\s+${icao}\\s+[^\\n]+`, 'i');
-        const match = bodyText.match(regex);
-        if (match) {
-          foundMetar = match[0].replace(/^METAR\s+/i, '').trim();
-        }
-      } catch (e) {} // Lỗi đọc màn hình thì im lặng bỏ qua
+    // Lấy toàn bộ chữ trên trang web
+    const bodyText = await page.evaluate(() => document.body.innerText);
+    
+    // Quét từng dòng tìm mã ICAO
+    const lines = bodyText.split('\n');
+    for (let line of lines) {
+      line = line.trim();
+      if (line.startsWith(`METAR ${icao}`)) {
+        return line.replace(/^METAR\s+/i, '').trim(); 
+      }
     }
 
-    return foundMetar;
+    // Dự phòng: Nếu VATM viết thiếu chữ METAR ở đầu (Ví dụ: "VVTX 210100Z ...")
+    const fallbackRegex = new RegExp(`${icao}\\s+\\d{6}Z\\s+.*`, 'i');
+    const match = bodyText.match(fallbackRegex);
+    if (match) {
+      return match[0].trim();
+    }
+
+    return null; // Không có thì trả về null cho bot xử lý
   } catch (err) {
-    // Bắt trọn ổ mọi lỗi tàn dư (kể cả lỗi mất kết nối), in ra log nhẹ nhàng thay vì làm đỏ lòm Console
-    console.warn(`⚠️ [VATM Warning] Lấy dữ liệu cho ${icao} thất bại: ${err.message}`);
+    console.error(`❌ Lỗi Puppeteer VATM (${icao}):`, err.message);
     return null;
   } finally {
-    // 🧹 TUYỆT ĐỐI CHỈ ĐÓNG TAB, GIỮ BROWSER SỐNG ĐỂ NGƯỜI SAU DÙNG
-    if (page) {
-      await page.close().catch(() => {});
+    // TỬ HÌNH CHROME SAU KHI DÙNG XONG: Giải phóng 100% RAM
+    if (browser) {
+      await browser.close().catch(() => {});
     }
   }
 }
