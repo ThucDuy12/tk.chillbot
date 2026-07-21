@@ -137,6 +137,9 @@ const ADMIN_CHANNEL_ID = process.env.ADMIN_CHANNEL_ID || '1448258683627638895';
 
 let simbriefUsersData = {};
 
+// Khai báo biến global ở đầu file
+let globalVatmBrowser = null;
+
 // ===================== PENDING USERS DATA =====================
 // Khởi tạo biến rỗng, dữ liệu sẽ được kéo từ Sheet về lúc bot ready
 let pendingUsersData = {};
@@ -6933,35 +6936,39 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
-// Khai báo biến này ở TUYẾN ĐẦU file (chung chỗ với các khai báo biến let/const khác)
-let globalVatmBrowser = null;
 
-// ===================== HELPER: KÉO METAR TỪ VATM (BẢN TỐI ƯU RAM - KHÔNG CRASH) =====================
+
+// ===================== HELPER: KÉO METAR TỪ VATM (BẢN SIÊU CHẮC CHẮN) =====================
 async function fetchMetarFromVATM(icao) {
-  // 1. TẦNG VŨ KHÍ BÍ MẬT: THỬ FETCH TRỰC TIẾP TRƯỚC KHI MỞ TRÌNH DUYỆT (TỐC ĐỘ 0.1s)
+  let foundMetar = null;
+
+  // 1. TẦNG FETCH TRỰC TIẾP TỪ HTML (TỐC ĐỘ BÀN THỜ - 0.1s)
   try {
-    const fetch = require('node-fetch');
+    // Sửa lại cú pháp import đặc thù của node-fetch
+    const fetch = (await import('node-fetch')).default;
     const res = await fetch('https://met.vatm.vn/airline', {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0 Safari/537.36' },
-      timeout: 3000
+      timeout: 5000
     });
+    
     if (res.ok) {
       const html = await res.text();
-      // Quét Regex chặn điểm dừng ở thẻ HTML (<), nháy kép (") hoặc xuống dòng
-      const regex = new RegExp(`(?:METAR\\s+)?${icao}\\s+\\d{6}Z\\s+[^<"\\n\\r\\\\]+`, 'i');
+      // Regex bọc thép: Bắt đầu từ ICAO, lấy phần đuôi đằng sau cho đến khi đụng thẻ HTML (<) hoặc xuống dòng
+      const regex = new RegExp(`(?:METAR\\s+)?${icao}\\s+\\d{6}Z[^<\\r\\n]+`, 'i');
       const match = html.match(regex);
-      if (match) return match[0].replace(/^METAR\s+/i, '').trim();
+      if (match) {
+        return match[0].replace(/^METAR\s+/i, '').trim();
+      }
     }
   } catch (e) {
-    // Nếu fetch thất bại (bị chặn CORS hoặc API đổi), nhẹ nhàng lướt qua dùng Puppeteer
+    console.log(`[VATM] Lỗi Fetch HTML cho ${icao}, chuyển sang Puppeteer...`);
   }
 
-  // 2. TẦNG PUPPETEER TÁI SỬ DỤNG TRÌNH DUYỆT (CHỐNG TRÀN RAM)
+  // 2. TẦNG PUPPETEER TÁI SỬ DỤNG TRÌNH DUYỆT (NẾU FETCH BỊ CHẶN)
   let page = null;
   try {
     const puppeteer = require('puppeteer');
     
-    // CHỈ KHỞI ĐỘNG CHROME NẾU NÓ CHƯA BẬT HOẶC ĐÃ CRASH
     if (!globalVatmBrowser || !globalVatmBrowser.isConnected()) {
       globalVatmBrowser = await puppeteer.launch({
         headless: "new",
@@ -6969,17 +6976,15 @@ async function fetchMetarFromVATM(icao) {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--disable-accelerated-2d-canvas'
+          '--disable-gpu'
         ]
       });
     }
     
-    // Chỉ mở thêm 1 Tab mới (tốn vài MB RAM thay vì tốn cả trăm MB khởi động Chrome)
     page = await globalVatmBrowser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0.0.0 Safari/537.36');
 
-    // Ép nhịn ăn: Chặn tải hình ảnh, CSS để load nhanh như gió
+    // Ép nhịn ăn: Chặn tải hình ảnh, CSS để load nhanh
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
@@ -6989,44 +6994,18 @@ async function fetchMetarFromVATM(icao) {
       }
     });
 
-    let foundMetar = null;
-
-    // Lắng nghe gói tin API trả về ngầm
-    page.on('response', async (response) => {
-      const req = response.request();
-      if (req.resourceType() === 'xhr' || req.resourceType() === 'fetch') {
-        try {
-          const text = await response.text();
-          if (text.includes(icao)) {
-            const regex = new RegExp(`(?:METAR\\s+)?${icao}\\s+\\d{6}Z\\s+[^"\\n\\\\]+`, 'i');
-            const match = text.match(regex);
-            if (match && !foundMetar) {
-              foundMetar = match[0].replace(/^METAR\s+/i, '').trim();
-            }
-          }
-        } catch (e) {}
-      }
-    });
-    
-    // Chờ tối đa 10s
+    // Chờ tải trang xong (domcontentloaded) thay vì chờ toàn bộ mạng
     await page.goto('https://met.vatm.vn/airline', { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
     
-    // Nếu rớt mạng gói tin API, lôi DOM ra vét máng
-    if (!foundMetar) {
-      try {
-        await page.waitForFunction(
-          (searchIcao) => document.body.innerText.includes(searchIcao),
-          { timeout: 5000 },
-          icao
-        );
-      } catch (e) {}
-      
-      const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
-      const lines = bodyText.split('\n');
-      const targetLine = lines.find(line => line.includes(icao) && /\d{6}Z/.test(line));
-      if (targetLine) {
-        foundMetar = targetLine.replace(/^METAR\s+/i, '').trim();
-      }
+    // Quét trực tiếp nội dung văn bản hiển thị trên màn hình
+    const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
+    
+    // Match với regex tương tự (không có thẻ HTML nên loại trừ \r\n là đủ)
+    const regex = new RegExp(`(?:METAR\\s+)?${icao}\\s+\\d{6}Z[^\\r\\n]+`, 'i');
+    const match = bodyText.match(regex);
+    
+    if (match) {
+      foundMetar = match[0].replace(/^METAR\s+/i, '').trim();
     }
 
     return foundMetar;
@@ -7034,10 +7013,11 @@ async function fetchMetarFromVATM(icao) {
     console.error(`❌ Lỗi Puppeteer VATM (${icao}):`, err.message);
     return null;
   } finally {
-    // ĐIỂM CHỐT HẠ: CHỈ ĐÓNG TAB (PAGE), GIỮ LẠI TRÌNH DUYỆT (BROWSER) CHỜ LỆNH SAU
+    // Đóng tab để tránh rò rỉ bộ nhớ
     if (page) await page.close().catch(() => {});
   }
 }
+
 // ===================== COMMAND: METAR =====================
 async function handleMetar(interaction) {
   const icao = interaction.options.getString('icao').toUpperCase();
