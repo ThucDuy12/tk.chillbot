@@ -6933,31 +6933,48 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
-// ===================== HELPER: KÉO METAR TỪ VATM (TRÌNH DUYỆT ẨN V2) =====================
+// ===================== HELPER: KÉO METAR TỪ VATM (PUPPETEER TỐI ƯU SIÊU NHẸ) =====================
 async function fetchMetarFromVATM(icao) {
   let browser;
   try {
+    const puppeteer = require('puppeteer');
     browser = await puppeteer.launch({
       headless: "new",
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
+        '--disable-dev-shm-usage', // Vượt rào giới hạn bộ nhớ của Linux
         '--disable-gpu',
-        '--window-size=1920,1080'
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process', // Giảm tải Process
+        '--window-size=800,600', // Thu nhỏ cửa sổ lại cho nhẹ
+        '--js-flags="--max-old-space-size=128"' // Ép NodeJS bên trong Chrome ăn ít RAM
       ]
     });
     
     const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+
+    // 🚀 BẬT KHIÊN CHẶN TÀI NGUYÊN RÁC (TIẾT KIỆM 80% RAM)
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      const resType = req.resourceType();
+      // Chặn đứng Hình ảnh, CSS, Font chữ, Media. Chỉ cho phép HTML, JS, XHR/Fetch đi qua
+      if (resType === 'image' || resType === 'stylesheet' || resType === 'font' || resType === 'media' || resType === 'manifest') {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
     
-    // Chỉ đợi DOM load xong, ép timeout 20s
-    await page.goto('https://met.vatm.vn/airline', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    // Giảm timeout xuống 15s để không bị treo bot nếu VATM sập
+    await page.goto('https://met.vatm.vn/airline', { waitUntil: 'domcontentloaded', timeout: 15000 });
     
-    // VŨ KHÍ TỐI THƯỢNG: Đợi đến khi chữ "METAR" thực sự xuất hiện trên giao diện
+    // Đợi đến khi chữ "METAR" thực sự xuất hiện trên giao diện
     await page.waitForFunction(() => {
       return document.body.innerText.includes('METAR');
-    }, { timeout: 15000 });
+    }, { timeout: 10000 });
 
     const bodyText = await page.evaluate(() => document.body.innerText);
     
@@ -6971,10 +6988,19 @@ async function fetchMetarFromVATM(icao) {
 
     return null;
   } catch (err) {
-    console.error(`❌ Lỗi Puppeteer VATM (${icao}):`, err.message);
+    console.error(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_VATM_FETCH_ERR', { v0: icao }), err.message);
     return null;
   } finally {
-    if (browser) await browser.close();
+    // 🧹 QUÉT DỌN SẠCH SẼ RAM TRƯỚC KHI ĐÓNG
+    if (browser) {
+      try {
+        const pages = await browser.pages();
+        for (const p of pages) await p.close(); // Đóng từng Tab
+        await browser.close(); // Đóng Browser
+      } catch (e) {
+        console.error("Lỗi khi đóng Puppeteer:", e.message);
+      }
+    }
   }
 }
 // ===================== COMMAND: METAR =====================
