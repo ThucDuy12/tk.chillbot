@@ -6934,7 +6934,6 @@ async function fetchMetarFromCheckWX(icao) {
 }
 
 // ===================== HELPER: KÉO METAR TỪ VATM (BẢN TỐI ƯU TỐC ĐỘ ĐỈNH CAO) =====================
-const puppeteer = require('puppeteer');
 let globalVatmBrowser = null; // Cuốn sổ hộ mệnh giữ Chrome sống dai
 
 // Hàm mồi: Kiểm tra xem Chrome đã bật chưa, nếu chưa thì bật lên
