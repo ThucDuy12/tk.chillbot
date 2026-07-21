@@ -6933,7 +6933,7 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
-// ===================== HELPER: KÉO METAR TỪ VATM (BẮT GÓI TIN NGẦM - KHÔNG CHỜ GIAO DIỆN) =====================
+// ===================== HELPER: KÉO METAR TỪ VATM (ĐÃ NÂNG CẤP) =====================
 async function fetchMetarFromVATM(icao) {
   let browser;
   try {
@@ -6945,62 +6945,75 @@ async function fetchMetarFromVATM(icao) {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--window-size=1920,1080'
+        '--disable-accelerated-2d-canvas',
+        '--disable-animations',
+        '--disable-background-timer-throttling'
       ]
     });
     
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
 
+    // 🚀 CHIẾN THUẬT 1: CHẶN TẢI RÁC (Giúp trang load cực nhanh, né Timeout)
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
     let foundMetar = null;
 
-    // 🚀 CHIẾN THUẬT MỚI: Đánh chặn và lục soát toàn bộ gói tin API bay qua mạng
+    // 🚀 CHIẾN THUẬT 2: ĐÁNH CHẶN API
     page.on('response', async (response) => {
       const req = response.request();
-      // Chỉ bắt các gói tin dữ liệu ngầm (API/XHR/Fetch), bỏ qua rác (hình ảnh, css...)
       if (req.resourceType() === 'xhr' || req.resourceType() === 'fetch') {
         try {
           const text = await response.text();
-          // Lục tìm mã ICAO trong cục dữ liệu JSON vừa bắt được
           if (text.includes(icao)) {
-            // Dùng Regex moi chính xác đoạn METAR ra khỏi mớ ngoặc kép JSON
-            let regex = new RegExp(`METAR\\s+${icao}\\s+[^"\\n\\\\]+`, 'i');
-            let match = text.match(regex);
+            // Regex bắt chuỗi METAR ngay trong gói tin JSON/Text
+            const regex = new RegExp(`(?:METAR\\s+)?${icao}\\s+\\d{6}Z\\s+[^"\\n\\\\]+`, 'i');
+            const match = text.match(regex);
             
-            // Trường hợp VATM lười, không thèm ghi chữ METAR ở đầu (VD: "VVTX 210100Z...")
-            if (!match) {
-              regex = new RegExp(`${icao}\\s+\\d{6}Z\\s+[^"\\n\\\\]+`, 'i');
-              match = text.match(regex);
-            }
-
             if (match && !foundMetar) {
-              // Cắt gọt sạch sẽ và lưu vào kho
               foundMetar = match[0].replace(/^METAR\s+/i, '').trim();
             }
           }
         } catch (e) {
-          // Bỏ qua nếu gói tin bị mã hóa hoặc lỗi CORS
+          // Bỏ qua lỗi CORS hoặc Binary data
         }
       }
     });
     
-    // Mở trang. Dùng 'domcontentloaded' để kích hoạt script nhanh nhất có thể.
+    // Mở trang, chờ mạng tải xong cấu trúc HTML
     await page.goto('https://met.vatm.vn/airline', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
     
-    // Vòng lặp chờ phản hồi API (Tối đa 8 giây)
-    // Cứ mỗi 0.5s nó sẽ liếc nhìn xem bắt được METAR chưa. Nếu bắt được rồi thì ngắt luôn, tiết kiệm cực nhiều thời gian!
-    for (let i = 0; i < 16; i++) {
-      if (foundMetar) break;
-      await new Promise(resolve => setTimeout(resolve, 500));
+    // 🚀 CHIẾN THUẬT 3: CHỜ DOM THÔNG MINH (Không dùng vòng lặp setTimeout mù quáng)
+    // Chờ cho đến khi ICAO xuất hiện trên màn hình, tối đa 15 giây.
+    if (!foundMetar) {
+      try {
+        await page.waitForFunction(
+          (searchIcao) => document.body.innerText.includes(searchIcao),
+          { timeout: 15000 },
+          icao
+        );
+      } catch (waitErr) {
+        // Bỏ qua lỗi timeout, sẽ xử lý quét ở bước vét máng dưới đây
+      }
     }
 
-    // 🛡️ Cứu cánh cuối cùng: Nếu API bị mã hoá ẩn, quét vét máng trên giao diện DOM như cũ
+    // 🛡️ VÉT MÁNG CUỐI CÙNG TRÊN GIAO DIỆN
     if (!foundMetar) {
       const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
-      const regex = new RegExp(`METAR\\s+${icao}\\s+[^\\n]+`, 'i');
-      const match = bodyText.match(regex);
-      if (match) {
-        foundMetar = match[0].replace(/^METAR\s+/i, '').trim();
+      
+      // Tách từng dòng ra kiểm tra để tránh lỗi nhảy dòng của regex
+      const lines = bodyText.split('\n');
+      const targetLine = lines.find(line => line.includes(icao) && /\d{6}Z/.test(line));
+      
+      if (targetLine) {
+        foundMetar = targetLine.replace(/^METAR\s+/i, '').trim();
       }
     }
 
@@ -7009,7 +7022,7 @@ async function fetchMetarFromVATM(icao) {
     console.error(`❌ Lỗi Puppeteer VATM (${icao}):`, err.message);
     return null;
   } finally {
-    // 🧹 Dọn dẹp RAM triệt để
+    // 🧹 Dọn dẹp RAM triệt để chống leak memory
     if (browser) {
       try {
         const pages = await browser.pages();
