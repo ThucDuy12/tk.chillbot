@@ -6933,7 +6933,7 @@ async function fetchMetarFromCheckWX(icao) {
   }
 }
 
-// ===================== HELPER: KÉO METAR TỪ VATM (PUPPETEER TỐI ƯU SIÊU NHẸ) =====================
+// ===================== HELPER: KÉO METAR TỪ VATM (BẢN VƯỢT TƯỜNG LỬA & RÀ LỖI) =====================
 async function fetchMetarFromVATM(icao) {
   let browser;
   try {
@@ -6943,38 +6943,41 @@ async function fetchMetarFromVATM(icao) {
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage', // Vượt rào giới hạn bộ nhớ của Linux
+        '--disable-dev-shm-usage',
         '--disable-gpu',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process', // Giảm tải Process
-        '--window-size=800,600', // Thu nhỏ cửa sổ lại cho nhẹ
-        '--js-flags="--max-old-space-size=128"' // Ép NodeJS bên trong Chrome ăn ít RAM
+        '--window-size=1920,1080' // Ép kích thước to như màn hình máy tính thật để tránh bị nhận diện là bot
       ]
     });
     
     const page = await browser.newPage();
 
-    // 🚀 BẬT KHIÊN CHẶN TÀI NGUYÊN RÁC (TIẾT KIỆM 80% RAM)
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      const resType = req.resourceType();
-      // Chặn đứng Hình ảnh, CSS, Font chữ, Media. Chỉ cho phép HTML, JS, XHR/Fetch đi qua
-      if (resType === 'image' || resType === 'stylesheet' || resType === 'font' || resType === 'media' || resType === 'manifest') {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
+    // Giả dạng làm người dùng thật cực kỳ chi tiết
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none'
+    });
     
-    // Giảm timeout xuống 15s để không bị treo bot nếu VATM sập
-    await page.goto('https://met.vatm.vn/airline', { waitUntil: 'domcontentloaded', timeout: 15000 });
+    // LƯU Ý: Đã gỡ bỏ chặn tài nguyên (setRequestInterception) để web tải đầy đủ Script và kết nối API nội bộ của VATM
     
-    // Đợi đến khi chữ "METAR" thực sự xuất hiện trên giao diện
-    await page.waitForFunction(() => {
-      return document.body.innerText.includes('METAR');
-    }, { timeout: 10000 });
+    // Nới lỏng thời gian chờ và đợi mạng tải xong hoàn toàn (networkidle2)
+    await page.goto('https://met.vatm.vn/airline', { waitUntil: 'networkidle2', timeout: 20000 });
+    
+    // ==============================================================
+    // BỌC CHỐNG SỐC: Đợi chữ METAR xuất hiện
+    // ==============================================================
+    try {
+      await page.waitForFunction(() => {
+        return document.body.innerText.includes('METAR');
+      }, { timeout: 10000 }); 
+    } catch (timeoutErr) {
+      // 🚨 BẮT LỖI TẬN GỐC: In ra tiêu đề trang web để xem VATM đang hiện cái quái gì
+      const pageTitle = await page.title();
+      console.warn(`[VATM] ⚠️ Lỗi Timeout cho ${icao}. Tiêu đề trang VATM lúc này là: "${pageTitle}"`);
+      return null; // Trả về null để bot lướt qua êm ái, không văng lỗi đỏ lòm
+    }
 
     const bodyText = await page.evaluate(() => document.body.innerText);
     
@@ -6988,18 +6991,16 @@ async function fetchMetarFromVATM(icao) {
 
     return null;
   } catch (err) {
-    console.error(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_VATM_FETCH_ERR', { v0: icao }), err.message);
+    console.error(`❌ Lỗi Puppeteer VATM (${icao}):`, err.message);
     return null;
   } finally {
-    // 🧹 QUÉT DỌN SẠCH SẼ RAM TRƯỚC KHI ĐÓNG
+    // QUÉT DỌN SẠCH SẼ RAM TRƯỚC KHI ĐÓNG
     if (browser) {
       try {
         const pages = await browser.pages();
-        for (const p of pages) await p.close(); // Đóng từng Tab
-        await browser.close(); // Đóng Browser
-      } catch (e) {
-        console.error("Lỗi khi đóng Puppeteer:", e.message);
-      }
+        for (const p of pages) await p.close();
+        await browser.close();
+      } catch (e) {}
     }
   }
 }
