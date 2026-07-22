@@ -3382,6 +3382,33 @@ client.once('ready', async () => {
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_DESC'))
       .addStringOption((option) => option.setName('dep').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_DEP')).setRequired(true))
       .addStringOption((option) => option.setName('arr').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_ARR')).setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('flight_time')
+      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FT_DESC'))
+      .addStringOption((option) => option.setName('dep').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FT_DEP')).setRequired(true))
+      .addStringOption((option) => option.setName('arr').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FT_ARR')).setRequired(true))
+      .addStringOption((option) => option.setName('aircraft').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FT_ACFT')).setRequired(true)
+        .addChoices(
+          { name: '✈️ Airbus A380', value: 'A380' },
+          { name: '✈️ Airbus A350 XWB', value: 'A350' },
+          { name: '✈️ Airbus A330 / A340', value: 'A330' },
+          { name: '✈️ Boeing 747 Family', value: 'B747' },
+          { name: '✈️ Boeing 777 / 777X', value: 'B777' },
+          { name: '✈️ Boeing 787 Dreamliner', value: 'B787' },
+          { name: '✈️ Boeing 767 / A300 / A310', value: 'B767' },
+          { name: '🛩️ Airbus A320 Family', value: 'A320' },
+          { name: '🛩️ Boeing 737 Family (Classic/NG/MAX)', value: 'B737' },
+          { name: '🛩️ A220 / B757 / C919 / MC-21', value: 'A220' },
+          { name: '🚀 Embraer E-Jets / E2', value: 'EJET' },
+          { name: '🚀 Bombardier CRJ Series', value: 'CRJ' },
+          { name: '🚀 SSJ100 / ARJ21', value: 'SSJ100' },
+          { name: '🚁 ATR 42 / 72', value: 'ATR' },
+          { name: '🚁 Dash 8 (Q400)', value: 'DASH8' },
+          { name: '🚁 Cessna Caravan / Twin Otter', value: 'CESSNA' },
+          { name: '📦 Antonov An-124 / An-225', value: 'AN124' },
+          { name: '📦 Airbus Beluga / Dreamlifter', value: 'BELUGA' },
+          { name: '🪖 C-130 Hercules', value: 'C130' }
+        )),
     ];
   // Sau các lệnh khởi tạo khác
   await initGoogleSheets().catch(err => console.error('Google Sheets init failed:', err));
@@ -3896,6 +3923,9 @@ client.on('interactionCreate', async (interaction) => {
             break;
         case 'altitude':
           await handleAltitude(interaction);
+          break;
+        case 'flight_time':
+          await handleFlightTime(interaction);
           break;
         case 'set_lang': {
           const chosenLang = interaction.options.getString('lang');
@@ -9556,6 +9586,97 @@ async function handleAltitude(interaction) {
   } catch (error) {
     console.error('Altitude calculation error:', error);
     await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_ERR_INTERNAL') });
+  }
+}
+
+// ===================== COMMAND: FLIGHT TIME ESTIMATOR =====================
+async function handleFlightTime(interaction) {
+  const dep = interaction.options.getString('dep').toUpperCase().trim();
+  const arr = interaction.options.getString('arr').toUpperCase().trim();
+  const acftType = interaction.options.getString('aircraft');
+  await interaction.deferReply();
+
+  try {
+    // 1. Kéo tọa độ từ File CSV Local
+    const depCoords = getLocalAirportCoords(dep);
+    const arrCoords = getLocalAirportCoords(arr);
+
+    if (!depCoords || !arrCoords) {
+      return interaction.editReply({ content: t(interaction, 'STR_FT_ERR_NOTFOUND', { v0: dep, v1: arr }) });
+    }
+
+    const depLon = depCoords[0];
+    const depLat = depCoords[1];
+    const arrLon = arrCoords[0];
+    const arrLat = arrCoords[1];
+
+    // 2. Tính toán khoảng cách (Haversine Formula) bằng Hải Lý (NM)
+    const R = 3440.065; // Bán kính trái đất tính bằng Hải Lý (Nautical Miles)
+    const dLat = (arrLat - depLat) * Math.PI / 180;
+    const dLon = (arrLon - depLon) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(depLat * Math.PI / 180) * Math.cos(arrLat * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
+
+    // 3. Cơ sở dữ liệu tốc độ tàu bay (KTAS - Knots True Airspeed)
+    const AIRCRAFT_DB = {
+      'A380': { name: 'Airbus A380 (Thân rộng)', speed: 490 },
+      'A350': { name: 'Airbus A350 XWB (Thân rộng)', speed: 490 },
+      'A330': { name: 'Airbus A330 / A340 (Thân rộng)', speed: 470 },
+      'B747': { name: 'Boeing 747 Family (Thân rộng)', speed: 490 },
+      'B777': { name: 'Boeing 777 / 777X (Thân rộng)', speed: 490 },
+      'B787': { name: 'Boeing 787 Dreamliner (Thân rộng)', speed: 490 },
+      'B767': { name: 'Boeing 767 / A300 / A310 (Thân rộng)', speed: 450 },
+      'A320': { name: 'Airbus A320 Family (Thân hẹp)', speed: 450 },
+      'B737': { name: 'Boeing 737 Family (Thân hẹp)', speed: 450 },
+      'A220': { name: 'A220 / B757 / C919 / MC-21 (Thân hẹp)', speed: 450 },
+      'EJET': { name: 'Embraer E-Jets / E2 (Phản lực khu vực)', speed: 450 },
+      'CRJ': { name: 'Bombardier CRJ Series (Phản lực khu vực)', speed: 430 },
+      'SSJ100': { name: 'SSJ100 / ARJ21 (Phản lực khu vực)', speed: 430 },
+      'ATR': { name: 'ATR 42 / 72 (Cánh quạt)', speed: 270 },
+      'DASH8': { name: 'Dash 8 Q400 (Cánh quạt)', speed: 360 },
+      'CESSNA': { name: 'Cessna Caravan / Twin Otter', speed: 160 },
+      'AN124': { name: 'Antonov An-124 / An-225 (Vận tải siêu nặng)', speed: 430 },
+      'BELUGA': { name: 'Beluga / Dreamlifter (Vận tải chuyên dụng)', speed: 400 },
+      'C130': { name: 'Lockheed C-130 Hercules (Vận tải quân sự)', speed: 290 }
+    };
+
+    const selectedAcft = AIRCRAFT_DB[acftType];
+
+    // 4. Tính thời gian bay
+    // Thời gian bay ngang (giờ) = Quãng đường / Tốc độ
+    const flightTimeHours = distance / selectedAcft.speed;
+    
+    // Đổi ra phút và cộng thêm 30 phút Block Time chuẩn (Cất cánh, SID, STAR, Hạ cánh, Taxi)
+    const totalMinutes = Math.round(flightTimeHours * 60) + 30;
+
+    // Quy đổi lại thành format Giờ:Phút
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    const timeFormatted = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+
+    // 5. Trình bày UI (Embed)
+    const embed = new EmbedBuilder()
+      .setTitle(t(interaction, 'STR_FT_TITLE', { v0: dep, v1: arr }))
+      .setColor(0x00A8FF)
+      .addFields(
+        { name: t(interaction, 'STR_FT_DIST'), value: `**${Math.round(distance)} NM**`, inline: true },
+        { name: t(interaction, 'STR_FT_SPEED'), value: `**${selectedAcft.speed} KTAS**`, inline: true },
+        { name: '\u200b', value: '\u200b', inline: true }, // Cột tàng hình để đẩy text
+        { name: t(interaction, 'STR_FT_AIRCRAFT'), value: `\`${selectedAcft.name}\``, inline: false },
+        { name: t(interaction, 'STR_FT_TIME'), value: `\`\`\`yaml\n${timeFormatted}\n\`\`\``, inline: false }
+      )
+      .setThumbnail('https://cdn-icons-png.flaticon.com/512/3238/3238914.png')
+      .setFooter({ text: t(interaction, 'STR_FT_FOOTER') })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+
+  } catch (error) {
+    console.error('Flight time calculation error:', error);
+    await interaction.editReply({ content: '❌ Có lỗi xảy ra khi tính toán thời gian bay.' });
   }
 }
 
