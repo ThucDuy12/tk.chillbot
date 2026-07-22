@@ -665,5 +665,14 @@
   "STR_ANTISPAM_WARN": "🚨 **WARNING:** <@{v0}> has been **Muted for 30 minutes** for tagging too many people in a short time (Spam Ping)!",
   "STR_ANTISPAM_LOG_TITLE": "🔇 Auto Mute (Spam Ping)",
   "STR_ANTISPAM_LOG_DESC": "**User:** <@{v0}> ({v1})\\n**Reason:** Tagged {v2} times in under 10 minutes.\\n**Penalty:** 30 minutes timeout.",
-  "STR_TIMEOUT_ADMIN_PING": "🚨 **ALERT:** <@{v0}> has just been Timed Out (Muted) in the server! Admins/Staff, please check!"
+  "STR_TIMEOUT_ADMIN_PING": "🚨 **ALERT:** <@{v0}> has just been Timed Out (Muted) in the server! Admins/Staff, please check!",
+  "STR_RWY_FALLBACK": "Fallback System",
+  "STR_RWY_ERR_NODATA": "Could not find runway information for airport **{v0}**.",
+  "STR_RWY_BEST": "✅ Best Runway",
+  "STR_RWY_DIFF": "**RWY {v0}** (Wind deviation: {v1}°)",
+  "STR_RWY_HEAD": "⬆️ Head",
+  "STR_RWY_TAIL": "⬇️ Tail",
+  "STR_RWY_ROW": "**RWY {v0}**: {v1} {v2} KT | ↔️ Cross {v3} KT\n",
+  "STR_RWY_TABLE": "📊 Wind Component Analysis",
+  "STR_RWY_FOOTER": "Data source: {v0}"
 }
