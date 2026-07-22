@@ -674,5 +674,16 @@
   "STR_RWY_TAIL": "⬇️ Tail",
   "STR_RWY_ROW": "**RWY {v0}**: {v1} {v2} KT | ↔️ Cross {v3} KT\n",
   "STR_RWY_TABLE": "📊 Wind Component Analysis",
-  "STR_RWY_FOOTER": "Data source: {v0}"
+  "STR_RWY_FOOTER": "Data source: {v0}",
+  "STR_FT_DESC": "Calculate estimated flight time between two airports (Block Time)",
+  "STR_FT_DEP": "Departure airport (ICAO, e.g., VVTS)",
+  "STR_FT_ARR": "Arrival airport (ICAO, e.g., VVNB)",
+  "STR_FT_ACFT": "Select aircraft type",
+  "STR_FT_ERR_NOTFOUND": "❌ Could not find coordinates for airport **{v0}** or **{v1}** in the Database.",
+  "STR_FT_TITLE": "⏱️ Estimated Flight Time: {v0} ➔ {v1}",
+  "STR_FT_DIST": "📏 Direct Distance",
+  "STR_FT_AIRCRAFT": "🛩️ Aircraft Type",
+  "STR_FT_SPEED": "💨 Cruise Speed",
+  "STR_FT_TIME": "⏳ Estimated Block Time",
+  "STR_FT_FOOTER": "Includes 30 mins for SID/STAR, climb/descent & taxi | Direct distance"
 }
