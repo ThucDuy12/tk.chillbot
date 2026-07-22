@@ -1032,5 +1032,14 @@
   "STR_ANTISPAM_WARN": "🚨 **CẢNH BÁO:** <@{v0}> đã bị **Mute 30 phút** do tag quá nhiều người trong thời gian ngắn (Spam Ping)!",
   "STR_ANTISPAM_LOG_TITLE": "🔇 Auto Mute (Spam Ping)",
   "STR_ANTISPAM_LOG_DESC": "**User:** <@{v0}> ({v1})\\n**Lý do:** Tag {v2} lần trong chưa đầy 10 phút.\\n**Hình phạt:** Timeout 30 phút.",
-  "STR_TIMEOUT_ADMIN_PING": "🚨 **BÁO ĐỘNG:** <@{v0}> vừa bị Timeout (Mute) trong server! Admin/Staff vào xem xét nhé!"
+  "STR_TIMEOUT_ADMIN_PING": "🚨 **BÁO ĐỘNG:** <@{v0}> vừa bị Timeout (Mute) trong server! Admin/Staff vào xem xét nhé!",
+  "STR_RWY_FALLBACK": "Hệ thống Dự phòng",
+  "STR_RWY_ERR_NODATA": "Không tìm thấy thông tin đường băng cho sân bay **{v0}**.",
+  "STR_RWY_BEST": "✅ Khuyên dùng nhất (Best Runway)",
+  "STR_RWY_DIFF": "**RWY {v0}** (Lệch gió: {v1}°)",
+  "STR_RWY_HEAD": "⬆️ Ngược",
+  "STR_RWY_TAIL": "⬇️ Xuôi",
+  "STR_RWY_ROW": "**RWY {v0}**: {v1} {v2} KT | ↔️ Ngang (Cross) {v3} KT\n",
+  "STR_RWY_TABLE": "📊 Bảng phân tích sức gió",
+  "STR_RWY_FOOTER": "Dữ liệu từ: {v0}"
 }
