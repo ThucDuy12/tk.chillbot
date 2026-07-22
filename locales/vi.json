@@ -1041,5 +1041,16 @@
   "STR_RWY_TAIL": "⬇️ Xuôi",
   "STR_RWY_ROW": "**RWY {v0}**: {v1} {v2} KT | ↔️ Ngang (Cross) {v3} KT\n",
   "STR_RWY_TABLE": "📊 Bảng phân tích sức gió",
-  "STR_RWY_FOOTER": "Dữ liệu từ: {v0}"
+  "STR_RWY_FOOTER": "Dữ liệu từ: {v0}",
+  "STR_FT_DESC": "Tính toán thời gian bay dự kiến giữa hai sân bay (Block Time)",
+  "STR_FT_DEP": "Sân bay đi (ICAO, VD: VVTS)",
+  "STR_FT_ARR": "Sân bay đến (ICAO, VD: VVNB)",
+  "STR_FT_ACFT": "Chọn loại tàu bay",
+  "STR_FT_ERR_NOTFOUND": "❌ Không tìm thấy tọa độ của sân bay **{v0}** hoặc **{v1}** trong Database.",
+  "STR_FT_TITLE": "⏱️ Thời Gian Bay Dự Kiến: {v0} ➔ {v1}",
+  "STR_FT_DIST": "📏 Khoảng cách",
+  "STR_FT_AIRCRAFT": "🛩️ Dòng tàu bay",
+  "STR_FT_SPEED": "💨 Tốc độ hành trình",
+  "STR_FT_TIME": "⏳ Thời gian Block Time",
+  "STR_FT_FOOTER": "Đã cộng thêm 30p (SID/STAR, cất/hạ cánh & taxi) | Khoảng cách đường chim bay"
 }
