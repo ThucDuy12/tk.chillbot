@@ -7000,62 +7000,50 @@ async function handleMetar(interaction) {
   await interaction.deferReply();
 
   try {
-    // 1. Ưu tiên lấy từ ATIS.guru
+    // Kéo D-ATIS (để hiển thị phần ATIS nếu có)
     const atisData = await fetchATIS(icao);
-
-    let metarText = atisData ? atisData.metar : null;
     let hasAtis = atisData && (atisData.arrival || atisData.departure);
 
-    // 2. Fallback VCLvACC & CheckWX
-    if (!metarText && !hasAtis) {
-      // Mở rộng tìm kiếm cho cả Việt Nam (VV), Campuchia (VD), Lào (VL)
-      if (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL')) {
-        metarText = await fetchMetarFromVCL(icao);
-        if (!metarText) {
-          metarText = await fetchMetarFromCheckWX(icao); // Cứu cánh bằng CheckWX
-        }
-      } else {
-        metarText = await fetchMetarFromCheckWX(icao);
-      }
+    // 1. ƯU TIÊN 1: Lấy METAR từ CheckWX vì nó update nhanh và mới nhất
+    let metarText = await fetchMetarFromCheckWX(icao);
+
+    // 2. ƯU TIÊN 2: Nếu CheckWX lỗi/không có, Fallback xuống VCL (chỉ vùng VV, VD, VL)
+    if (!metarText && (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL'))) {
+      metarText = await fetchMetarFromVCL(icao);
+    }
+
+    // 3. ƯU TIÊN 3: Cứu cánh cuối cùng, móc METAR từ D-ATIS (atis.guru/vatsim)
+    if (!metarText && atisData && atisData.metar) {
+      metarText = atisData.metar;
     }
 
     let replyContent = '';
 
-    // 3. Xử lý hiển thị METAR
+    // Xử lý hiển thị METAR
     if (metarText) {
-      replyContent += `🌤️ **METAR cho ${icao}:**\n\`\`\`${metarText}\`\`\``;
+      replyContent += `🌤️ **METAR for ${icao}:**\n\`\`\`${metarText}\`\`\``;
     } else {
       replyContent += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_185E275D', { v0: icao });
     }
 
-    // 4. Xử lý hiển thị D-ATIS
+    // Xử lý hiển thị D-ATIS
     if (hasAtis) {
 
-      // =========================================================
       // LUẬT ĐẶC CÁCH VCLvACC (VIỆT NAM, CAMPUCHIA, LÀO)
-      // Ghép Ngày trên Header với Giờ trong ATIS để đọ thời gian tuyệt đối
-      // =========================================================
       if (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL')) {
         if (atisData.arrival && atisData.departure) {
           
-          // Hàm tính mốc thời gian thực tế
           const getRealIssueTime = (headerTs, text) => {
             if (!headerTs || !text) return 0;
-            
-            // Tìm mã giờ Z (Bắt cả loại 0500Z hoặc 300500Z)
             const m = text.match(/\b(?:[0-3][0-9])?([0-2][0-9][0-5][0-9])Z\b/);
-            if (!m) return headerTs; // Nếu ATC gõ sai format, xài luôn giờ Header
+            if (!m) return headerTs; 
 
             const hh = parseInt(m[1].substring(0, 2), 10);
             const mm = parseInt(m[1].substring(2, 4), 10);
 
-            // Bóc ngày từ Header
             const dateObj = new Date(headerTs);
-            // Ghép Ngày Header + Giờ ATIS
             let issueTime = Date.UTC(dateObj.getUTCFullYear(), dateObj.getUTCMonth(), dateObj.getUTCDate(), hh, mm, 0);
 
-            // Xử lý Lỗi Giao Thừa: ATIS 2350Z hôm qua, nhưng Header web là 0010Z hôm nay.
-            // Nếu ghép lại nó sẽ thành 2350Z hôm nay (vọt tới tương lai). Giải pháp: Lùi 1 ngày!
             if (issueTime > headerTs + 12 * 3600 * 1000) {
               issueTime -= 24 * 3600 * 1000; 
             }
@@ -7066,7 +7054,6 @@ async function handleMetar(interaction) {
           const realArrTime = getRealIssueTime(atisData.arrTimestamp, atisData.arrival);
           const realDepTime = getRealIssueTime(atisData.depTimestamp, atisData.departure);
 
-          // Thằng nào mang mốc thời gian tổng hợp lớn hơn (mới hơn) thì giữ lại
           if (realArrTime >= realDepTime) {
             atisData.departure = null;
           } else {
@@ -7075,33 +7062,27 @@ async function handleMetar(interaction) {
         }
       }
 
-      // =========================================================
-      // LUẬT KIỂM TRA THÔNG MINH (TÍNH BẰNG NGÀY GIỜ TUYỆT ĐỐI)
-      // Dành cho các sân bay quốc tế khác ngoài VCL
-      // =========================================================
+      // LUẬT KIỂM TRA THÔNG MINH (Cho các sân bay khác)
       if (atisData.arrival && atisData.departure) {
         const now = Date.now();
-
-        // Tính số phút trôi qua kể từ lúc phát ATIS (Bao gồm cả Ngày/Tháng/Năm)
         const arrAge = atisData.arrTimestamp ? (now - atisData.arrTimestamp) / 60000 : 0;
         const depAge = atisData.depTimestamp ? (now - atisData.depTimestamp) / 60000 : 0;
 
-        // Nếu chênh lệch tuổi thọ giữa 2 bản tin lớn hơn 90 phút
         if (Math.abs(arrAge - depAge) > 90) {
           if (arrAge > depAge) {
-            atisData.arrival = null; // Arrival cũ nát hơn -> Chém!
+            atisData.arrival = null;
           } else {
-            atisData.departure = null; // Departure cũ nát hơn -> Chém!
+            atisData.departure = null;
           }
         }
       }
 
-      // Trường hợp 1: Sân bay dùng chung 1 ATIS cho cả Dep và Arr
+      // Trường hợp 1: Dùng chung ATIS
       if (atisData.arrival && atisData.departure && atisData.arrival === atisData.departure) {
         const formatted = formatATISText(atisData.arrival);
         replyContent += `\n📻 **D-ATIS(${icao}):**\n\`\`\`${formatted}\`\`\``;
       }
-      // Trường hợp 2: Tách biệt rõ ràng
+      // Trường hợp 2: Tách biệt
       else {
         if (atisData.arrival) {
           const formattedArr = formatATISText(atisData.arrival);
@@ -7128,19 +7109,16 @@ async function handleRunway(interaction) {
   await interaction.deferReply();
 
   try {
-    // 1. LẤY METAR ĐỂ TÍNH GIÓ 
-    let metar = null;
-    const atisData = await fetchATIS(icao);
+    let metar = await fetchMetarFromCheckWX(icao);
 
-    if (atisData && atisData.metar) {
-      metar = atisData.metar;
-    } else {
-      // Mở rộng tìm kiếm cho cả khu vực VCL
-      if (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL')) {
-        metar = await fetchMetarFromVCL(icao);
-        if (!metar) metar = await fetchMetarFromCheckWX(icao);
-      } else {
-        metar = await fetchMetarFromCheckWX(icao);
+    if (!metar && (icao.startsWith('VV') || icao.startsWith('VD') || icao.startsWith('VL'))) {
+      metar = await fetchMetarFromVCL(icao);
+    }
+
+    if (!metar) {
+      const atisData = await fetchATIS(icao);
+      if (atisData && atisData.metar) {
+        metar = atisData.metar;
       }
     }
 
@@ -7148,7 +7126,6 @@ async function handleRunway(interaction) {
       return await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D9C0CB4D', { v0: icao }) });
     }
 
-    // Tìm hướng gió và tốc độ gió trong METAR (VD: 25015G25KT, VRB02KT)
     const windMatch = metar.match(/(VRB|\d{3})(\d{2,3})(?:G\d{2,3})?KT/);
     if (!windMatch) {
       return await interaction.editReply({ content: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_D9D31F31', { v0: icao, v1: metar }) });
@@ -7159,11 +7136,10 @@ async function handleRunway(interaction) {
 
     let embed = new EmbedBuilder()
       .setTitle(`🛫 Active Runway Indicator - ${icao}`)
-      .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_75BAEF5B', { v0: metar }))
+      .setDescription(`\`\`\`${metar}\`\`\``)
       .setColor(0x3498db)
       .setTimestamp();
 
-    // Nếu gió đổi hướng liên tục (VRB) hoặc quá nhẹ (<3 KT)
     if (windDirStr === 'VRB' || windSpeed < 3) {
       embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C3EBA294'), value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_16B5BA8B'), inline: false });
       embed.addFields({ name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_78E65E15'), value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_BABF75C7'), inline: false });
@@ -7292,49 +7268,70 @@ async function handleRunway(interaction) {
 
       if (fallbackRunways[icao]) {
         runways = fallbackRunways[icao];
-        dataSource = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_04A5B041');
+        dataSource = t(typeof interaction !== 'undefined' ? interaction : null, 'STR_RWY_FALLBACK');
       }
     }
 
     // ==========================================
-    // 4. TÍNH TOÁN
+    // 4. TÍNH TOÁN VÀ SẮP XẾP ĐƯỜNG BĂNG TỐI ƯU
     // ==========================================
     if (runways.length === 0) {
       embed.addFields({
         name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_74DBA104'),
-        value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C0D1B8C0', { v0: icao, v1: windDir })
+        value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_RWY_ERR_NODATA', { v0: icao })
       });
     } else {
-      let bestRunway = null;
-      let minDiff = 180;
-
-      // Tìm đường băng đón gió trực diện nhất (Headwind)
+      const uniqueRunwaysMap = new Map();
       runways.forEach(rw => {
-        let diff = Math.abs(windDir - rw.heading);
-        if (diff > 180) diff = 360 - diff;
-
-        if (diff < minDiff) {
-          minDiff = diff;
-          bestRunway = rw;
+        const baseId = rw.id.replace(/[LRC]/gi, '');
+        if (!uniqueRunwaysMap.has(baseId)) {
+          uniqueRunwaysMap.set(baseId, { id: baseId, heading: rw.heading });
         }
       });
+      const uniqueRunways = Array.from(uniqueRunwaysMap.values());
 
-      // Tính Component (Dùng lượng giác để bóc tách gió ngược và ngang)
-      const angleRad = minDiff * (Math.PI / 180);
-      const headwind = Math.abs(Math.round(Math.cos(angleRad) * windSpeed));
-      const crosswind = Math.abs(Math.round(Math.sin(angleRad) * windSpeed));
+      const calculatedRunways = uniqueRunways.map(rw => {
+        let diff = windDir - rw.heading;
+        while (diff <= -180) diff += 360;
+        while (diff > 180) diff -= 360;
+
+        const angleRad = diff * (Math.PI / 180);
+        const headwind = Math.round(Math.cos(angleRad) * windSpeed);
+        const crosswind = Math.abs(Math.round(Math.sin(angleRad) * windSpeed));
+
+        return {
+          id: rw.id,
+          heading: rw.heading,
+          headwind: headwind,
+          crosswind: crosswind,
+          diff: Math.abs(diff)
+        };
+      });
+
+      calculatedRunways.sort((a, b) => a.diff - b.diff);
+
+      const bestRunways = calculatedRunways.slice(0, 4);
+      const primaryRunway = bestRunways[0];
 
       embed.addFields({
-        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_C9AA3383'),
-        value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_63D760BB', { v0: bestRunway.id, v1: minDiff }),
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_RWY_BEST'),
+        value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_RWY_DIFF', { v0: primaryRunway.id, v1: primaryRunway.diff }),
         inline: false
       });
+
+      let calcText = '';
+      bestRunways.forEach(rw => {
+        const hwIcon = rw.headwind >= 0 ? t(typeof interaction !== 'undefined' ? interaction : null, 'STR_RWY_HEAD') : t(typeof interaction !== 'undefined' ? interaction : null, 'STR_RWY_TAIL');
+        calcText += t(typeof interaction !== 'undefined' ? interaction : null, 'STR_RWY_ROW', { v0: rw.id, v1: hwIcon, v2: Math.abs(rw.headwind), v3: rw.crosswind });
+      });
+
       embed.addFields({
-        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_4EB912FB'),
-        value: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_0B521CDE', { v0: headwind, v1: crosswind }),
+        name: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_RWY_TABLE'),
+        value: calcText,
         inline: false
       });
-      embed.setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_DE1C1C88', { v0: dataSource }) });
+
+      embed.setFooter({ text: t(typeof interaction !== 'undefined' ? interaction : null, 'STR_RWY_FOOTER', { v0: dataSource }) });
     }
 
     await interaction.editReply({ embeds: [embed] });
