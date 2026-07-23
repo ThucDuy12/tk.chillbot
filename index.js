@@ -20,6 +20,8 @@ const nodeFetch = require('node-fetch');
 // Thêm vào khu vực khai báo biến ở đầu file
 const temporarySearchResults = new Map();
 
+const dmContents = new Map(); // Bộ nhớ đệm lưu trữ nội dung DM song ngữ
+
 const https = require('https');
 const deletedImageCache = new Map();
 
@@ -3383,6 +3385,25 @@ client.once('ready', async () => {
       .addStringOption((option) => option.setName('dep').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_DEP')).setRequired(true))
       .addStringOption((option) => option.setName('arr').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_ALT_ARR')).setRequired(true)),
     new SlashCommandBuilder()
+      .setName('set_lang')
+      .setDescription('Change bot language / Đổi ngôn ngữ bot')
+      .addStringOption(opt => opt.setName('lang')
+        .setDescription('Select language / Chọn ngôn ngữ')
+        .setRequired(true)
+        .addChoices(
+          { name: 'English', value: 'en' },
+          { name: 'Tiếng Việt', value: 'vi' }
+        )
+      ),
+    new SlashCommandBuilder()
+      .setName('send_dm')
+      .setDescription('Gửi tin nhắn riêng (DM) song ngữ cho một người dùng (Admin/Staff only)')
+      .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+      .addUserOption((option) => option.setName('target_user').setDescription('Người nhận (@user hoặc gõ tên)').setRequired(true))
+      .addStringOption((option) => option.setName('message').setDescription('Nội dung tin nhắn').setRequired(true))
+      .addStringOption((option) => option.setName('time').setDescription('Hẹn giờ (YYYY-MM-DD HH:MM UTC), bỏ trống = gửi ngay').setRequired(false))
+      .addAttachmentOption((option) => option.setName('image').setDescription('Hình ảnh đính kèm').setRequired(false)),
+    new SlashCommandBuilder()
       .setName('flight_time')
       .setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FT_DESC'))
       .addStringOption((option) => option.setName('dep').setDescription(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_FT_DEP')).setRequired(true))
@@ -3520,25 +3541,49 @@ client.once('ready', async () => {
     for (let i = scheduledAnnouncements.length - 1; i >= 0; i--) {
       const ann = scheduledAnnouncements[i];
       if (now >= ann.time) {
-        try {
-          const targetChannel = await client.channels.fetch(ann.channelId);
-          
-          const safeContent = (ann.content && ann.content.trim() !== '') ? ann.content : ' ';
-          const payload = { content: safeContent, allowedMentions: { parse: ['roles', 'users', 'everyone'] } };
+        
+        // NẾU LÀ THÔNG BÁO DM RIÊNG
+        if (ann.isDM) {
+          try {
+            const targetUser = await client.users.fetch(ann.targetUserId);
+            // Kéo nội dung từ Database đổ vào RAM để đợi nút bấm
+            dmContents.set(ann.id, {
+              vi: ann.contentVi,
+              en: ann.contentEn,
+              imageUrl: ann.imageUrl
+            });
+            
+            const row = new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId(`readdm_vi_${ann.id}`).setLabel('🇻🇳 Tiếng Việt').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setCustomId(`readdm_en_${ann.id}`).setLabel('🇬🇧 English').setStyle(ButtonStyle.Danger)
+            );
 
-          if (ann.imageUrl) {
-            // 🚀 Bắn link ImgBB bất tử vào Embed, máy chủ Discord sẽ tự render ảnh!
-            payload.embeds = [
-                new EmbedBuilder()
-                    .setImage(ann.imageUrl)
-                    .setColor(0x2b2d31)
-            ];
+            await targetUser.send({
+              content: "📬 **Bạn có 1 tin nhắn mới từ hệ thống.** Vui lòng chọn ngôn ngữ để đọc.\n📬 **You have a new message from the system.** Please select a language to read.",
+              components: [row]
+            });
+          } catch (err) {
+            console.error(`Lỗi gửi DM hẹn giờ cho user ${ann.targetUserId}:`, err);
           }
+        } 
+        // NẾU LÀ THÔNG BÁO CHANNEL CHUNG NHƯ CŨ
+        else {
+          try {
+            const targetChannel = await client.channels.fetch(ann.channelId);
+            const safeContent = (ann.content && ann.content.trim() !== '') ? ann.content : ' ';
+            const payload = { content: safeContent, allowedMentions: { parse: ['roles', 'users', 'everyone'] } };
 
-          await targetChannel.send(payload);
-        } catch (err) {
-          console.error(t(typeof interaction !== 'undefined' ? interaction : null, 'STR_CF89E6F8', { v0: ann.id }), err);
+            if (ann.imageUrl) {
+              payload.embeds = [
+                  new EmbedBuilder().setImage(ann.imageUrl).setColor(0x2b2d31)
+              ];
+            }
+            await targetChannel.send(payload);
+          } catch (err) {
+            console.error('Lỗi gửi thông báo kênh hẹn giờ (ID: ' + ann.id + '):', err);
+          }
         }
+
         scheduledAnnouncements.splice(i, 1);
         hasChanges = true;
       }
@@ -3927,6 +3972,9 @@ client.on('interactionCreate', async (interaction) => {
         case 'flight_time':
           await handleFlightTime(interaction);
           break;
+        case 'send_dm':
+          await handleSendDM(interaction);
+          break;
         case 'set_lang': {
           const chosenLang = interaction.options.getString('lang');
           
@@ -3974,6 +4022,43 @@ client.on('interactionCreate', async (interaction) => {
         }
       }
     } else if (interaction.isButton()) {
+
+      // Xử lý nút chọn ngôn ngữ cho DM
+      if (customId.startsWith('readdm_')) {
+        const parts = customId.split('_');
+        const lang = parts[1]; // 'vi' hoặc 'en'
+        const dmId = parts.slice(2).join('_');
+
+        const dmData = dmContents.get(dmId);
+        if (!dmData) {
+          return interaction.reply({ content: '❌ Nội dung tin nhắn này đã hết hạn khỏi bộ nhớ của hệ thống.', ephemeral: true });
+        }
+
+        const isVi = lang === 'vi';
+        const finalContent = isVi ? dmData.vi : dmData.en;
+        const footerNote = isVi 
+          ? "\n\n*(Vui lòng không trả lời tin nhắn này)*" 
+          : "\n\n*(Please do not reply to this message)*";
+
+        const payload = {
+          content: finalContent + footerNote,
+          embeds: [],
+          components: [] // Xóa 2 nút ngôn ngữ đi để thay bằng text
+        };
+
+        if (dmData.imageUrl) {
+          payload.embeds = [
+            new EmbedBuilder()
+              .setImage(dmData.imageUrl)
+              .setColor(0x2b2d31) // Màu nền hòa vào dark mode của Discord
+          ];
+        }
+
+        // Biến đổi cái tin nhắn chọn ngôn ngữ ban đầu thành toàn bộ văn bản và hình ảnh
+        await interaction.update(payload);
+        return;
+      }
+
       const customId = interaction.customId;
 
       // ===================== XỬ LÝ NÚT BẤM CỦA TRÌNH PHÁT NHẠC (ĐỂ NGOÀI CÙNG) =====================
@@ -9677,6 +9762,123 @@ async function handleFlightTime(interaction) {
   } catch (error) {
     console.error('Flight time calculation error:', error);
     await interaction.editReply({ content: '❌ Có lỗi xảy ra khi tính toán thời gian bay.' });
+  }
+}
+
+async function handleSendDM(interaction) {
+  // Check quyền (Dev, Admin, Staff)
+  const hasDev = interaction.member.roles.cache.has(roles.devRoleId);
+  const hasAdmin = interaction.member.roles.cache.has(roles.adminRoleId);
+  const hasStaff = interaction.member.roles.cache.has('1493908725231128617'); // ID Role Staff
+
+  if (!hasDev && !hasAdmin && !hasStaff && interaction.user.id !== OWNER_ID) {
+    return interaction.reply({ content: '❌ Chỉ Admin, Dev hoặc Staff mới có thể dùng lệnh này!', ephemeral: true });
+  }
+
+  const targetUser = interaction.options.getUser('target_user');
+  const rawMessage = interaction.options.getString('message');
+  const timeStr = interaction.options.getString('time');
+  const image = interaction.options.getAttachment('image');
+
+  // Xử lý giờ giấc
+  let targetTime = null;
+  if (timeStr) {
+    targetTime = parseUTCDateTime(timeStr);
+    if (isNaN(targetTime) || targetTime <= Date.now()) {
+      return interaction.reply({ content: '❌ Giờ hẹn không hợp lệ hoặc đã trôi qua. (Chuẩn: YYYY-MM-DD HH:MM UTC)', ephemeral: true });
+    }
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  // 1. Kéo ảnh lên ImgBB (Lấy link vĩnh viễn)
+  let finalImageUrl = null;
+  if (image) {
+    if (process.env.IMGBB_API_KEY) {
+      try {
+        const imgBuffer = await downloadBuffer(image.url);
+        const base64Image = imgBuffer.toString('base64');
+        const params = new URLSearchParams();
+        params.append('image', base64Image);
+
+        const fetchObj = (await import('node-fetch')).default;
+        const imgbbRes = await fetchObj(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, { method: 'POST', body: params });
+        const imgbbData = await imgbbRes.json();
+
+        if (imgbbData && imgbbData.data && imgbbData.data.url) {
+          finalImageUrl = imgbbData.data.url;
+        } else {
+          finalImageUrl = image.url;
+        }
+      } catch (e) {
+        console.error('Lỗi upload ảnh DM lên ImgBB:', e);
+        finalImageUrl = image.url;
+      }
+    } else {
+      finalImageUrl = image.url;
+    }
+  }
+
+  // 2. Ép Gemini tự động dịch ra tiếng Anh chuẩn (CÓ BỌC THÉP CHỐNG SẬP)
+  let enMessage = rawMessage;
+  try {
+    const prompt = `Dịch đoạn thông báo sau sang tiếng Anh một cách tự nhiên, thân thiện. TRẢ VỀ CHỈ NỘI DUNG TIẾNG ANH, không thêm bình luận hay thẻ code markdown:\n\n${rawMessage}`;
+    
+    // Áp dụng hàm retryWithBackoff để thử gọi tối đa 3 lần nếu Gemini báo lỗi rate limit/503
+    const result = await retryWithBackoff(async () => {
+      return await geminiModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 2000, temperature: 0.3 }
+      });
+    }, 3, 1500);
+
+    enMessage = result.response.text().trim();
+    
+    // Gọt bỏ rác markdown nếu AI bị lú
+    if (enMessage.startsWith('```')) {
+      enMessage = enMessage.replace(/^```(markdown|txt|html)?\n?/, '').replace(/\n?```$/, '').trim();
+    }
+  } catch (err) {
+    console.error('Lỗi dịch DM sang tiếng Anh (Đã thử lại 3 lần nhưng API Gemini vẫn sập):', err.message);
+    // FALLBACK AN TOÀN: Nếu sập toàn tập, lấy bản gốc đính kèm câu xin lỗi tiếng Anh
+    enMessage = `${rawMessage}\n\n*(Automated English translation is currently unavailable due to server overload. We apologize for the inconvenience.)*`;
+  }
+
+  const dmId = Date.now().toString();
+
+  // TRƯỜNG HỢP 1: HẸN GIỜ GỬI
+  if (targetTime) {
+    scheduledAnnouncements.push({
+      id: dmId,
+      isDM: true, // Cờ báo hiệu đây là gửi DM
+      targetUserId: targetUser.id,
+      contentVi: rawMessage,
+      contentEn: enMessage,
+      imageUrl: finalImageUrl,
+      time: targetTime,
+      author: interaction.user.id
+    });
+    await db.saveAnnouncements(scheduledAnnouncements);
+    return interaction.editReply({ content: `✅ Đã lên lịch gửi DM song ngữ cho <@${targetUser.id}> vào <t:${Math.floor(targetTime / 1000)}:F>!` });
+  }
+
+  // TRƯỜNG HỢP 2: GỬI THẲNG TRỰC TIẾP
+  dmContents.set(dmId, { vi: rawMessage, en: enMessage, imageUrl: finalImageUrl });
+  
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`readdm_vi_${dmId}`).setLabel('🇻🇳 Tiếng Việt').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`readdm_en_${dmId}`).setLabel('🇬🇧 English').setStyle(ButtonStyle.Danger)
+  );
+
+  try {
+    await targetUser.send({
+      content: "📬 **Bạn có 1 tin nhắn mới từ hệ thống.** Vui lòng chọn ngôn ngữ để đọc.\n📬 **You have a new message from the system.** Please select a language to read.",
+      components: [row]
+    });
+    await interaction.editReply({ content: `✅ Đã gửi DM thông báo chọn ngôn ngữ cho <@${targetUser.id}> thành công!` });
+  } catch (err) {
+    console.error('Lỗi khi DM user:', err);
+    await interaction.editReply({ content: `❌ Không thể gửi tin nhắn cho <@${targetUser.id}>. (Người dùng có thể đã chặn nhận tin nhắn từ người lạ).` });
   }
 }
 
