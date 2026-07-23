@@ -4023,9 +4023,9 @@ client.on('interactionCreate', async (interaction) => {
       }
     } else if (interaction.isButton()) {
 
-      // Xử lý nút chọn ngôn ngữ cho DM
-      if (customId.startsWith('readdm_')) {
-        const parts = customId.split('_');
+      // Xử lý nút chọn ngôn ngữ cho DM (BỌC THÉP AN TOÀN)
+      if (interaction.isButton() && interaction.customId && interaction.customId.startsWith('readdm_')) {
+        const parts = interaction.customId.split('_');
         const lang = parts[1]; // 'vi' hoặc 'en'
         const dmId = parts.slice(2).join('_');
 
